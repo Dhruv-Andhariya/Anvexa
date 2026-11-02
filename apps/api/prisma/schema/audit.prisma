@@ -1,0 +1,15 @@
+// Owner: Intern 1 (Core & HR) - M32 audit log (append-only).
+
+model AuditLog {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid // null for platform-level events (e.g. login)
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  action      String // e.g. "job.approved", "company.suspended"
+  subjectType String?  @map("subject_type")
+  subjectId   String?  @map("subject_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}

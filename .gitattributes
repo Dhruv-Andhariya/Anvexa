@@ -1,0 +1,6 @@
+# Force LF everywhere so Windows and Mac teammates never fight over line endings
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary

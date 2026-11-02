@@ -1,0 +1,134 @@
+// =====================================================================================
+// M12 AI screening round (voice)  (code: apps/api/src/modules/screening)
+// The candidate reaches it through the shortlist email's link: screening_invites (ats.prisma) holds only the
+// SHA-256 of that token. Transcripts are stored; raw audio never is. Everything is deleted with the application.
+// =====================================================================================
+
+enum AiScreeningStatus {
+  NOT_STARTED // link opened, consent not given yet
+  IN_PROGRESS
+  COMPLETED
+  ENDED_EARLY // the candidate pressed "End screening"; they may resume while the link is valid
+
+  @@map("ai_screening_status")
+}
+
+enum AiScreeningStep {
+  INTRO
+  EDUCATION
+  BACKGROUND
+  LOCATION
+  AVAILABILITY
+  CANDIDATE_QUESTIONS
+
+  @@map("ai_screening_step")
+}
+
+enum AiScreeningTurnKind {
+  MAIN
+  FOLLOW_UP
+  CLOSING
+
+  @@map("ai_screening_turn_kind")
+}
+
+enum AiScreeningReviewStatus {
+  PENDING
+  REVIEWED
+  NEEDS_FOLLOW_UP
+
+  @@map("ai_screening_review_status")
+}
+
+enum AiScreeningResultStatus {
+  PENDING
+  DONE
+  FAILED
+
+  @@map("ai_screening_result_status")
+}
+
+/// One screening per application (unique application_id). The question being waited for is kept on the row
+/// (pending_*), so a refresh or a second tab always continues at the same place.
+model ScreeningSession {
+  id                 String                  @id @default(uuid(7)) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  applicationId      String                  @unique @map("application_id") @db.Uuid
+  jobId              String                  @map("job_id") @db.Uuid
+  status             AiScreeningStatus       @default(NOT_STARTED)
+  /// consents.id of the voice-processing consent (purpose "ai_voice_screening").
+  consentId          String?                 @map("consent_id") @db.Uuid
+  consentGivenAt     DateTime?               @map("consent_given_at")
+  pendingSeq         Int                     @default(1) @map("pending_seq")
+  pendingStep        AiScreeningStep         @default(INTRO) @map("pending_step")
+  pendingKind        AiScreeningTurnKind     @default(MAIN) @map("pending_kind")
+  pendingText        String                  @default("") @map("pending_text")
+  /// Follow-ups already asked in the current step / candidate questions answered so far.
+  followUpsInStep    Int                     @default(0) @map("follow_ups_in_step")
+  candidateQuestions Int                     @default(0) @map("candidate_questions")
+  stepsDone          Int                     @default(0) @map("steps_done")
+  startedAt          DateTime?               @map("started_at")
+  lastActivityAt     DateTime?               @map("last_activity_at")
+  completedAt        DateTime?               @map("completed_at")
+  endedReason        String?                 @map("ended_reason")
+  reviewStatus       AiScreeningReviewStatus @default(PENDING) @map("review_status")
+  reviewedById       String?                 @map("reviewed_by_id") @db.Uuid
+  reviewedAt         DateTime?               @map("reviewed_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+
+  application Application      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  turns       ScreeningTurn[]
+  result      ScreeningResult?
+
+  @@index([tenantId, jobId, status])
+  @@map("screening_sessions")
+}
+
+/// One answered question. The text actually asked (incl. follow-ups) and the candidate's own words (transcript) are
+/// the source of truth; nothing here is ever overwritten.
+model ScreeningTurn {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  sessionId     String              @map("session_id") @db.Uuid
+  seq           Int
+  step          AiScreeningStep
+  kind          AiScreeningTurnKind
+  question      String
+  answer        String
+  /// The AI's answer to a question the candidate asked (CANDIDATE_QUESTIONS step only).
+  aiReply       String?             @map("ai_reply")
+  /// Browser-generated id of the upload: the same answer sent twice is saved once.
+  clientTurnId  String              @map("client_turn_id")
+  answerSeconds Float?              @map("answer_seconds")
+  model         String?
+  promptVersion String?             @map("prompt_version")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  session ScreeningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@unique([sessionId, clientTurnId])
+  @@map("screening_turns")
+}
+
+/// Structured summary extracted from the transcript after the screening (AiScreeningExtraction JSON). Kept apart from
+/// the raw turns and from the ATS score; it is information for HR, never a hiring decision.
+model ScreeningResult {
+  id            String                  @id @default(uuid(7)) @db.Uuid
+  tenantId      String                  @map("tenant_id") @db.Uuid
+  sessionId     String                  @unique @map("session_id") @db.Uuid
+  status        AiScreeningResultStatus @default(PENDING)
+  extraction    Json?
+  /// Safe short text only.
+  lastError     String?                 @map("last_error")
+  attempts      Int                     @default(0)
+  model         String?
+  promptVersion String?                 @map("prompt_version")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+
+  session ScreeningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("screening_results")
+}

@@ -1,0 +1,58 @@
+{
+  "_note": "Used by demo.mjs. 'form' goes through Intern 1's job API; 'jd' is used only when the AI worker cannot generate one.",
+  "form": {
+    "title": "Junior Backend Developer",
+    "department": "Engineering",
+    "experienceMin": 0,
+    "experienceMax": 2,
+    "mustHaveSkills": [
+      "Node.js",
+      "PostgreSQL",
+      "REST APIs"
+    ],
+    "niceToHaveSkills": [
+      "Docker",
+      "Git"
+    ],
+    "salaryMin": 400000,
+    "salaryMax": 600000,
+    "currency": "INR",
+    "salaryType": "CTC",
+    "locations": [
+      "Ahmedabad"
+    ],
+    "workMode": "HYBRID",
+    "employmentType": "FULL_TIME",
+    "openings": 3,
+    "deadline": "2099-12-31T18:29:59.000Z"
+  },
+  "jd": {
+    "title": "Junior Backend Developer",
+    "summary": "Join our small engineering team and build the REST APIs that power our billing and inventory apps.",
+    "aboutCompany": "",
+    "responsibilities": [
+      "Build and maintain REST APIs in Node.js.",
+      "Write SQL queries and database migrations for PostgreSQL.",
+      "Fix bugs and write tests for your code.",
+      "Review code with senior engineers and learn from feedback."
+    ],
+    "requirements": [
+      "Working knowledge of Node.js and JavaScript or TypeScript.",
+      "Basic SQL with PostgreSQL or another relational database.",
+      "Understanding of how REST APIs work."
+    ],
+    "niceToHave": [
+      "Experience with Docker.",
+      "Comfort using Git."
+    ],
+    "benefits": [
+      "Health insurance",
+      "Learning budget"
+    ]
+  },
+  "selectionProcess": [
+    "AI screening",
+    "Coding round",
+    "Interview with the team"
+  ]
+}

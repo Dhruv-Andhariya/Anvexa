@@ -1,0 +1,135 @@
+// =====================================================================================
+// M10 Resume parser + M11 ATS scorer + candidate decision emails  (code: apps/api/src/modules/ats)
+// Every table carries tenant_id. Nothing here is ever served by a public API: the minimum ATS score is HR-only.
+// =====================================================================================
+
+/// HR's private screening rules for one job. Kept OUT of jobs.form_data on purpose: the job form is served by the
+/// public careers API, this must never be.
+model JobScreeningSettings {
+  jobId       String   @id @map("job_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  /// 0-100. Candidates scoring at least this go to "Filtered Students".
+  minAtsScore Int      @map("min_ats_score")
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  job Job @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([jobId, tenantId])
+  @@index([tenantId])
+  @@map("job_screening_settings")
+}
+
+enum AtsStatus {
+  PENDING // waiting for the background worker (or for a retry after a technical error)
+  PROCESSING // claimed by a worker (locked_at); a stale claim is picked up again
+  SCORED // parsed + scored; decision fields are set
+  NEEDS_REVIEW // technical failure after every retry (unreadable file, AI down...): HR looks at it. Never rejected.
+
+  @@map("ats_status")
+}
+
+enum ScreeningDecision {
+  SHORTLISTED
+  NOT_SHORTLISTED
+
+  @@map("screening_decision")
+}
+
+/// One evaluation per application, always against the JD version the student applied to.
+model AtsEvaluation {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  applicationId  String             @unique @map("application_id") @db.Uuid
+  jobId          String             @map("job_id") @db.Uuid
+  jdVersionId    String             @map("jd_version_id") @db.Uuid
+  status         AtsStatus          @default(PENDING)
+  attempts       Int                @default(0)
+  nextAttemptAt  DateTime           @default(now()) @map("next_attempt_at")
+  lockedAt       DateTime?          @map("locked_at")
+  /// Safe short text only (never resume content).
+  lastError      String?            @map("last_error")
+  /// What the resume says (skills, experience, projects...): ParsedResume JSON.
+  parsedProfile  Json?              @map("parsed_profile")
+  /// 0-100.
+  score          Int?
+  /// Explainable score: every part with its points, max and reason (AtsBreakdown JSON).
+  breakdown      Json?
+  matchedSkills  String[]           @default([]) @map("matched_skills")
+  missingSkills  String[]           @default([]) @map("missing_skills")
+  /// The threshold the decision was made with (HR may change it later; the evaluation keeps its own).
+  minAtsScore    Int?               @map("min_ats_score")
+  /// What the ATS suggests. HR's own decision (below) always wins.
+  systemDecision ScreeningDecision? @map("system_decision")
+  hrDecision     ScreeningDecision? @map("hr_decision")
+  hrDecidedById  String?            @map("hr_decided_by_id") @db.Uuid
+  hrDecidedAt    DateTime?          @map("hr_decided_at")
+  model          String?
+  promptVersion  String?            @map("prompt_version")
+  scoredAt       DateTime?          @map("scored_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, jobId, status])
+  @@map("ats_evaluations")
+}
+
+enum CandidateEmailKind {
+  SHORTLIST
+  REJECTION
+
+  @@map("candidate_email_kind")
+}
+
+enum EmailDeliveryStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED // gave up after every retry; HR can send again
+
+  @@map("email_delivery_status")
+}
+
+/// The ONE decision email of an application (unique application_id: never two, never both kinds). HR sends it.
+model CandidateEmail {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  applicationId String              @unique @map("application_id") @db.Uuid
+  kind          CandidateEmailKind
+  status        EmailDeliveryStatus @default(QUEUED)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?           @map("locked_at")
+  lastError     String?             @map("last_error")
+  sentAt        DateTime?           @map("sent_at")
+  requestedById String?             @map("requested_by_id") @db.Uuid
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([tenantId])
+  @@map("candidate_emails")
+}
+
+/// Secure AI screening link of a shortlisted candidate. Only the SHA-256 of the token is stored; the link is valid
+/// for 7 days from the moment the shortlist email was sent.
+model ScreeningInvite {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  applicationId String    @unique @map("application_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("screening_invites")
+}

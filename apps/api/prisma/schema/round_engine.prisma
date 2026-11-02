@@ -1,0 +1,165 @@
+// =====================================================================================
+// M13 Round engine: online test rounds (Aptitude & English, Technical MCQ...) after the AI voice screening
+// Code: apps/api/src/modules/round-engine. Rounds, questions and pass rules come from rounds.prisma (M05, read only);
+// results go to round_results through the assessments module. Every table carries tenant_id. Webcam VIDEO is never
+// stored: only proctoring EVENTS (camera stopped, tab switch...) for HR to review. Deleted with the application.
+// =====================================================================================
+
+/// A candidate's invitation to one online test round. Created QUEUED; the email sender makes the link token right
+/// before sending, so only its SHA-256 is ever stored. One invitation per student per round.
+model RoundInvite {
+  id            String              @id @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  applicationId String              @map("application_id") @db.Uuid
+  jobId         String              @map("job_id") @db.Uuid
+  roundId       String              @map("round_id") @db.Uuid
+  /// null until the email was sent.
+  tokenHash     String?             @unique @map("token_hash")
+  expiresAt     DateTime?           @map("expires_at")
+  /// HR withdrew the link: it stops working at once (an attempt in progress included).
+  revokedAt     DateTime?           @map("revoked_at")
+  revokedById   String?             @map("revoked_by_id") @db.Uuid
+  emailStatus   EmailDeliveryStatus @default(QUEUED) @map("email_status")
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?           @map("locked_at")
+  lastError     String?             @map("last_error")
+  sentAt        DateTime?           @map("sent_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  application Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound      @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  attempt     RoundAttempt?
+  /// Coding rounds: the DSA page's state (round_engine_dsa.prisma).
+  dsaSession  DsaSession?
+
+  @@unique([applicationId, roundId])
+  @@index([emailStatus, nextAttemptAt])
+  @@index([tenantId, jobId])
+  @@map("round_invites")
+}
+
+enum RoundAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED // the candidate submitted
+  TIMED_OUT // the time limit ran out: the saved answers were submitted by the server
+
+  @@map("round_attempt_status")
+}
+
+/// The one attempt of a candidate at one round. The server owns the clock (deadline_at) and the answers; the result
+/// itself is in round_results (assessments module).
+model RoundAttempt {
+  id             String             @id @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  applicationId  String             @map("application_id") @db.Uuid
+  jobId          String             @map("job_id") @db.Uuid
+  roundId        String             @map("round_id") @db.Uuid
+  inviteId       String             @unique @map("invite_id") @db.Uuid
+  status         RoundAttemptStatus @default(IN_PROGRESS)
+  consentVersion String             @map("consent_version")
+  consentAt      DateTime           @map("consent_at")
+  startedAt      DateTime           @map("started_at")
+  /// null = the round has no time limit.
+  deadlineAt     DateTime?          @map("deadline_at")
+  submittedAt    DateTime?          @map("submitted_at")
+  /// { [questionId]: { selected: number[], marked: boolean } } - the autosaved answers.
+  answers        Json               @default("{}")
+  /// Highest autosave revision applied; an older (late) save never overwrites a newer one.
+  revision       Int                @default(0)
+  /// Result as graded by the assessments module (null until graded).
+  systemPassed   Boolean?           @map("system_passed")
+  /// Set once the next step (next invite / decision email) was queued, so it happens exactly once.
+  progressedAt   DateTime?          @map("progressed_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  application Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound       @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  invite      RoundInvite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  events      ProctorEvent[]
+
+  @@unique([applicationId, roundId])
+  @@index([status, deadlineAt])
+  @@index([tenantId, jobId])
+  @@map("round_attempts")
+}
+
+enum ProctorEventType {
+  ASSESSMENT_STARTED
+  ASSESSMENT_SUBMITTED
+  ASSESSMENT_TIMED_OUT
+  CAMERA_STARTED
+  CAMERA_STOPPED
+  CAMERA_PERMISSION_REVOKED
+  TAB_SWITCH
+  FULLSCREEN_EXIT
+  CONNECTION_LOST
+
+  @@map("proctor_event_type")
+}
+
+enum ProctorSeverity {
+  INFO
+  WARNING
+
+  @@map("proctor_severity")
+}
+
+/// Something the browser (or the server) noticed during an attempt. Evidence for HR's review only - never a reason to
+/// fail a candidate by itself.
+model ProctorEvent {
+  id         String           @id @db.Uuid
+  tenantId   String           @map("tenant_id") @db.Uuid
+  attemptId  String           @map("attempt_id") @db.Uuid
+  type       ProctorEventType
+  severity   ProctorSeverity
+  /// When it happened (the browser's time, kept inside the attempt's window; the server's time otherwise).
+  occurredAt DateTime         @map("occurred_at")
+  receivedAt DateTime         @default(now()) @map("received_at")
+  /// Small facts only (e.g. how long the tab was hidden). Never images or video.
+  detail     Json             @default("{}")
+
+  attempt RoundAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId, occurredAt])
+  @@index([tenantId])
+  @@map("round_proctor_events")
+}
+
+enum RoundOutcomeEmailKind {
+  REJECTED // failed the round
+  CLEARED_NEXT_BY_HR // passed; the next round is run by HR (interview...), HR contacts the candidate
+  CLEARED_ALL // passed the last round; HR makes the final decision
+
+  @@map("round_outcome_email_kind")
+}
+
+/// The outcome email of one round for one candidate (passing into another online round sends that round's invite
+/// instead). One per student per round, sent in the background like the other decision emails.
+model RoundOutcomeEmail {
+  id            String                @id @db.Uuid
+  tenantId      String                @map("tenant_id") @db.Uuid
+  applicationId String                @map("application_id") @db.Uuid
+  roundId       String                @map("round_id") @db.Uuid
+  kind          RoundOutcomeEmailKind
+  /// CLEARED_NEXT_BY_HR: the next round's name (public, as in the job's selection process).
+  nextRoundName String?               @map("next_round_name")
+  status        EmailDeliveryStatus   @default(QUEUED)
+  attempts      Int                   @default(0)
+  nextAttemptAt DateTime              @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?             @map("locked_at")
+  lastError     String?               @map("last_error")
+  sentAt        DateTime?             @map("sent_at")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound    @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([applicationId, roundId])
+  @@index([status, nextAttemptAt])
+  @@index([tenantId])
+  @@map("round_outcome_emails")
+}

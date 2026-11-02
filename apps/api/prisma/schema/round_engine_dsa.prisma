@@ -1,0 +1,21 @@
+// =====================================================================================
+// Coding rounds on the DSA page (apps/candidate-app /dsa/[token]). Code: apps/api/src/modules/dsa
+// (integration/round-engine.bridge.ts). The link, attempt, result and emails are the round engine's own tables; this
+// keeps what the DSA page needs to survive an API restart. Deleted with the invitation (and so with the application).
+// =====================================================================================
+
+/// One candidate's DSA attempt state for one coding-round invitation: timer, best score per problem, how it ended.
+/// Never the link token (the invitation keeps only its SHA-256) and never the submitted code.
+model DsaSession {
+  inviteId  String   @id @map("invite_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  /// { assessmentId, candidateName, durationSec, status, startedAt, deadlineAt, finishedAt, finishReason, progress }
+  state     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  invite RoundInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("dsa_sessions")
+}

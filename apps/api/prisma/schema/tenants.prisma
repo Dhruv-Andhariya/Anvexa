@@ -1,0 +1,50 @@
+// Owner: Intern 1 (Core & HR) - M33 tenants + the company profile used by JD generation (step 1).
+
+/// A suspended company keeps its data, but its members cannot use any company-scoped endpoint.
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@map("tenant_status")
+}
+
+/// A company. Created by a Platform Admin; its users join through memberships (auth.prisma).
+model Tenant {
+  id        String       @id @default(uuid(7)) @db.Uuid
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  companyProfile CompanyProfile?
+  jobs           Job[]
+  memberships    Membership[]
+  invitations    Invitation[]
+  sessions       Session[]
+
+  @@map("tenants")
+}
+
+/// Saved once by HR, then loaded automatically for every job and sent to the AI with the job form.
+model CompanyProfile {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  tenantId         String   @unique @map("tenant_id") @db.Uuid
+  name             String
+  industry         String
+  description      String
+  productsServices String?  @map("products_services")
+  website          String?
+  careersUrl       String?  @map("careers_url") // careers page link (not sent to the AI)
+  headquarters     String?
+  companySize      String?  @map("company_size")
+  foundedYear      Int?     @map("founded_year")
+  culture          String?
+  benefits         String[]
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("company_profiles")
+}

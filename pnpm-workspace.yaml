@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/rounds/*"
+  - "workers/workflows"
+  - "workers/activities-ts"

@@ -1,0 +1,165 @@
+// =====================================================================================
+// M08 Unified apply link + M09 Applications intake  (owner: Intern 3 - applications module)
+// Code: apps/api/src/modules/applications
+// Every table carries tenant_id. The resume parser reads ONLY the view `parser_resume_inbox`
+// (created by SQL in the migration) through the read-only role `hireflow_resume_reader`.
+// =====================================================================================
+
+/// One person per company, identified by verified phone (doc M09 dedupe).
+model Candidate {
+  id              String    @id @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String
+  email           String
+  phone           String
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
+  city            String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  applications Application[]
+  consents     Consent[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, email])
+  @@map("candidates")
+}
+
+/// One candidate applying to one job. Education fields are a snapshot at apply time.
+model Application {
+  id                      String           @id @db.Uuid
+  tenantId                String           @map("tenant_id") @db.Uuid
+  jobId                   String           @map("job_id") @db.Uuid
+  /// The approved jd_versions.id the student saw when applying.
+  jdVersionId             String           @map("jd_version_id") @db.Uuid
+  candidateId             String           @map("candidate_id") @db.Uuid
+  /// Email typed on THIS application, lower-case (candidates.email is overwritten by every later apply).
+  /// Dedupe by email (doc M09) is enforced by the unique index below. Null only for rows older than the column
+  /// whose backfilled email would have been a duplicate. A CHECK in SQL keeps it lower-case.
+  email                   String?
+  source                  String           @default("direct")
+  state                   ApplicationState @default(APPLIED)
+  college                 String
+  degree                  String
+  branch                  String
+  graduationYear          Int              @map("graduation_year")
+  scoreType               ScoreType        @map("score_type")
+  scoreValue              Decimal          @map("score_value") @db.Decimal(5, 2)
+  linkedinUrl             String?          @map("linkedin_url")
+  githubUrl               String?          @map("github_url")
+  portfolioUrl            String?          @map("portfolio_url")
+  /// A project the student built (live site, repo, demo video). Optional, like the other links.
+  projectUrl              String?          @map("project_url")
+  /// "Thanks for applying" email. Null = not sent (yet); the application is saved either way.
+  confirmationEmailSentAt DateTime?        @map("confirmation_email_sent_at")
+  createdAt               DateTime         @default(now()) @map("created_at")
+
+  candidate       Candidate        @relation(fields: [candidateId], references: [id])
+  resume          Resume?
+  /// M10/M11 (ats.prisma): deleted with the application (DPDP erase).
+  atsEvaluation   AtsEvaluation?
+  decisionEmail   CandidateEmail?
+  screeningInvite ScreeningInvite?
+  /// M12 (screening.prisma): the AI screening round of this application.
+  screeningSession ScreeningSession?
+  /// Assessment round results (rounds.prisma), deleted with the application.
+  roundResults RoundResult[]
+  /// M13 round engine (round_engine.prisma): online test invites, attempts, outcome emails.
+  roundInvites       RoundInvite[]
+  roundAttempts      RoundAttempt[]
+  roundOutcomeEmails RoundOutcomeEmail[]
+
+  @@unique([tenantId, jobId, candidateId])
+  @@unique([tenantId, jobId, email])
+  @@index([tenantId, jobId, createdAt])
+  @@map("applications")
+}
+
+enum ApplicationState {
+  APPLIED
+
+  @@map("application_state")
+}
+
+enum ScoreType {
+  CGPA
+  PERCENTAGE
+
+  @@map("score_type")
+}
+
+/// Resume RECORD (metadata). The file itself is in cloud storage (storage_key, RESUME_STORAGE=s3) or, in local dev
+/// and for rows from before cloud storage, in resume_files.
+model Resume {
+  id            String     @id @db.Uuid
+  tenantId      String     @map("tenant_id") @db.Uuid
+  applicationId String     @unique @map("application_id") @db.Uuid
+  fileName      String     @map("file_name")
+  mimeType      String     @map("mime_type")
+  sizeBytes     Int        @map("size_bytes")
+  sha256        String
+  scanStatus    ScanStatus @map("scan_status")
+  /// Which scanner checked the file (e.g. 'clamav', 'dev-eicar-only').
+  scannedBy     String     @map("scanned_by")
+  scannedAt     DateTime   @map("scanned_at")
+  /// S3 object key (<tenantId>/resumes/<resumeId>.pdf|.docx). Null = the bytes are in resume_files.
+  storageKey    String?    @map("storage_key")
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  application Application @relation(fields: [applicationId], references: [id])
+  file        ResumeFile?
+
+  @@index([tenantId, createdAt])
+  @@map("resumes")
+}
+
+enum ScanStatus {
+  /// Only clean files are ever stored; infected uploads are rejected before saving.
+  CLEAN
+
+  @@map("resume_scan_status")
+}
+
+/// Resume BYTES for local dev without cloud storage (and old rows until scripts move them). Kept apart from
+/// `resumes` so listing queries never load file content.
+model ResumeFile {
+  resumeId String @id @map("resume_id") @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  content  Bytes
+
+  resume Resume @relation(fields: [resumeId], references: [id])
+
+  @@map("resume_files")
+}
+
+/// Exactly what the student agreed to, with policy version and time (DPDP).
+model Consent {
+  id            String    @id @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  candidateId   String    @map("candidate_id") @db.Uuid
+  applicationId String    @map("application_id") @db.Uuid
+  purpose       String
+  policyVersion String    @map("policy_version")
+  grantedAt     DateTime  @default(now()) @map("granted_at")
+  withdrawnAt   DateTime? @map("withdrawn_at")
+
+  candidate Candidate @relation(fields: [candidateId], references: [id])
+
+  @@index([tenantId, candidateId])
+  @@map("consents")
+}
+
+/// Phone OTP challenges. Only an HMAC of the code is stored, never the code itself.
+model PhoneOtpChallenge {
+  id         String    @id @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  phone      String
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at")
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId, phone, createdAt])
+  @@map("applications_phone_otp_challenges")
+}

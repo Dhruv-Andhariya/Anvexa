@@ -1,0 +1,8 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "infra: up", "type": "shell", "command": "docker compose -f infra/docker/docker-compose.yml up -d" },
+    { "label": "infra: down", "type": "shell", "command": "docker compose -f infra/docker/docker-compose.yml down" },
+    { "label": "check: everything", "type": "shell", "command": "pnpm check" }
+  ]
+}

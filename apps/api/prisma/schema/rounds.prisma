@@ -1,0 +1,178 @@
+// =====================================================================================
+// M05 Round configurator + assessment results
+// Config code:  apps/api/src/modules/rounds-config  (job_round_configs, job_rounds, round_questions)
+// Results code: apps/api/src/modules/assessments    (round_results)
+// Every table carries tenant_id; every query filters by it. NOTHING here is ever served by a public API: only the
+// round NAMES are copied into publisher_job_listings.selection_process when HR publishes.
+// =====================================================================================
+
+enum RoundsConfigStatus {
+  DRAFT
+  COMPLETE // every round has its passing criterion (and questions); the job can be published
+
+  @@map("rounds_config_status")
+}
+
+enum RoundType {
+  APTITUDE
+  TECHNICAL_MCQ
+  CODING
+  SQL
+  COMMUNICATION
+  GROUP_DISCUSSION
+  TECHNICAL_INTERVIEW
+  HR_INTERVIEW
+  CUSTOM
+
+  @@map("round_type")
+}
+
+enum RoundPassMode {
+  CORRECT_COUNT
+  PERCENTAGE
+  MARKS
+  INTERVIEWER_SCORE
+
+  @@map("round_pass_mode")
+}
+
+enum RoundQuestionKind {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+  DESCRIPTIVE
+  CODING
+  INTERVIEW
+
+  @@map("round_question_kind")
+}
+
+enum RoundQuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+
+  @@map("round_question_difficulty")
+}
+
+enum RoundQuestionSource {
+  HR
+  AI
+
+  @@map("round_question_source")
+}
+
+/// The assessment rounds of one job (one row per job). Locked (locked_at) once students start: from then on the
+/// rounds, questions and criteria never change, so every result is judged against what the student saw.
+model JobRoundConfig {
+  jobId       String             @id @map("job_id") @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  status      RoundsConfigStatus @default(DRAFT)
+  lockedAt    DateTime?          @map("locked_at")
+  updatedById String?            @map("updated_by_id") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  job    Job        @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  rounds JobRound[]
+
+  @@unique([jobId, tenantId])
+  @@index([tenantId])
+  @@map("job_round_configs")
+}
+
+/// One round of a job, in order (position 1 = first round after AI voice screening).
+model JobRound {
+  id               String         @id @db.Uuid
+  tenantId         String         @map("tenant_id") @db.Uuid
+  jobId            String         @map("job_id") @db.Uuid
+  position         Int
+  type             RoundType
+  /// Public: shown to students as a selection process step.
+  name             String
+  description      String         @default("")
+  timeLimitMinutes Int?           @map("time_limit_minutes")
+  /// Passing criterion. All null = not chosen yet (draft only).
+  passMode         RoundPassMode? @map("pass_mode")
+  passValue        Int?           @map("pass_value")
+  /// INTERVIEWER_SCORE: what the interviewer scores out of.
+  passMaxScore     Int?           @map("pass_max_score")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  config    JobRoundConfig  @relation(fields: [jobId, tenantId], references: [jobId, tenantId], onDelete: Cascade)
+  questions RoundQuestion[]
+  results   RoundResult[]
+  /// M13 round engine (round_engine.prisma).
+  invites       RoundInvite[]
+  attempts      RoundAttempt[]
+  outcomeEmails RoundOutcomeEmail[]
+
+  @@unique([jobId, position])
+  @@unique([id, tenantId])
+  @@index([tenantId, jobId])
+  @@map("job_rounds")
+}
+
+/// One question HR wrote (or kept from the AI's suggestions). Answers / rubrics are private, like the rest.
+model RoundQuestion {
+  id          String                   @id @db.Uuid
+  tenantId    String                   @map("tenant_id") @db.Uuid
+  roundId     String                   @map("round_id") @db.Uuid
+  position    Int
+  kind        RoundQuestionKind
+  text        String
+  options     String[]                 @default([])
+  /// Indexes into options of the right answer(s) (MCQ, TRUE_FALSE: 0 = True, 1 = False).
+  correct     Int[]                    @default([])
+  /// Expected answer / rubric / reference solution for open questions.
+  modelAnswer String?                  @map("model_answer")
+  language    String?
+  marks       Int                      @default(1)
+  difficulty  RoundQuestionDifficulty?
+  topics      String[]                 @default([])
+  source      RoundQuestionSource      @default(HR)
+  createdAt   DateTime                 @default(now()) @map("created_at")
+
+  round JobRound @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([roundId, position])
+  @@index([tenantId])
+  @@map("round_questions")
+}
+
+/// One student's result in one round, sent by the round engine. score / max_score / pass_mark are in the pass rule's
+/// unit and are a snapshot of the (locked) rule. HR may override passed with a reason; the system result stays.
+model RoundResult {
+  id               String        @id @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  applicationId    String        @map("application_id") @db.Uuid
+  jobId            String        @map("job_id") @db.Uuid
+  roundId          String        @map("round_id") @db.Uuid
+  correctCount     Int?          @map("correct_count")
+  marks            Float?
+  interviewerScore Float?        @map("interviewer_score")
+  passMode         RoundPassMode @map("pass_mode")
+  score            Float
+  maxScore         Float         @map("max_score")
+  passMark         Int           @map("pass_mark")
+  systemPassed     Boolean       @map("system_passed")
+  /// RoundAnswer[] JSON (see packages/contracts assessments.ts).
+  answers          Json          @default("[]")
+  notes            String?
+  startedAt        DateTime?     @map("started_at")
+  submittedAt      DateTime?     @map("submitted_at")
+  overridePassed   Boolean?      @map("override_passed")
+  overrideReason   String?       @map("override_reason")
+  overriddenById   String?       @map("overridden_by_id") @db.Uuid
+  overriddenByName String?       @map("overridden_by_name")
+  overriddenAt     DateTime?     @map("overridden_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound    @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([applicationId, roundId])
+  @@index([tenantId, jobId])
+  @@map("round_results")
+}

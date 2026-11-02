@@ -1,0 +1,106 @@
+// =====================================================================================
+// M06 Job publisher + M07 Channel adapters  (owner: Intern 3 - publisher module)
+// Code: apps/api/src/modules/publisher
+// Reads (never writes) Intern 1's tables: jobs, jd_versions, job_approvals, tenants, company_profiles.
+// Every table here carries tenant_id; every query in the publisher module filters by it.
+// =====================================================================================
+
+/// One row per APPROVED job that HR published. The job page and the posts always show `jdVersionId`,
+/// which is the version recorded in job_approvals (never a draft). jd_versions rows are immutable.
+model PublisherJobListing {
+  jobId            String           @id @map("job_id") @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  /// Public URL part: careers-site /<company slug>/jobs/<slug>. Stable for the life of the job.
+  slug             String
+  status           JobListingStatus @default(LIVE)
+  /// The approved jd_versions.id that is published.
+  jdVersionId      String           @map("jd_version_id") @db.Uuid
+  /// The job_approvals.id that approved it.
+  approvalId       String           @map("approval_id") @db.Uuid
+  /// Selection rounds typed by HR at publish time (until M05 round config exists).
+  selectionProcess String[]         @map("selection_process")
+  publishedBy      String?          @map("published_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, status])
+  @@map("publisher_job_listings")
+}
+
+enum JobListingStatus {
+  LIVE
+  CLOSED
+
+  @@map("publisher_job_listing_status")
+}
+
+/// One post per job per channel (doc 11.2 job_posts). The unique key is what stops double posting.
+model JobPost {
+  id          String     @id @db.Uuid
+  tenantId    String     @map("tenant_id") @db.Uuid
+  jobId       String     @map("job_id") @db.Uuid
+  /// The approved jd_versions.id this post was made from.
+  jdVersionId String     @map("jd_version_id") @db.Uuid
+  channel     String
+  status      PostStatus @default(PENDING)
+  externalId  String?    @map("external_id")
+  url         String?
+  attempts    Int        @default(0)
+  /// Safe, short error text only - never tokens or raw provider payloads.
+  lastError   String?    @map("last_error")
+  publishedAt DateTime?  @map("published_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  @@unique([tenantId, jobId, channel])
+  @@map("job_posts")
+}
+
+enum PostStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  NOT_CONFIGURED
+
+  @@map("job_post_status")
+}
+
+/// Per-company channel switches + non-secret settings (e.g. LinkedIn organizationId).
+/// Secrets (access tokens) live in env / a secret manager, never here.
+model PublisherChannelSetting {
+  tenantId  String   @map("tenant_id") @db.Uuid
+  channel   String
+  enabled   Boolean  @default(true)
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([tenantId, channel])
+  @@map("publisher_channel_settings")
+}
+
+/// M07 channel_credentials: one OAuth connection per company per channel (e.g. its LinkedIn page admin's token).
+/// Tokens are AES-256-GCM encrypted with ENCRYPTION_KEY (common/secret-box.ts); plain tokens never reach the DB,
+/// the logs, the audit log or any API response.
+model ChannelCredential {
+  tenantId              String    @map("tenant_id") @db.Uuid
+  channel               String
+  accessTokenEnc        String    @map("access_token_enc")
+  refreshTokenEnc       String?   @map("refresh_token_enc")
+  /// When the access token stops working (from the provider's expires_in).
+  expiresAt             DateTime? @map("expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  /// Scopes the provider actually granted (space separated).
+  scopes                String    @default("")
+  /// users.id of the admin who connected it.
+  connectedBy           String?   @map("connected_by") @db.Uuid
+  /// The provider account the token belongs to (LinkedIn: OpenID `sub` and display name), read when connecting.
+  accountId             String?   @map("account_id")
+  accountName           String?   @map("account_name")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@id([tenantId, channel])
+  @@map("channel_credentials")
+}

@@ -1,0 +1,82 @@
+// Owner: Intern 1 (Core & HR) - M01 jobs, M02 jd_versions, M04 job_approvals (steps 2-4).
+
+enum JobStatus {
+  DRAFT // no current JD: just created, or the requirements changed since the last JD (old versions kept)
+  JD_GENERATED // at least one JD version exists, waiting for HR approval
+  APPROVED // HR approved one version; the job is locked
+
+  @@map("job_status")
+}
+
+enum JdSource {
+  AI
+  HR_EDIT
+
+  @@map("jd_source")
+}
+
+model Job {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  title              String
+  formData           Json      @map("form_data") // the validated JobForm
+  status             JobStatus @default(DRAFT)
+  currentJdVersionId String?   @map("current_jd_version_id") @db.Uuid
+  openings           Int
+  deadline           DateTime?
+  createdById        String?   @map("created_by_id") @db.Uuid // null for jobs created before auth existed
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions          JdVersion[]
+  approvals         JobApproval[]
+  /// HR-only ATS rules (ats.prisma). Never part of form_data.
+  screeningSettings JobScreeningSettings?
+  /// HR-only assessment rounds (rounds.prisma). Only the round names are ever public.
+  roundConfig       JobRoundConfig?
+
+  @@unique([id, tenantId]) // target of the (job_id, tenant_id) foreign keys below
+  @@index([tenantId, createdAt])
+  @@map("jobs")
+}
+
+/// Every AI generation and every HR edit is a new row. Rows are never updated.
+model JdVersion {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  jobId           String   @map("job_id") @db.Uuid
+  version         Int
+  source          JdSource
+  content         Json // JdContent
+  companySnapshot Json?    @map("company_snapshot") // company profile as sent to the AI
+  promptVersion   String?  @map("prompt_version")
+  model           String?
+  createdBy       String?  @map("created_by") // user id (null for versions written before auth existed)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // composite FK: the database itself rejects a version whose tenant differs from its job's tenant
+  job       Job           @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  approvals JobApproval[]
+
+  @@unique([jobId, version])
+  @@map("jd_versions")
+}
+
+model JobApproval {
+  id                     String   @id @default(uuid(7)) @db.Uuid
+  tenantId               String   @map("tenant_id") @db.Uuid
+  jobId                  String   @map("job_id") @db.Uuid
+  jdVersionId            String   @map("jd_version_id") @db.Uuid
+  approvedBy             String   @map("approved_by") // approver's display name, taken from the session
+  approvedById           String?  @map("approved_by_id") @db.Uuid // null for approvals made before auth existed
+  companyDetailsVerified Boolean  @map("company_details_verified")
+  note                   String?
+  approvedAt             DateTime @default(now()) @map("approved_at")
+
+  job       Job       @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  jdVersion JdVersion @relation(fields: [jdVersionId], references: [id])
+
+  @@index([jobId])
+  @@map("job_approvals")
+}

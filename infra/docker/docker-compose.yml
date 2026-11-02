@@ -1,0 +1,40 @@
+# Local dev infra. Start:  docker compose -f infra/docker/docker-compose.yml up -d
+# Later (Intern 1, when workflows start):  add  --profile workflow  to also start Temporal
+# MinIO is OFF by default (its Docker image was removed). Replace it before resume upload (see TEAM_GUIDE).
+name: hireflow
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment: { POSTGRES_USER: hire, POSTGRES_PASSWORD: hire, POSTGRES_DB: hireflow }
+    # A locally installed PostgreSQL already on 5432? Start with POSTGRES_PORT=5433 and point DATABASE_URL at it.
+    ports: ['${POSTGRES_PORT:-5432}:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      { test: ['CMD-SHELL', 'pg_isready -U hire -d hireflow'], interval: 5s, retries: 10 }
+  redis:
+    image: redis:7.4-alpine
+    ports: ['6379:6379']
+  minio:
+    image: minio/minio
+    profiles: ['storage']
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: hireflow, MINIO_ROOT_PASSWORD: hireflow-secret }
+    ports: ['9000:9000', '9001:9001']
+    volumes: [miniodata:/data]
+  mailpit:
+    image: axllent/mailpit
+    ports: ['1025:1025', '8025:8025'] # SMTP / web inbox
+  # M09 resume virus scan (opt-in): docker compose -f infra/docker/docker-compose.yml --profile security up -d clamav
+  # First start downloads virus signatures (several minutes, ~1 GB RAM). Then set VIRUS_SCANNER=clamav in .env.
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ['security']
+    ports: ['3310:3310']
+  temporal:
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0
+    ports: ['7233:7233', '8233:8233']
+    profiles: ['workflow']
+volumes:
+  pgdata:
+  miniodata:

@@ -1,0 +1,39 @@
+# REPLACE @internN with real GitHub usernames. GitHub auto-requests these people as reviewers.
+/apps/hr-dashboard/          @naina-chauhan
+/apps/admin-console/         @naina-chauhan
+/apps/api/src/modules/auth/          @naina-chauhan
+/apps/api/src/modules/tenants/       @naina-chauhan
+/apps/api/src/modules/jobs/          @naina-chauhan
+/apps/api/src/modules/rounds-config/ @naina-chauhan
+/apps/api/src/modules/proctoring/    @naina-chauhan
+/apps/api/src/modules/analytics/     @naina-chauhan
+/apps/api/src/modules/audit/         @naina-chauhan
+/apps/api/src/common/        @naina-chauhan
+/workers/workflows/          @naina-chauhan
+/workers/activities-ts/      @naina-chauhan
+/packages/ui/                @naina-chauhan
+/packages/config/            @naina-chauhan
+
+/workers/ai-worker/          @Dhruv-Andhariya
+/prompts/                    @Dhruv-Andhariya
+/apps/api/src/modules/ats/        @Dhruv-Andhariya
+/apps/api/src/modules/screening/  @Dhruv-Andhariya
+/apps/api/src/modules/evaluator/  @Dhruv-Andhariya
+/apps/api/src/modules/feedback/   @Dhruv-Andhariya
+
+/apps/candidate-app/         @GrisaPujara
+/apps/careers-site/          @GrisaPujara
+/apps/api/src/modules/applications/   @GrisaPujara
+/apps/api/src/modules/notifications/  @GrisaPujara
+/apps/api/src/modules/publisher/      @GrisaPujara
+/apps/api/src/modules/scheduler/      @GrisaPujara
+/apps/api/src/modules/round-engine/   @GrisaPujara
+/packages/email-templates/   @GrisaPujara
+/packages/proctor-sdk/       @GrisaPujara
+/packages/round-sdk/         @GrisaPujara
+/packages/rounds/            @GrisaPujara
+
+# Shared glue: ALL THREE must see changes
+/packages/contracts/         @naina-chauhan @Dhruv-Andhariya @GrisaPujara
+/apps/api/prisma/            @naina-chauhan @Dhruv-Andhariya @GrisaPujara
+/infra/docker/               @naina-chauhan @Dhruv-Andhariya @GrisaPujara

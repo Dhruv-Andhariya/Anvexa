@@ -1,0 +1,147 @@
+// Owner: Intern 1 (Core & HR) - M28 auth: staff users, server-side sessions, company memberships, invitations.
+
+/// Company-level roles. Platform Admin is NOT a company role (see User.isPlatformAdmin).
+enum CompanyRole {
+  COMPANY_ADMIN
+  HR_MEMBER
+
+  @@map("company_role")
+}
+
+enum MembershipStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("membership_status")
+}
+
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  email           String    @unique // always stored lower-cased
+  name            String
+  passwordHash    String    @map("password_hash") // scrypt, see auth/password.ts
+  /// Google account id (OpenID `sub`) after "Continue with Google"; null for password-only accounts.
+  googleSub       String?   @unique @map("google_sub")
+  /// Platform-level role. Only granted by the create-platform-admin CLI, never through the API.
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  isActive        Boolean   @default(true) @map("is_active")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  memberships    Membership[]
+  sessions        Session[]
+  passwordResets  PasswordReset[]
+  loginChallenges LoginChallenge[]
+
+  @@map("users")
+}
+
+/// Opaque random token in an httpOnly cookie; only its SHA-256 hash is stored.
+model Session {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  userId    String   @map("user_id") @db.Uuid
+  /// The company this session works in. Re-checked against an ACTIVE membership on every request.
+  tenantId  String?  @map("tenant_id") @db.Uuid
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Membership {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  role      CompanyRole
+  status    MembershipStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// One-time link to join a company. Only the token's SHA-256 hash is stored.
+model Invitation {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  tenantId    String      @map("tenant_id") @db.Uuid
+  email       String
+  role        CompanyRole
+  tokenHash   String      @unique @map("token_hash")
+  invitedById String?     @map("invited_by_id") @db.Uuid
+  expiresAt   DateTime    @map("expires_at")
+  acceptedAt  DateTime?   @map("accepted_at")
+  revokedAt   DateTime?   @map("revoked_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("invitations")
+}
+
+/// One-time "forgot password" link. Only the token's SHA-256 hash is stored; a newer link supersedes older ones.
+model PasswordReset {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  /// Set when the link is used, or when a newer link replaces it.
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+/// Login 2FA: after the right password, a 6-digit code is emailed; the session starts only when it is entered.
+/// Only hashes are stored (the challenge token the browser holds, and the code). A newer challenge supersedes older ones.
+model LoginChallenge {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  /// Wrong codes entered; the challenge is dead after LOGIN_CODE_MAX_ATTEMPTS.
+  attempts  Int       @default(0)
+  /// Set when the code is accepted, or when a newer challenge replaces this one.
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("login_challenges")
+}
+
+/// Sign-up email verification: the account is created only after the 6-digit code emailed to that address is
+/// entered. Until then the details wait here (password already scrypt-hashed). A newer request for the same email
+/// supersedes older ones.
+model SignupChallenge {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  email        String // lower-cased, like users.email
+  name         String
+  passwordHash String    @map("password_hash")
+  tokenHash    String    @unique @map("token_hash")
+  codeHash     String    @map("code_hash")
+  expiresAt    DateTime  @map("expires_at")
+  attempts     Int       @default(0)
+  /// Set when the account is created from it, or when a newer challenge replaces it.
+  usedAt       DateTime? @map("used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@map("signup_challenges")
+}
