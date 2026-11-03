@@ -78,6 +78,7 @@ const medianTests: TestCase[] = [
   medCase('md-h8', range(0, 1000), range(1000, 2000), 999.5, true),
 ];
 
+/** The problem bank (full questions, hidden tests included). Also the demo set. contracts' DSA_BANK lists the same ids. */
 export const MOCK_QUESTIONS: DsaQuestion[] = [
   {
     id: 'dsa-001',

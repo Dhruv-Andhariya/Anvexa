@@ -1,29 +1,8 @@
 # DSA coding assessment — integration notes
 
-Isolated DSA assessment module for HireFlow: candidate route `/dsa/[token]` in `apps/candidate-app`, backend module `apps/api/src/modules/dsa`, code execution through the local self-hosted Judge0 CE.
+Isolated DSA assessment module for HireFlow: candidate route `/dsa/[token]` in `apps/candidate-app`, backend module `apps/api/src/modules/dsa`, code execution through a self-hosted **Piston** runner on the hosting PC (see [dsa-piston-hosting.md](dsa-piston-hosting.md)).
 
-> **Update 2026-11-02: wired to the round engine.** Sections 4 and 6 below describe the plan; this is what was built.
->
-> - **Which rounds:** a job round with only Coding questions and a score pass rule (`isCodingRound`, round-engine `online-test.ts`). Passing the round before it queues an invitation (instead of the "HR will contact you" email). Students who already got that email for a coding round are invited by the worker (`clearedBeforeCodingRound`).
-> - **Link:** the round engine's own invitation token, emailed as `DSA_SITE_URL/dsa/<token>` (or `DSA_URL` with `{token}`). Same rules as the aptitude link: only its SHA-256 is stored, valid `ASSESSMENT_LINK_DAYS`, withdrawn by HR at once, held while the link is not public. A coding link does not open the MCQ page and the reverse.
-> - **Bridge:** `dsa/integration/round-engine.bridge.ts` is the `InvitationResolver`, `SessionStore` and `AssessmentLifecycle`. The timer start creates the round attempt (deadline = HR's time limit, 60 min if none); finish, time-out or an integrity end finishes it; an abandoned attempt is finished by the worker at its deadline.
-> - **Grading:** the best score per problem (as before), scaled to HR's round (marks rounded down, never up) and judged by `assessments/grading.ts` against HR's pass rule. The per-problem summary is stored as the result's notes for HR.
-> - **Persistence:** table `dsa_sessions` (migration `20261102120000_dsa_sessions`), keyed by invitation id, without the token or the code. The run/submit `BUSY` guard is now a per-process set in `DsaService`.
-> - **Questions:** still the 3 built-in problems for every student: HR's coding questions have text only, no test cases (§3 decision still open).
-> - **Code runner:** `JUDGE0_URL` etc. Hosted Judge0 CE on RapidAPI is supported (`JUDGE0_RAPIDAPI_HOST`, `JUDGE0_AUTH_HEADER=X-RapidAPI-Key`); each submission and each poll is one request against the plan's quota (`DSA_JUDGE0_POLL_INTERVAL_MS`).
-> - **Public link:** `scripts/start-public.ps1` starts a second quick tunnel to the candidate app (:3001) and writes `DSA_SITE_URL`, **only while `JUDGE0_URL` is set** (otherwise every student would be graded 0 and rejected). The candidate app calls the API through its own origin (`/api/v1`, `next.config.ts` rewrite).
-> - **Not yet:** DSA proctoring events stay in memory (lost on restart, not shown on the HR round panel); demo tokens no longer work in the app (tests still use `DemoInvitationResolver`); no rate limit on the DSA routes.
-
-> **Status in one paragraph.** The module is complete and verified everywhere except one place: **live code execution through Judge0 could not be verified, because the local Judge0 sandbox cannot run code on this machine** (root cause in [§5](#5-judge0-configuration-and-the-current-blocker)). The backend talks to Judge0 correctly (a submission is accepted, queued and picked up by a worker); the worker then fails inside the `isolate` sandbox. All execution, scoring and UI behaviour was verified against locally installed toolchains instead, which is *not* a substitute for a Judge0 run. Until the Judge0 environment is fixed, the API reports a runner error and scores 0. It never fakes a pass.
-
-> **Read this first (added when the module was moved into this repo).** The module was built and tested in a sandbox copy that did not have the real API's guards. When it was ported here, these changes were made, and a test (`apps/api/tests/dsa-access.test.ts`) runs the DSA routes behind the real `AuthGuard` to prove them:
->
-> - **Access is declared.** The global `AuthGuard` answers 403 to any route that does not declare its access. The candidate controllers are `@Public()` (the invitation token is the only credential, validated on every call). The proctoring admin routes are also `@Public()` **but closed by default**: they answer 404 unless `DSA_ADMIN_API_KEY` is set, and then need it in `x-dsa-admin-key`. They deliberately do **not** use `@RequirePermission` yet, because an invitation carries no company (tenant) id, so a session-based check could not stop one company's HR user from listing another company's flagged candidates. Add `tenantId` to the invitation, then switch to `@RequirePermission('jobs.read')` and filter every query by the session's company.
-> - **CSRF header.** The guard requires `x-requested-with: hireflow` on every write, even on public routes. `apps/candidate-app/src/lib/dsa-api.ts` sends it on every POST.
-> - **Demo tokens are development-only.** `demo-dsa-token` and `demo-dsa-short` resolve only when `NODE_ENV` is not `production` (or `DSA_ALLOW_DEMO_TOKENS=on`). Without a real `InvitationResolver`, a production API therefore rejects every token instead of offering free code execution.
-> - **Not wired yet:** per-IP rate limiting (the round-engine uses `rateLimit('assessment')` from `modules/applications`; the DSA routes should get an equivalent), the real `InvitationResolver`, the HR question bank, persistent sessions and proctoring storage, and tenant scoping of HR reports.
-> - **Registration:** one import and one entry in `apps/api/src/app.module.ts`. **`apps/candidate-app`** was an empty folder (`.gitkeep`); it now holds a Next.js 15 app, and `pnpm-lock.yaml` gained only that app's entry (32 added lines, none removed). Run `pnpm install` after pulling. Port 3001 is its dev port.
-> - **Tests:** `pnpm --filter api test` runs the fast DSA tests. The two slow suites are opt-in: the local-toolchain suite with `DSA_SLOW_TESTS=on` (about 5 minutes, needs Python, Java and g++), and the live Judge0 suite, which skips itself loudly when Judge0 cannot execute code (§5).
+> **Status in one paragraph.** The module is **wired into the round engine** as a DSA round of a job's selection process: HR picks bank problems in the rounds editor, students are invited by email after the AI voice screening (or the previous round), take the test on the candidate page with real sandboxed execution on Piston, and the result, the cleared email or the rejection email follow automatically. Sessions, results and the monitoring record are in the database. The whole flow is described in [DSA_ASSESSMENT_ROUND.md](DSA_ASSESSMENT_ROUND.md). Sections below that talk about demo tokens describe the demo mode (`DSA_DEMO_MODE=on`). Judge0, used in an earlier iteration, was dropped (it could not run on this machine's cgroup v2) and its client code was removed.
 
 ---
 
@@ -42,14 +21,16 @@ Created, all under `src/modules/dsa/`:
 | `questions/question.types.ts` | `DsaQuestion` (internal, has hidden tests), `PublicQuestion` and `toPublicQuestion` (field whitelist). |
 | `questions/question.repository.ts` | `QuestionRepository` interface and `DSA_QUESTION_REPOSITORY` token. |
 | `questions/mock-question.repository.ts`, `questions/mock-questions.data.ts` | Temporary dataset (3 questions). |
-| `judge0/judge0.client.ts` | Judge0 REST client (batch submit, polling, error normalisation). |
+| `execution/code-runner.ts` | `CodeRunner` interface (the engine seam), `CODE_RUNNER` token, result and error types. |
+| `execution/piston.runner.ts` | Piston client: language mapping, per-run limits, response mapping, concurrency and queue control. |
+| `execution/limiter.ts` | `ConcurrencyLimiter`: global slots, bounded FIFO queue, queue timeout. |
 | `evaluation/harness.ts` | Wraps candidate code into a stdin-driven program per language. |
 | `evaluation/evaluator.ts` | Runs cases, compares output, redacts hidden-case details. |
 | `session/session.store.ts` | `SessionStore` interface and in-memory implementation. |
 | `session/invitation.resolver.ts` | `InvitationResolver` interface and demo implementation. |
 | `README.md` | Module ownership note (matches the other module folders). |
 
-Tests, under `apps/api/tests/`: `dsa-unit.test.ts`, `dsa-http.e2e.test.ts`, `dsa-judge0.integration.test.ts`, `dsa-local-runner.test.ts`, `dsa-fixtures.ts`, `support/execution-suite.ts`, `support/local-runner.ts`.
+Tests, under `apps/api/tests/`: `dsa-unit.test.ts`, `dsa-http.e2e.test.ts`, `dsa-piston-runner.test.ts`, `dsa-piston.integration.test.ts` (live), `dsa-piston-load.test.ts` (opt-in), `dsa-local-runner.test.ts`, `dsa-proctoring*.test.ts`, `dsa-fixtures.ts`, `support/execution-suite.ts`, `support/local-runner.ts`.
 
 Modified (the only shared file touched):
 
@@ -65,11 +46,12 @@ Deleted: `src/lib/questions.ts` and `src/lib/public-questions.ts`. They were an 
 
 ### Not touched
 
-`round-engine`, `rounds-config`, `proctoring`, `notifications`, the HR dashboard, `packages/*`, Prisma schema, `.env.example` (it already lists `JUDGE0_URL`). `pnpm install --frozen-lockfile` was run in `hireflow-dsa-work` because its `node_modules` was broken (no `.bin`); no dependency was added or upgraded, and the lockfile is unchanged. `packages/contracts` was built (`dist/`), as turbo's `^build` would do.
+`round-engine`, `rounds-config`, `proctoring`, `notifications`, the HR dashboard, `packages/*`, Prisma schema, `.env.example` (the root file still lists `JUDGE0_URL`; it is unused now and the owner of that file should replace it with `PISTON_URL`). `pnpm install --frozen-lockfile` was run in `hireflow-dsa-work` because its `node_modules` was broken (no `.bin`); no dependency was added or upgraded, and the lockfile is unchanged. `packages/contracts` was built (`dist/`), as turbo's `^build` would do.
 
 ### Outside the repository
 
-The developer's local Judge0 folder (`judge0.conf`, not part of this repo): `REDIS_HOST=redis` → `REDIS_HOST=judge0-v1131-redis-1`, applied with your approval; backup at `judge0.conf.bak-before-redis-host-fix`. The Judge0 server and workers containers were restarted. See §5.
+- `infra/piston/` (`piston.env`, `start-piston.ps1`): the runner's settings and an idempotent start/verify script. Piston runs as Docker container `hireflow-piston` with volume `hireflow_piston_data`.
+- `apps/candidate-app/next.config.ts`: forwards only `/api/v1/dsa/*` to the API, long proxy timeout, privacy headers.
 
 ---
 
@@ -144,14 +126,15 @@ Code is limited to 64,000 characters.
 | 409 | `NOT_STARTED` | Run/submit/finish before start. |
 | 403 | `TIME_EXPIRED`, `ALREADY_FINISHED` | After the deadline or after finish. |
 | 429 | `BUSY` | A run is already executing for this candidate. |
-| 503 | `JUDGE0_UNAVAILABLE` | Judge0 unreachable or rejecting requests. No URL or token in the message. |
+| 503 | `CODE_RUNNER_UNAVAILABLE` | Piston unreachable or rejecting requests. Never reported as a pass. |
+| 503 | `CODE_RUNNER_BUSY` | Run queue full or waited too long (`DSA_RUNNER_QUEUE_TIMEOUT_MS`). Try again. |
 
 ### Behaviour worth knowing
 
 - **Timer:** the deadline is `start + duration`, computed and enforced on the server. A finished-by-expiry state is detected lazily on the next request. The browser countdown is display only (it syncs to `serverTime`); at zero it asks the server.
 - **Scoring:** `marks × passed / total`, over sample and hidden tests together (rounded to 2 decimals). The best submission per question counts.
 - **Never passes without verification:** a case passes only if the program ran and printed a result that matches the expected output. No output, a crash, a timeout or a runner error is never a pass.
-- **Python syntax errors:** Python has no compile step, so Judge0 reports them as runtime errors. When every run dies with a real interpreter `SyntaxError`/`IndentationError`, the API reports `compile_error`.
+- **Python syntax errors:** Python has no compile step, so the runner reports them as runtime errors. When every run dies with a real interpreter `SyntaxError`/`IndentationError`, the API reports `compile_error`.
 - **Candidate prints:** the harness prints the return value on a marker line, so debug `print`s appear in `stdout` and cannot corrupt the result.
 
 ---
@@ -182,167 +165,101 @@ stdin format used by the current harnesses: int array → `"<len> v1 v2 ..."` on
 
 ---
 
-## 4. Connecting the existing invitation token
+## 4. The invitation token (wired)
 
-The route `/dsa/[token]` already matches the shape of an emailed link: `https://<candidate-app>/dsa/<token>`. The page reads `token` and sends it to the API unchanged.
+The link in the email is `https://<candidate-app>/dsa/<token>`; the token is the round engine's invitation token (32 random bytes, only its SHA-256 stored in `round_invites`). The page sends it to the API unchanged.
 
-Backend seam: `InvitationResolver.resolve(token): Promise<{ token, assessmentId, candidateName, durationMinutes } | null>` (`session/invitation.resolver.ts`). The current `DemoInvitationResolver` accepts only:
+Seams, all bound in `dsa.module.ts` (the real implementation is the default; `DSA_DEMO_MODE=on` binds the demo ones):
 
-- `demo-dsa-token`: 60 minutes (override with `DSA_DEMO_DURATION_MINUTES`)
-- `demo-dsa-short`: 1 minute, for checking timer expiry by hand
+| Seam | Real | Demo |
+|---|---|---|
+| `InvitationResolver` | `RoundInvitationResolver`: `RoundEngineService.openCodingRound(token)` checks the link (known, not withdrawn, not expired before the start, the round is still a DSA round) and returns the candidate, the minutes and the round's questions | `DemoInvitationResolver`: `demo-dsa-token` (60 min), `demo-dsa-short` (1 min), or `DSA_DEMO_TOKENS` |
+| `QuestionRepository` | `BankQuestionRepository`: the round's bank problems under HR's round-question ids, HR's marks and order | the whole bank |
+| `SessionStore` | `EngineSessionStore`: the attempt is the engine's `round_attempts` row; progress in `coding_state`; finishing records the result and queues the next email | in memory |
+| `ProctorStore` | `PrismaProctorStore`: table `dsa_proctor_sessions` | in memory |
 
-To integrate, implement the interface on top of the existing token validation owned by round-engine / the invitation workflow (return `null` for unknown, expired or already-used tokens; map the invitation to an `assessmentId` and a duration from rounds-config), then swap it in `dsa.module.ts` (`DSA_INVITATION_RESOLVER`). No change to the controller, service or UI is needed.
+The demo tokens are refused when `NODE_ENV=production` unless `DSA_ALLOW_DEMO_TOKENS=on`, and `DSA_DEMO_TOKENS` (long random tokens) replaces the two well-known ones.
 
-Also required for production:
-
-- **Session persistence:** `SessionStore` is in-memory; state is lost on API restart. Implement it on Prisma (suggested table `dsa_sessions` keyed by token, with `progress` as JSON) and bind `DSA_SESSION_STORE`. The per-candidate `busy` flag would then need a lock or a DB column.
-- **CORS:** `apps/api/src/main.ts` allows only `localhost` origins. A deployed candidate-app origin needs adding by the owner of that file.
-- **Candidate app → API URL:** `NEXT_PUBLIC_API_URL` (default `http://localhost:4000/api/v1`) is baked in at build time.
+Still true for production: **CORS** in `apps/api/src/main.ts` allows only `localhost` origins, which does not matter for the candidate app because the browser calls the candidate app itself (same origin) and the app forwards `/api/v1/dsa/*`; and `NEXT_PUBLIC_API_URL` / `API_INTERNAL_URL` are baked in at build time.
 
 ---
 
-## 5. Judge0 configuration and the current blocker
+## 5. Code execution (Piston)
 
-### What the backend needs
+Full hosting, startup and troubleshooting guide: **[dsa-piston-hosting.md](dsa-piston-hosting.md)**. Summary:
 
-| Env var | Default | Notes |
-|---|---|---|
-| `JUDGE0_URL` | `http://localhost:2358` | Server-side only; never sent to the browser. |
-| `JUDGE0_AUTH_TOKEN` | unset | Sent in `JUDGE0_AUTH_HEADER` (default `X-Auth-Token`) if the instance has `AUTHN_TOKEN` set. Currently unset on the instance. |
-| `JUDGE0_LANG_PYTHON` / `_JAVA` / `_CPP` | `71` / `62` / `54` | Python 3.8.1, Java OpenJDK 13.0.1, C++ GCC 9.2.0. |
-| `DSA_CPU_TIME_LIMIT_SEC` | `3` | Per test; the instance maximum is 15. |
-| `DSA_WALL_TIME_LIMIT_SEC` | `10` | Per test. |
-| `DSA_MEMORY_LIMIT_KB` | `256000` | Per test; instance maximum 512000. |
-| `DSA_JUDGE0_POLL_TIMEOUT_MS` | `60000` | Give up waiting after this long. |
-
-Judge0 features used: `POST /submissions/batch?base64_encoded=true` and `GET /submissions/batch?tokens=...`. Both are enabled on this instance (`enable_batched_submissions`).
-
-### Root cause: Judge0 cannot execute code here (two layers)
-
-Judge0 1.13.1 at `localhost:2358` answers `/about` and `/languages`, but every submission failed.
-
-**Layer 1: fixed (with your approval).** Every submission returned HTTP 500 (`Redis::CommandError: ERR AUTH <password> called without any password configured`). The Judge0 server container is attached to two Docker networks, `hireflow_default` (manually, alias `judge0`) and its own `judge0-v1131_default`. On the HireFlow network the hostname `redis` resolves to **HireFlow's own password-less Redis** (`hireflow-redis-1`), not Judge0's password-protected one. Judge0 sent `AUTH`, and the wrong Redis rejected it. Fix applied: `REDIS_HOST=judge0-v1131-redis-1` in `judge0.conf` (a name that is unique), then restarted the server and workers. Submissions are now accepted and picked up.
-
-**Layer 2: open.** Workers now fail every job with status 13, `No such file or directory @ rb_sysopen - /box/script.py`. The sandbox cannot initialise:
-
-```
-$ docker exec judge0-v1131-workers-1 isolate --cg --init
-Failed to create control group /sys/fs/cgroup/memory/box-0/: No such file or directory
-```
-
-Docker Desktop runs **cgroup v2** (kernel `6.18.33.2-microsoft-standard-WSL2`; `/sys/fs/cgroup` is `cgroup2fs`). Judge0 1.13.1 bundles `isolate` 1.8.1, which only supports **cgroup v1** and is always started with `--cg`. In this WSL2 kernel, `/proc/cgroups` lists no `memory` controller at all, so v1 memory cgroups are not available. Setting `kernelCommandLine = systemd.unified_cgroup_hierarchy=0` in `.wslconfig` would therefore probably **not** help on its own. The compose file already uses `cgroup: host` and the image `mrkushalsm/judge0:latest`, which looks like an earlier attempt at this problem; the backup compose file used `judge0/judge0:1.13.1`.
-
-Options for whoever owns the Judge0 setup (none were applied, because each changes the image, the sandbox or the WSL kernel):
-
-1. Run a Judge0 build whose `isolate` supports cgroup v2 (isolate ≥ 2.0 / a cgroup-v2 patched Judge0 image).
-2. Run Judge0 on a Linux host or VM with cgroup v1 (or a WSL2 kernel built with `CONFIG_MEMCG_V1`).
-3. Dev only: wrap `isolate` to drop `--cg`/`--cg-mem`. This runs code but **loses memory/CPU accounting** and weakens the sandbox, so it should not be used for real candidates.
-
-Once Judge0 can execute, run `pnpm --filter api exec vitest run tests/dsa-judge0.integration.test.ts`. The 38 live tests then un-skip automatically (the suite probes with a real execution, not just `/about`).
+- `PistonRunner` implements `CodeRunner` and posts to `${PISTON_URL}/api/v2/execute` (default `http://127.0.0.1:2000`, server-side only, never sent to the browser). Languages: Python 3.12, Java 15, C++ (gcc 10.2).
+- Limits per run: wall time, CPU time, memory, set from `DSA_RUN_*`, `DSA_COMPILE_*`, `DSA_JAVA_*`; Piston enforces ceilings from `infra/piston/piston.env`. No network in the sandbox; output capped at 64 KiB.
+- Control: `DSA_RUNNER_CONCURRENCY` (3), `DSA_RUNNER_PER_SUBMISSION` (2), `DSA_RUNNER_QUEUE_TIMEOUT_MS` (60000), `DSA_RUNNER_MAX_QUEUE` (60). A refused run is reported as `CODE_RUNNER_BUSY`, never as a pass.
+- The evaluator runs the first test case alone, so a compile error is reported once instead of once per case. Compiler diagnostics are rewritten to `solution:N` (the candidate's own line numbers); harness lines show as `solution:?`.
+- Java: Piston runs Java in single-file source mode, so the generated `Main` class comes first and the candidate's `import` lines are moved to the top of the file.
+- Judge0 history: Judge0 1.13.1 could not initialise its `isolate` sandbox on this PC (it needs cgroup v1; Docker Desktop provides v2) and a per-process-limits workaround was slow and flaky, so it was replaced. Its client, tests and settings were removed from the repository. The machine-level removal of the old Judge0 containers and files is a separate step that needs explicit approval and has not been done.
 
 ---
 
-## 6. Integration points with teammate-owned modules (documented, not implemented)
+## 6. Integration with the other modules (done)
 
-| Module | What is needed | Where it plugs in |
-|---|---|---|
-| **round-engine** | Create the DSA invitation/token and call into this module to start a round and read the final result. | Implement `InvitationResolver`; read results via `DsaService.getState(token).result` (or a small exported result port); a finished assessment should notify the round engine so the next round can proceed. |
-| **rounds-config** | Duration, question set and pass mark per job/round. | `InvitationResolver` returns `durationMinutes` and `assessmentId`; `QuestionRepository` reads the question set. |
-| **proctoring** | Browser signals (tab switches, focus loss, paste, camera) during the assessment. | Frontend hook points: `assessment.tsx` already listens to `visibilitychange`; start/finish transitions are in `DsaService.start/finish`. Backend events (e.g. `dsa.started`, `dsa.submitted`, `dsa.finished`) should be defined in `packages/contracts` by their owner and emitted from `DsaService`. Nothing proctoring-related was built here. |
-| **notifications** | Email the result / "assessment completed". | Triggered by the finish event above; this module sends no email. |
-| **contracts** | Shared types. | `apps/candidate-app/src/lib/dsa-api.ts` mirrors the DSA response types by hand; move them to `packages/contracts` if you want one source of truth. |
+| Module | How it is connected |
+|---|---|
+| **round-engine** | A DSA round is a round kind (`roundKind` = CODING). The engine invites, keeps the clock, sweeps overdue attempts, records the result and queues the next invitation or email. The dsa module calls it only through `round-engine/index.ts`. |
+| **rounds-config** | HR's rounds editor stores the problem as the topic `dsa:<id>` on a CODING question; the schema refuses unknown problems; duration and pass rule come from the round. |
+| **assessments** | `record()` receives marks per problem, `isCorrect`, the best code and a summary; pass or fail is decided in `grading.ts` only. |
+| **notifications / email** | The round engine's existing invitation, cleared and rejection emails (coding wording for the invitation). |
+| **proctoring** (the older module) | Not used. The DSA page has its own browser monitoring (this module's `proctoring/`); HR reads it through `/dsa-hr`. |
+| **contracts** | `schemas/dsa-bank.ts` (bank list, marker rules, `isDsaRound`, the HR review shape). The candidate page's own response types are still mirrored by hand in `apps/candidate-app/src/lib/dsa-api.ts`. |
 
 ---
 
 ## 7. Tests executed and their actual results
 
-Run from `hireflow-dsa-work`, last run on 2026-11-02.
+Run from `hireflow-dsa-work`, last run on 2026-11-02, with Piston running (`infra/piston/start-piston.ps1`).
 
 | Check | Command | Result |
 |---|---|---|
 | Candidate-app type check | `pnpm typecheck` (apps/candidate-app) | **Passed**, no errors |
-| Candidate-app production build | `pnpm build` | **Passed** (`/dsa/[token]` 7.08 kB, first load 110 kB) |
+| Candidate-app production build | `pnpm build` with `NEXT_PUBLIC_API_URL=/api/v1` | **Passed** (`/dsa/[token]` 11.1 kB, first load 114 kB) |
 | API type check | `pnpm typecheck` (apps/api) | **Passed**, no errors |
 | API build | `pnpm build` | **Passed** |
-| API test suite | `pnpm test` (apps/api) | **5 files passed, 1 skipped. 82 tests passed, 38 skipped, 0 failed** |
+| API test suite | `pnpm test` (apps/api) | **9 files passed, 1 skipped. 181 tests passed, 1 skipped, 0 failed** (214 s) |
 
-Breakdown of the API suite:
+The one skipped test is `dsa-piston-load.test.ts`, which is opt-in (it fires up to 20 simultaneous submissions; see its header). It was run separately, see below. The live Piston suite skips itself automatically when Piston is not reachable, so **a green run without Piston running is not proof**; this run had Piston up (its 38 tests ran).
 
-| File | Tests | What it proves | Result |
-|---|---|---|---|
-| `resume-score.test.ts`, `jd-generation.test.ts` | 4 + 11 | Pre-existing tests, unaffected. | passed |
-| `dsa-unit.test.ts` | 27 | Question data (3 questions, marks, tests); hidden data absent from the public projection; exact/float comparison; harness helpers; request validation; service: start/timer with a fake clock, expiry, finish lock, scoring and best-score, never-pass-without-output, compile errors, Judge0 outage → 503 without leaking URL/token, concurrency (BUSY); Judge0 client with a fake `fetch` (base64, auth header, ordering, polling, status mapping, timeouts). | passed |
-| `dsa-http.e2e.test.ts` | 2 | Real Nest controllers over real HTTP: full flow for all 3 questions (correct + wrong submissions, run, finish, 60/60), and **every response body scanned: no hidden input/output; hidden cases expose only `id,label,hidden,status,timeMs,memoryKb`**. | passed |
-| `dsa-local-runner.test.ts` | 38 | End-to-end through harness → evaluator → scoring for **all 3 questions × Python, Java, C++**: correct solution passes every sample + hidden test; wrong solution is judged failed with a partial score; Run executes samples only; compile/syntax error, runtime error and infinite loop (time limit) in each language; debug prints don't corrupt results; final score aggregation. | passed |
-| `dsa-judge0.integration.test.ts` | 38 | Same suite through the **live Judge0**. | **SKIPPED**: the probe reported `Internal Error: No such file or directory @ rb_sysopen - /box/script.py` (§5). **This is not a pass.** |
+| File | Tests | What it proves |
+|---|---|---|
+| `resume-score.test.ts`, `jd-generation.test.ts` | 4 + 11 | Pre-existing tests, unaffected. |
+| `dsa-unit.test.ts` | 27 | Question data; hidden data absent from the public projection; comparison; harness helpers (incl. line mapping and Java import hoisting); request validation; service: timer with a fake clock, expiry, finish lock, scoring and best score, never-pass-without-output, compile errors, runner outage and busy mapped to 503 without leaking URLs. |
+| `dsa-piston-runner.test.ts` | 21 | Piston client with a fake `fetch`: request shape and limits, language and file names, status mapping (OK, runtime error, signal, timeout, memory kill, Java compile error), noise stripping, unreachable runner, concurrency limiter (slots, queue order, timeout, max queue). |
+| `dsa-proctoring.test.ts`, `dsa-proctoring.e2e.test.ts` | 35 + 5 | Proctoring rules, strike policy, admin routes closed by default, over real HTTP. |
+| `dsa-http.e2e.test.ts` | 2 | Real Nest controllers over real HTTP: full flow for all 3 questions, and **every response body scanned: no hidden input/output**. |
+| `dsa-piston.integration.test.ts` | 38 | **Live Piston**: 3 questions × Python/Java/C++ (correct, wrong, Run), compile error, runtime error and infinite loop per language, debug prints, score aggregation. **38 of 38 passed.** |
+| `dsa-local-runner.test.ts` | 38 | Same suite with toolchains installed on this PC (no sandbox). It validates the harnesses, expected outputs and evaluator, not Piston. |
 
-**Caveat on `dsa-local-runner.test.ts`:** it executes with the toolchains on this PC (Python 3.14, Java 24, MinGW GCC 6.3, no sandbox), so it validates the harnesses, the dataset's expected outputs and the evaluator, not Judge0. Judge0 will use Python 3.8, Java 13 and GCC 9.2; the harnesses use only features available in those versions, but this has not been executed there.
+### Load test (opt-in, live Piston, defaults: concurrency 3)
 
-**Browser test** (scratchpad Puppeteer script driving Chrome against the dev server and a test API with the local runner; **not committed to the repo**): 34/34 checks passed on the final code. It covered the intro screen; timer start and countdown; three tabs; language list; starter code; question navigation with code persistence (per question and per language); Run (2/2 samples shown with input, expected and actual); Submit (10/10, hidden rows without details); wrong answer (partial score); Java compile error; reload during the assessment (timer continues from the server, drafts restored); finish confirmation and result screen; invalid-token page; mobile width without horizontal overflow; dark mode; automatic end when the 1-minute timer expires; no console errors; and **14 captured network responses with no hidden test data**. Screenshots were reviewed manually. After that run, one layout-only class change (question tabs on their own row on narrow screens) was made; typecheck and build were re-run afterwards, but the browser script was not.
+6, 12, 10 Java, 10 C++, 20 mixed and 20 C++ simultaneous submissions: every result correct, none refused. Slowest case: about 113 s for 20 simultaneous C++ submissions. Details in [dsa-piston-hosting.md](dsa-piston-hosting.md) §6.
 
-**Live HTTP check against the real Judge0** (API on port 4100, Judge0 at 2358): start, run and submit return `verdict: "internal_error"`, score 0, with the neutral message "The code runner failed to execute this test", and no hidden data in the responses. Judge0's raw error is logged server-side only.
+### Browser tests (scratchpad Puppeteer scripts driving real Chrome; **not in the repo**)
 
----
+Run against the production build of the candidate app (browser calls the same origin, which forwards `/api/v1/dsa/*`), with the API running on Piston:
 
-## 7b. Temporary public demo on a Cloudflare quick tunnel
-
-For short-lived testing with a few people, like the aptitude and AI-screening links. **Not a deployment.** The PC must stay on, the URL changes every time `cloudflared` restarts, and code from the testers runs on the host through Judge0 (with the weaker per-process isolation of §7a if the host has no cgroup v1). Share links only with people you trust.
-
-How it is wired: the browser talks only to the candidate app's own origin. `apps/candidate-app/next.config.ts` forwards **only** `/api/v1/dsa/*` to the API (`API_INTERNAL_URL`, baked in at build time). The proctoring admin routes, the rest of the API and Judge0 are not reachable through the tunnel. The link pages send `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and `X-Robots-Tag: noindex`.
-
-1. **Tokens.** The well-known demo tokens are printed in this repo, so do not use them on a public URL. Set `DSA_DEMO_TOKENS` to long random tokens, one per tester (`token:minutes`, minutes optional, default 60; tokens under 16 characters are ignored). While it is set, **only** those tokens work. Each token is one attempt and is used up at Finish or time-out (state is in memory and resets when the API restarts).
-2. **API** (`apps/api`): `JUDGE0_URL` (default `http://localhost:2358`), `JUDGE0_PER_PROCESS_LIMITS=true` only if the host has no cgroup v1 (§7a), `DSA_DEMO_TOKENS=...`. Leave `DSA_ADMIN_API_KEY` unset unless you need the HR routes (they are not proxied anyway).
-3. **Candidate app** (`apps/candidate-app`): build with `NEXT_PUBLIC_API_URL=/api/v1` and `API_INTERNAL_URL=http://localhost:<api port>/api/v1`, then `next start -p 3001`.
-4. **Tunnel:** `cloudflared tunnel --no-autoupdate --url http://localhost:3001`. The link for a tester is `https://<words>.trycloudflare.com/dsa/<token>`.
-5. **Check before sharing:** the page opens, a Python run passes on Judge0, `/api/v1/dsa-admin/...` and `/api/v1/health` answer 404 on the public URL, and `demo-dsa-token` is rejected.
-6. **Stop:** end the `cloudflared` process (the URL dies at once), then the candidate app and the API.
-
-The `cloudflared` binary used for the first demo was downloaded from Cloudflare's GitHub release, checked against the digest GitHub publishes for that asset, and has a valid Cloudflare, Inc. code signature.
+- Assessment UI regression: **34 / 34** (intro, timer and server sync, three tabs, language list and starter code, navigation with drafts, Run and Submit, hidden rows without details, wrong answer partial score, Java compile error, reload keeps the timer, finish and result screens, invalid token, mobile width, expiry of a 1-minute assessment, 18 captured responses with no hidden data, no console errors).
+- Proctoring: **56 / 56** with `DSA_PROCTOR_MAX_STRIKES=0` (the script deliberately triggers about 19 violations). The scripts' step labels still say "real Judge0"; that text is stale, the runs used Piston.
+- Strike policy (2 allowed, third ends the assessment) was verified earlier with its own script (24 checks) before the runner change; **it was not re-run** after the switch to Piston because it does not touch code execution.
+- Public URL through a Cloudflare quick tunnel: **11 / 11**, every API call 200, no console errors. Probes through the public URL for `/api/v2/runtimes`, `/api/v1/dsa-admin/*`, `/api/v1/health`, `/api/v1/auth/me`: all 404. Piston published on `127.0.0.1:2000` only. A test from a genuinely separate network was not possible from the hosting PC.
 
 ---
-
-## 7a. Update: Judge0 on this PC (dev-only workaround) and the production setup
-
-> **The configuration in this section is for local development only. It must never be exposed to real candidates or public traffic.**
-
-### What was done on this machine
-
-Judge0 1.13.1's isolate sandbox needs cgroup v1, which this PC's Docker Desktop (WSL2 kernel 6.18, cgroup v2, no v1 memory controller) does not have (§5, layer 2). Reading Judge0's `isolate_job.rb` showed a supported alternative: when a submission sets **both** `enable_per_process_and_thread_time_limit` and `enable_per_process_and_thread_memory_limit`, Judge0 does not pass `--cg` and uses plain per-process limits (`isolate -m` / `-t`). No container, binary or Docker volume was modified for this. Changes made:
-
-| Where | Change |
-|---|---|
-| Backend (opt-in) | `JUDGE0_PER_PROCESS_LIMITS=true` makes the Judge0 client send those two flags. **Default off**, so the cgroup path stays the default. `DSA_JAVA_PER_PROCESS_MEMORY_LIMIT_KB` (default 8,000,000) sets Java's address-space cap in this mode. |
-| `judge0.conf` (outside the repo) | `MAX_MEMORY_LIMIT=8000000`. A JVM reserves GBs of *virtual* memory up front, and the compile step takes its cap from this server-wide value, so Java could not compile under the default 512 MB. Backups: `judge0.conf.bak-before-redis-host-fix`, `judge0.conf.bak-before-max-memory`. Judge0 server and workers were restarted. |
-| Backend robustness | Polling now retries transient failures up to 3 times; request timeout is configurable (`DSA_JUDGE0_REQUEST_TIMEOUT_MS`, default 30 s). |
-
-Behaviour in this mode: **memory is an address-space cap, not an accounted RSS limit** (Java's cap is nominal, ~8 GB of address space); CPU and wall-clock limits still apply; there is no cgroup accounting. That is acceptable for trusted local testing and **not** for untrusted candidate code.
-
-### Results on this PC (actual)
-
-- Direct Judge0 submissions with real output: Python (`5`), C++ (`5`), Java (`5`, 6 of 6 repeated runs, about 1.2 to 1.5 s each).
-- Live suite `dsa-judge0.integration.test.ts` (38 tests), two full runs: **22 passed / 16 failed** before the polling retry fix and **20 passed / 18 failed** after. A Python-only subset passed 10 of 12. The failures were timeouts and "runner not reachable", not wrong answers. They are consistent with an overloaded machine (3.7 GB VM, load average 9 to 13, 18 Judge0 worker processes, JVM runs) but that was **not proven**. Java and C++ are not demonstrated as reliable through Judge0 on this PC. Python is.
-- Real Run and Submit through Judge0 (Python) passed in the browser tests of the assessment and of the proctoring change.
-- After a Docker restart the Judge0 **server and workers containers did not come back by themselves** (exit code 127, cause not found); `docker start judge0-v1131-server-1 judge0-v1131-workers-1` restored them.
-
-### Production setup: proper CPU and memory isolation
-
-Run Judge0 where its sandbox works as designed, and leave `JUDGE0_PER_PROCESS_LIMITS` **off**:
-
-1. **Host:** a dedicated Linux host or VM (not Docker Desktop, not WSL2) with **cgroup v1** (for Judge0 1.13.x: kernel started with `systemd.unified_cgroup_hierarchy=0`, or an OS image that still defaults to v1). A Judge0 release whose `isolate` supports cgroup v2 is an alternative, but check that it exists and is maintained before depending on it.
-2. **Isolation:** keep isolate's cgroup mode (CPU time accounting and an enforced memory limit per run), `privileged: true` only on the Judge0 *workers/server* containers as Judge0 requires, with the host dedicated to this job. Keep `enable_network: false` (the instance default), the instance's `cpu_time_limit`, `wall_time_limit`, `memory_limit` and process limits at the tight defaults, and `max_file_size` small.
-3. **Network:** Judge0 reachable only from the API (private network or firewall). Never publish port 2358 to the internet. Set `AUTHN_TOKEN` in `judge0.conf` and `JUDGE0_AUTH_TOKEN` in the API.
-4. **Capacity:** size workers to the CPU count (the default spawns many) and test concurrency with the expected number of simultaneous candidates; a single submission batches one run per test case.
-5. **Separate Redis:** Judge0 must use its own Redis with a unique hostname (the collision with HireFlow's Redis in §5 came from a shared Docker network alias).
-6. **Verify:** run `pnpm --filter api exec vitest run tests/dsa-judge0.integration.test.ts` against it. All 38 tests should run (not skip) and pass.
 
 ## 8. Remaining issues and decisions
 
-1. **Judge0 execution is blocked** (§5, layer 2). Needs a cgroup-v2-capable Judge0 or a cgroup-v1 host. Live Judge0 tests exist and will run once fixed; until then Judge0-specific behaviour is verified only against a fake `fetch` (client unit tests) plus the real accept/queue path.
+1. **HR integration is done** (see [DSA_ASSESSMENT_ROUND.md](DSA_ASSESSMENT_ROUND.md)). Not done: HR-managed problem bank (the three problems are code), a SQL round, a new link for a withdrawn candidate.
 2. **Harness is per problem shape** (§3). Real HR questions need a harness decision.
-3. **Sessions are in memory** (§4). Lost on restart; needs a Prisma-backed store. Without a lock, multiple API instances would not share the `busy` guard.
-4. **Judge0 compiles once per test case** (one batched submission per case). With a working Judge0 this makes Java/C++ submissions slower than necessary (local runs took roughly 1 to 2 s per Java/C++ test). If that matters, run all cases in one process.
-5. **Code editor is a plain textarea** (line numbers, Tab indentation, auto-indent); no syntax highlighting, to avoid adding a dependency. Monaco/CodeMirror can replace `code-editor.tsx` without other changes.
-6. **Drafts live in `sessionStorage`** per token (per browser tab session). They are not stored on the server; only submitted code is scored.
-7. **Scoring rule:** the best submission per question counts (not the last). Change `DsaService.submit` if the product decision differs.
-8. **Environment notes:** `hireflow-dsa-work` is not a git repository, so there is no diff to review; the file lists in §1 are the change record. Ports 3001 and 4000 were in use by other processes, so all testing used 3101 and 4100 and those processes were left alone. Build outputs (`.next`, `dist`, `packages/contracts/dist`) are present in the working folder.
-9. **Judge0 config change outside the repo** (§1): needs to be known by whoever owns that Docker setup. The container is also still attached to `hireflow_default`, which is what caused the Redis collision.
+3. **One API instance**: the per-candidate "one run at a time" guard and the runner queue are in memory (sessions and records are in the database). Several API instances would need a shared lock and queue.
+4. **Compile cost per test case.** Each test case is its own run, so Java (about 4 to 5 s) and C++ (about 9 to 12 s) submissions are slow, and a burst of C++ submits queues. Running all cases of a submission in one process would cut this a lot (not done).
+5. **Cloudflare ~100 s request limit** on its default plan (documented, not verified here) can cut an extreme submit burst even though the result is still computed. Async submit with polling would remove the issue (not done).
+6. **Stable public address**: a quick tunnel URL changes on every restart. Links to students need a domain with a named tunnel, or a static ngrok domain.
+7. **Teammates cannot use a localhost-only Piston.** They test through the hosted URL or run `start-piston.ps1` themselves. Never expose port 2000 directly (no authentication).
+8. **Hosting PC headroom** is small (7.7 GB RAM, 0.6 to 0.7 GB free while testing). See the hosting guide's requirements.
+9. **Code editor is a plain textarea** (no syntax highlighting, to avoid a dependency). **Drafts live in `sessionStorage`** per token; only submitted code is scored.
+10. **Scoring rule:** the best submission per question counts (not the last).
+11. **Old Judge0 install still present on the PC** (containers, volumes, `Downloads` folder and zip). Removal was requested but needs explicit approval of the list shown earlier; nothing was deleted.
+12. **Environment notes:** the work was first built in a separate folder (`hireflow-dsa-work`, not a git repository) and then ported into this repository on `develop` as plain file changes; the commit is made by the repository owner.

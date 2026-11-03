@@ -1,7 +1,7 @@
 # Starts the whole local stack and opens the public links (Cloudflare quick tunnels) - safe to run more than once.
 #   1. Docker Desktop  2. Postgres / Redis / Mailpit  3. cloudflared tunnel -> careers site :3300, URL written to
-#   CAREERS_SITE_URL in .env; when a code runner is set up (JUDGE0_URL in .env) a second tunnel -> candidate app
-#   :3001 (DSA coding round), URL written to DSA_SITE_URL  4. pnpm dev (API :4000, HR :3000, careers :3300,
+#   CAREERS_SITE_URL in .env; when a code runner is set up (PISTON_URL in .env) a second tunnel -> candidate app
+#   :3001 (DSA coding round), URL written to CANDIDATE_APP_URL  4. pnpm dev (API :4000, HR :3000, careers :3300,
 #   candidate app :3001)  5. AI worker :8000
 # A quick tunnel gets a NEW random https://<words>.trycloudflare.com URL every time cloudflared starts, so Apply links
 # in posts made before a restart point to the old URL. The API edits those posts at start (same post, new link);
@@ -116,24 +116,29 @@ Say "public URL: $publicUrl"
 $changed = SetEnv 'CAREERS_SITE_URL' $publicUrl
 if ($changed) { Say 'CAREERS_SITE_URL updated in .env - the API will update the Apply link in existing posts when it starts' }
 
-# DSA coding round: its invitations are emailed only while DSA_SITE_URL is set, and only a working code runner
+# DSA coding round: its invitations are emailed only while CANDIDATE_APP_URL is public, and only a working code runner
 # makes the test fair (without one every submission fails and the student is graded 0 -> rejection email).
+# Piston itself: infra/piston/start-piston.ps1 (docs/dsa-piston-hosting.md).
 $dsaUrl = $null
-if (EnvValue 'JUDGE0_URL') {
+if (EnvValue 'PISTON_URL') {
   $dsaUrl = Tunnel 3001 (Join-Path $logs 'cloudflared-dsa.log')
   if ($dsaUrl) { Say "DSA coding test URL: $dsaUrl" } else { Say 'ERROR: no tunnel for the DSA coding test - its invitations wait' }
 } else {
   TunnelProcess 3001 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Say 'JUDGE0_URL is not set in .env: DSA coding round invitations wait until a code runner is set up'
+  Say 'PISTON_URL is not set in .env: DSA coding round invitations wait until a code runner is set up'
 }
-if (SetEnv 'DSA_SITE_URL' $dsaUrl) { $changed = $true; Say "DSA_SITE_URL $(if ($dsaUrl) { 'updated' } else { 'removed' }) in .env" }
+# localhost is never emailed, so without a tunnel coding invitations wait (round-engine link.ts)
+if (SetEnv 'CANDIDATE_APP_URL' $(if ($dsaUrl) { $dsaUrl } else { 'http://localhost:3001' })) { $changed = $true; Say 'CANDIDATE_APP_URL updated in .env' }
 if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new URL'; 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
 
 # 4. API + dashboards (pnpm is not on PATH on this laptop, so the pinned version runs through npx)
 if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (Listening 3001))) {
   if (Listening 4000) { 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
+  # CAREERS_SITE_URL is the live tunnel here, so the API may rewrite old posts to it at start even when .env keeps
+  # PUBLISHER_AUTO_REFRESH_LINKS=false (that guards plain `pnpm dev` with a localhost URL). The process env wins
+  # over .env: process.loadEnvFile never overwrites a variable that is already set.
   Start-Process -WindowStyle Hidden -WorkingDirectory $root powershell.exe `
-    -ArgumentList '-NoProfile', '-Command', "npx -y pnpm@9.15.0 dev *> '$logs\dev.log'"
+    -ArgumentList '-NoProfile', '-Command', "`$env:PUBLISHER_AUTO_REFRESH_LINKS='true'; npx -y pnpm@9.15.0 dev *> '$logs\dev.log'"
 }
 if (-not (WaitFor 'API + careers site' 300 { (Listening 4000) -and (Listening 3300) })) { exit 1 }
 if ($dsaUrl) { WaitFor 'candidate app (DSA)' 300 { Listening 3001 } | Out-Null }

@@ -4,13 +4,12 @@ import { DsaService } from '../src/modules/dsa/dsa.service';
 import { outputsMatch } from '../src/modules/dsa/evaluation/evaluator';
 import { RESULT_MARKER, buildProgram, cleanDiagnostics, splitStdout } from '../src/modules/dsa/evaluation/harness';
 import {
-  Judge0Client,
-  Judge0UnavailableError,
-  judge0OptionsFromEnv,
+  CodeRunnerBusyError,
+  CodeRunnerUnavailableError,
   type CodeRunner,
-  type Judge0Job,
-  type Judge0Result,
-} from '../src/modules/dsa/judge0/judge0.client';
+  type RunnerJob,
+  type RunnerResult,
+} from '../src/modules/dsa/execution/code-runner';
 import { MockQuestionRepository } from '../src/modules/dsa/questions/mock-question.repository';
 import { MOCK_QUESTIONS } from '../src/modules/dsa/questions/mock-questions.data';
 import { toPublicQuestion } from '../src/modules/dsa/questions/question.types';
@@ -18,9 +17,9 @@ import { DemoInvitationResolver } from '../src/modules/dsa/session/invitation.re
 import { InMemorySessionStore } from '../src/modules/dsa/session/session.store';
 
 const TOKEN = 'demo-dsa-token';
-const ok = (stdout: string): Judge0Result => ({
+const ok = (stdout: string): RunnerResult => ({
   verdict: 'ok',
-  statusText: 'Accepted',
+  statusText: 'OK',
   stdout,
   stderr: '',
   compileOutput: '',
@@ -31,7 +30,7 @@ const expectedByStdin = new Map(MOCK_QUESTIONS.flatMap((q) => q.testCases.map((t
 
 /** Fake runner that behaves like a perfect solution: echoes each test's expected value. */
 const perfectRunner: CodeRunner = {
-  async runBatch(jobs: Judge0Job[]) {
+  async runBatch(jobs: RunnerJob[]) {
     return jobs.map((j) => ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`));
   },
 };
@@ -104,15 +103,36 @@ describe('comparison and harness helpers', () => {
     expect(splitStdout('only prints')).toEqual({ result: null, userOutput: 'only prints' });
   });
 
-  it('cleanDiagnostics maps compiler lines back onto the candidate code', () => {
-    expect(cleanDiagnostics('/box/main.cpp:5:3: error: expected', 2)).toBe('solution:3:3: error: expected');
-    expect(cleanDiagnostics('File "/box/script.py", line 4', 1)).toBe('File "solution", line 3');
+  it('cleanDiagnostics maps compiler lines back onto the candidate code and hides the runner\'s file names', () => {
+    const cpp = buildProgram('cpp', 'two-sum', 'class Solution {};\nint x = ;\n');
+    expect(cleanDiagnostics("main.cpp.cpp:4:9: error: expected primary-expression", cpp.mapLine)).toBe('solution:2:9: error: expected primary-expression');
+    const py = buildProgram('python', 'two-sum', 'def two_sum(a, b):\n    pass\n');
+    expect(cleanDiagnostics('  File "/box/submission/main.py", line 2\nSyntaxError: x', py.mapLine)).toBe('  File "solution", line 1\nSyntaxError: x');
+    // a message about a harness line is not blamed on the candidate
+    expect(cleanDiagnostics('main.cpp.cpp:2:1: error: boom', cpp.mapLine)).toBe('solution:?:1: error: boom');
+    expect(cleanDiagnostics("x\nchmod: cannot access 'a.out': No such file or directory", cpp.mapLine)).toBe('x');
   });
 
-  it('buildProgram puts candidate code before the harness and reports the prelude size', () => {
+  it('buildProgram puts candidate code before the harness for Python and C++, and maps lines exactly', () => {
     const p = buildProgram('cpp', 'two-sum', 'class Solution {};');
-    expect(p.lineOffset).toBe(2);
     expect(p.source.indexOf('class Solution {};')).toBeLessThan(p.source.indexOf('int main'));
+    expect(p.mapLine(1)).toBeNull(); // prelude: #include
+    expect(p.mapLine(2)).toBeNull(); // prelude: using namespace
+    expect(p.mapLine(3)).toBe(1); // the candidate's first line
+  });
+
+  it('for Java the harness Main comes FIRST (the runner launches the first class), imports move above it, and lines still map back', () => {
+    const code = 'import java.util.*;\n\nclass Solution {\n    int f() { return 1; }\n}\nimport java.io.*;\n';
+    const p = buildProgram('java', 'two-sum', code);
+    const lines = p.source.split('\n');
+    expect(p.source.indexOf('public class Main')).toBeLessThan(p.source.indexOf('class Solution'));
+    expect(lines[0]).toBe('import java.util.*;');
+    expect(lines[1]).toBe('import java.io.*;'); // the late import is moved up too
+    const solutionLine = lines.findIndex((l) => l.startsWith('class Solution')) + 1;
+    expect(p.mapLine(solutionLine)).toBe(3); // `class Solution {` was line 3 of the candidate's code
+    expect(p.mapLine(1)).toBe(1);
+    expect(p.mapLine(2)).toBe(6);
+    expect(p.mapLine(lines.findIndex((l) => l.includes('hfEmit(String v)')) + 1)).toBeNull(); // harness code
   });
 });
 
@@ -205,9 +225,10 @@ describe('DsaService', () => {
 
   it('scores proportionally and keeps the best submission per question', async () => {
     let passEverything = false;
+    let seq = 0; // position of the test case within the submission (cases arrive in two batches)
     const flaky: CodeRunner = {
       async runBatch(jobs) {
-        return jobs.map((j, i) => ok(`\n${RESULT_MARKER}${passEverything || i % 2 === 0 ? expectedByStdin.get(j.stdin) : 'wrong'}\n`));
+        return jobs.map((j) => ok(`\n${RESULT_MARKER}${passEverything || seq++ % 2 === 0 ? expectedByStdin.get(j.stdin) : 'wrong'}\n`));
       },
     };
     const { service } = makeService(flaky);
@@ -219,27 +240,74 @@ describe('DsaService', () => {
     passEverything = true;
     expect((await service.submit(TOKEN, body())).score).toBe(10);
     passEverything = false;
+    seq = 0;
     const worse = await service.submit(TOKEN, body());
     expect(worse.progress.bestScore).toBe(10); // best kept
     expect(worse.progress.attempts).toBe(3);
   });
 
-  it('turns Judge0 outages into a 503 without recording progress or leaking internals', async () => {
+  it('turns code runner outages into a 503 without recording progress or leaking internals', async () => {
     const down: CodeRunner = {
       runBatch: async () => {
-        throw new Judge0UnavailableError('The code runner is not reachable right now. Please try again shortly.', 'ECONNREFUSED http://localhost:2358');
+        throw new CodeRunnerUnavailableError('The code runner is not reachable right now. Please try again shortly.', 'ECONNREFUSED http://127.0.0.1:2000');
       },
     };
     const { service } = makeService(down);
     await service.start(TOKEN);
-    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503, response: { code: 'JUDGE0_UNAVAILABLE' } });
+    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503, response: { code: 'CODE_RUNNER_UNAVAILABLE' } });
     const state = await service.getState(TOKEN);
     expect(state.progress.every((p) => p.attempts === 0 && p.bestScore === 0)).toBe(true);
     try {
       await service.run(TOKEN, body());
     } catch (e) {
-      expect(JSON.stringify((e as { response: unknown }).response)).not.toContain('localhost');
+      expect(JSON.stringify((e as { response: unknown }).response)).not.toMatch(/localhost|127\.0\.0\.1|2000/);
     }
+  });
+
+  it('a busy runner is a retryable 503 and nothing is recorded', async () => {
+    const busy: CodeRunner = {
+      runBatch: async () => {
+        throw new CodeRunnerBusyError();
+      },
+    };
+    const { service } = makeService(busy);
+    await service.start(TOKEN);
+    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503, response: { code: 'CODE_RUNNER_BUSY' } });
+    expect((await service.getState(TOKEN)).progress.every((p) => p.attempts === 0)).toBe(true);
+    // and the candidate is not left stuck behind a "previous run still in progress" lock
+    await expect(service.run(TOKEN, body())).rejects.toMatchObject({ response: { code: 'CODE_RUNNER_BUSY' } });
+  });
+
+  it('runs the first test case alone, so code that does not compile costs one run, not one per test', async () => {
+    const batches: number[] = [];
+    const broken: CodeRunner = {
+      async runBatch(jobs) {
+        batches.push(jobs.length);
+        return jobs.map(() => ({ ...ok(''), verdict: 'compile_error' as const, statusText: 'Compilation failed', compileOutput: 'main.cpp.cpp:3:1: error: boom' }));
+      },
+    };
+    const { service } = makeService(broken);
+    await service.start(TOKEN);
+    const res = await service.submit(TOKEN, body('dsa-001', 'cpp'));
+    expect(batches).toEqual([1]); // the other test cases were never started
+    expect(res).toMatchObject({ verdict: 'compile_error', score: 0, total: 8 });
+    expect(res.compileOutput).toContain('error: boom');
+    expect(res.compileOutput).not.toContain('main.cpp.cpp');
+  });
+
+  it('when the first case compiles, the remaining cases run in one further batch', async () => {
+    const batches: number[] = [];
+    const counting: CodeRunner = {
+      async runBatch(jobs) {
+        batches.push(jobs.length);
+        return jobs.map((j) => ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`));
+      },
+    };
+    const { service } = makeService(counting);
+    await service.start(TOKEN);
+    const res = await service.submit(TOKEN, body());
+    expect(batches).toEqual([1, res.total - 1]);
+    expect(res.verdict).toBe('passed');
   });
 
   it('compile errors surface once and score zero', async () => {
@@ -307,136 +375,5 @@ describe('DsaService', () => {
     const { service } = makeService(perfectRunner);
     await service.start(TOKEN);
     await rejectsWith(service.run(TOKEN, body('dsa-999')), 'UNKNOWN_QUESTION', 404);
-  });
-});
-
-describe('Judge0Client', () => {
-  const b64 = (s: string) => Buffer.from(s).toString('base64');
-  const options = (fetchImpl: typeof fetch, extra = {}) => ({
-    ...judge0OptionsFromEnv(),
-    baseUrl: 'http://judge0.internal:2358',
-    authToken: 'secret-token',
-    pollIntervalMs: 1,
-    fetch: fetchImpl,
-    ...extra,
-  });
-
-  it('sends base64 payloads with limits and auth header, polls until done and keeps request order', async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    let polls = 0;
-    const fetchImpl = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
-      if (init?.method === 'POST') return new Response(JSON.stringify([{ token: 't1' }, { token: 't2' }]));
-      polls += 1;
-      const done = polls > 1;
-      return new Response(
-        JSON.stringify({
-          submissions: [
-            // deliberately reversed order
-            { token: 't2', status: { id: done ? 6 : 2, description: 'x' }, compile_output: b64('boom'), time: null, memory: null },
-            { token: 't1', status: { id: done ? 3 : 1, description: 'x' }, stdout: b64('héllo'), time: '0.012', memory: 3200 },
-          ],
-        }),
-      );
-    }) as unknown as typeof fetch;
-
-    const client = new Judge0Client(options(fetchImpl));
-    const res = await client.runBatch([
-      { language: 'python', source: 'print(1)', stdin: 'in' },
-      { language: 'cpp', source: 'int main(){}', stdin: '' },
-    ]);
-    expect(polls).toBe(2);
-    expect(res[0]).toMatchObject({ verdict: 'ok', stdout: 'héllo', timeMs: 12, memoryKb: 3200 });
-    expect(res[1]).toMatchObject({ verdict: 'compile_error', compileOutput: 'boom' });
-
-    const post = JSON.parse(calls[0].init!.body as string);
-    expect(post.submissions[0]).toMatchObject({ language_id: 71, source_code: b64('print(1)'), stdin: b64('in') });
-    expect(post.submissions[1].language_id).toBe(54);
-    expect(post.submissions[0].cpu_time_limit).toBeGreaterThan(0);
-    expect((calls[0].init!.headers as Record<string, string>)['X-Auth-Token']).toBe('secret-token');
-  });
-
-  it('sends per-process limit flags only when the dev option is on, with a larger cap for Java', async () => {
-    const bodies: { submissions: Record<string, unknown>[] }[] = [];
-    const fetchImpl = (async (_u: string, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        bodies.push(JSON.parse(init.body as string));
-        return new Response(JSON.stringify([{ token: 'a' }, { token: 'b' }]));
-      }
-      return new Response(
-        JSON.stringify({ submissions: [{ token: 'a', status: { id: 3, description: 'ok' } }, { token: 'b', status: { id: 3, description: 'ok' } }] }),
-      );
-    }) as unknown as typeof fetch;
-    const jobs = [
-      { language: 'python' as const, source: 'x', stdin: '' },
-      { language: 'java' as const, source: 'x', stdin: '' },
-    ];
-    await new Judge0Client(options(fetchImpl, { perProcessLimits: false })).runBatch(jobs);
-    await new Judge0Client(options(fetchImpl, { perProcessLimits: true, javaPerProcessMemoryLimitKb: 8_000_000 })).runBatch(jobs);
-    const [off, on] = bodies.map((b) => b.submissions);
-    expect(off[0]).not.toHaveProperty('enable_per_process_and_thread_memory_limit');
-    expect(off[1].memory_limit).toBe(off[0].memory_limit);
-    expect(on[0]).toMatchObject({ enable_per_process_and_thread_time_limit: true, enable_per_process_and_thread_memory_limit: true });
-    expect(on[1].memory_limit).toBe(8_000_000);
-    expect(on[0].memory_limit).toBe(judge0OptionsFromEnv().memoryLimitKb);
-  });
-
-  it('maps timeouts and runtime errors', async () => {
-    const fetchImpl = (async (_u: string, init?: RequestInit) =>
-      init?.method === 'POST'
-        ? new Response(JSON.stringify([{ token: 'a' }, { token: 'b' }, { token: 'c' }]))
-        : new Response(
-            JSON.stringify({
-              submissions: [
-                { token: 'a', status: { id: 5, description: 'Time Limit Exceeded' } },
-                { token: 'b', status: { id: 11, description: 'Runtime Error (NZEC)' }, stderr: b64('Traceback') },
-                { token: 'c', status: { id: 13, description: 'Internal Error' }, message: b64('No such file') },
-              ],
-            }),
-          )) as unknown as typeof fetch;
-    const res = await new Judge0Client(options(fetchImpl)).runBatch(
-      ['a', 'b', 'c'].map(() => ({ language: 'java' as const, source: '', stdin: '' })),
-    );
-    expect(res.map((r) => r.verdict)).toEqual(['time_limit', 'runtime_error', 'internal_error']);
-    expect(res[1].stderr).toBe('Traceback');
-    expect(res[2].stderr).toContain('No such file');
-  });
-
-  it('reports failures without leaking the internal URL or token', async () => {
-    const refused = (async () => {
-      throw new TypeError('fetch failed');
-    }) as unknown as typeof fetch;
-    const err = await new Judge0Client(options(refused)).runBatch([{ language: 'python', source: 'x', stdin: '' }]).catch((e) => e);
-    expect(err).toBeInstanceOf(Judge0UnavailableError);
-    expect(err.message).not.toMatch(/judge0\.internal|secret-token|2358/);
-
-    const http500 = (async () => new Response('{"error":"Internal Server Error"}', { status: 500 })) as unknown as typeof fetch;
-    const err2 = await new Judge0Client(options(http500)).runBatch([{ language: 'python', source: 'x', stdin: '' }]).catch((e) => e);
-    expect(err2).toBeInstanceOf(Judge0UnavailableError);
-    expect(err2.message).not.toMatch(/judge0\.internal|secret-token|2358/);
-    expect(err2.detail).toContain('HTTP 500');
-  });
-
-  it('retries a stalled poll instead of failing the whole evaluation', async () => {
-    let polls = 0;
-    const fetchImpl = (async (_u: string, init?: RequestInit) => {
-      if (init?.method === 'POST') return new Response(JSON.stringify([{ token: 'a' }]));
-      polls += 1;
-      if (polls < 3) throw new TypeError('The operation was aborted due to timeout');
-      return new Response(JSON.stringify({ submissions: [{ token: 'a', status: { id: 3, description: 'ok' }, stdout: b64('1') }] }));
-    }) as unknown as typeof fetch;
-    const [res] = await new Judge0Client(options(fetchImpl)).runBatch([{ language: 'python', source: 'x', stdin: '' }]);
-    expect(res.verdict).toBe('ok');
-    expect(polls).toBe(3);
-  });
-
-  it('gives up polling after the timeout', async () => {
-    const fetchImpl = (async (_u: string, init?: RequestInit) =>
-      init?.method === 'POST'
-        ? new Response(JSON.stringify([{ token: 'a' }]))
-        : new Response(JSON.stringify({ submissions: [{ token: 'a', status: { id: 2, description: 'Processing' } }] }))) as unknown as typeof fetch;
-    await expect(
-      new Judge0Client(options(fetchImpl, { pollTimeoutMs: 20 })).runBatch([{ language: 'python', source: 'x', stdin: '' }]),
-    ).rejects.toBeInstanceOf(Judge0UnavailableError);
   });
 });

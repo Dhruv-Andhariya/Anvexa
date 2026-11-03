@@ -162,7 +162,9 @@ export function IntroScreen({
   );
 }
 
-export function ResultScreen({ result, candidateName }: { result: FinalResult; candidateName: string }) {
+export function ResultScreen({ result, candidateName, showScore = true }: { result: FinalResult; candidateName: string; showScore?: boolean }) {
+  // An HR round: no score, no pass / fail and no per-problem marks. The hiring team writes to the candidate.
+  if (!showScore) return <SubmittedScreen result={result} candidateName={candidateName} />;
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
       <Card className="flex flex-col gap-6 p-5 sm:p-8">
@@ -229,6 +231,27 @@ export function ResultScreen({ result, candidateName }: { result: FinalResult; c
         </div>
 
         <p className="text-sm text-muted">You can now close this window. The hiring team will review your results.</p>
+      </Card>
+    </main>
+  );
+}
+
+function SubmittedScreen({ result, candidateName }: { result: FinalResult; candidateName: string }) {
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
+      <Card className="flex flex-col gap-4 p-5 sm:p-8">
+        <header className="flex flex-col gap-1">
+          <p className="text-sm text-muted">{candidateName}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Assessment complete</h1>
+        </header>
+        <p className="text-sm">
+          {result.reason === 'time_expired'
+            ? 'Time ran out, so the assessment ended automatically. Everything you submitted before that was recorded.'
+            : result.reason === 'disqualified'
+              ? 'The assessment was ended automatically because the allowed number of warnings was used up. Everything you submitted before that was recorded and will be reviewed by the hiring team.'
+              : 'Your solutions were submitted successfully.'}
+        </p>
+        <p className="text-sm text-muted">Thank you for taking the test. The hiring team will review your work and contact you by email about the next step. You can now close this window.</p>
       </Card>
     </main>
   );

@@ -1,37 +1,63 @@
 import { Module } from '@nestjs/common';
+import { ApplicationsModule } from '../applications';
 import { RoundEngineModule } from '../round-engine';
+import { TenantsModule } from '../tenants';
+import { DsaHrController } from './dsa-hr.controller';
 import { DsaController } from './dsa.controller';
 import { DsaService } from './dsa.service';
-import { RoundEngineBridge } from './integration/round-engine.bridge';
-import { JUDGE0_CLIENT, Judge0Client, judge0OptionsFromEnv } from './judge0/judge0.client';
+import { CODE_RUNNER } from './execution/code-runner';
+import { PistonRunner, pistonOptionsFromEnv } from './execution/piston.runner';
 import { ProctoringAdminController } from './proctoring/proctoring-admin.controller';
 import { ProctoringController } from './proctoring/proctoring.controller';
 import { DSA_PROCTOR_POLICY, policyFromEnv } from './proctoring/proctoring.policy';
 import { ProctoringService } from './proctoring/proctoring.service';
+import { PrismaProctorStore } from './proctoring/prisma-proctor.store';
 import { DSA_PROCTOR_STORE, InMemoryProctorStore } from './proctoring/proctoring.store';
-import { MockQuestionRepository } from './questions/mock-question.repository';
+import { BankQuestionRepository } from './questions/bank-question.repository';
 import { DSA_QUESTION_REPOSITORY } from './questions/question.repository';
-import { DSA_LIFECYCLE } from './session/assessment-lifecycle';
-import { DSA_INVITATION_RESOLVER } from './session/invitation.resolver';
-import { DSA_SESSION_STORE } from './session/session.store';
+import { EngineSessionStore } from './session/engine-session.store';
+import { DSA_INVITATION_RESOLVER, DemoInvitationResolver } from './session/invitation.resolver';
+import { RoundInvitationResolver } from './session/round-invitation.resolver';
+import { DSA_SESSION_STORE, InMemorySessionStore } from './session/session.store';
 
-// The DSA page runs the round engine's coding rounds: links, sessions and results go through RoundEngineBridge.
-// Still to swap: DSA_QUESTION_REPOSITORY (HR's question bank) and DSA_PROCTOR_STORE (see
-// docs/dsa-integration-notes.md and docs/dsa-proctoring-implementation.md).
+/**
+ * DSA_DEMO_MODE=on switches the module to the demo tokens (DSA_DEMO_TOKENS / the two built-in ones) with everything
+ * kept in memory: for trying the page without an HR round. Off (default): the real thing, where the link token comes
+ * from the round engine's invitation email and the attempt, result and proctoring record live in the database.
+ */
+const demoMode = () => ['on', 'true', '1'].includes((process.env.DSA_DEMO_MODE ?? '').trim().toLowerCase());
+
 @Module({
-  imports: [RoundEngineModule],
-  controllers: [DsaController, ProctoringController, ProctoringAdminController],
+  imports: [ApplicationsModule, RoundEngineModule, TenantsModule],
+  controllers: [DsaController, ProctoringController, ProctoringAdminController, DsaHrController],
   providers: [
     DsaService,
     ProctoringService,
-    RoundEngineBridge,
-    { provide: DSA_QUESTION_REPOSITORY, useClass: MockQuestionRepository },
-    { provide: DSA_INVITATION_RESOLVER, useExisting: RoundEngineBridge },
-    { provide: DSA_SESSION_STORE, useExisting: RoundEngineBridge },
-    { provide: DSA_LIFECYCLE, useExisting: RoundEngineBridge },
-    { provide: DSA_PROCTOR_STORE, useClass: InMemoryProctorStore },
+    RoundInvitationResolver,
+    DemoInvitationResolver,
+    EngineSessionStore,
+    InMemorySessionStore,
+    PrismaProctorStore,
+    InMemoryProctorStore,
+    { provide: DSA_QUESTION_REPOSITORY, useClass: BankQuestionRepository },
+    {
+      provide: DSA_INVITATION_RESOLVER,
+      useFactory: (round: RoundInvitationResolver, demo: DemoInvitationResolver) => (demoMode() ? demo : round),
+      inject: [RoundInvitationResolver, DemoInvitationResolver],
+    },
+    {
+      provide: DSA_SESSION_STORE,
+      useFactory: (engine: EngineSessionStore, memory: InMemorySessionStore) => (demoMode() ? memory : engine),
+      inject: [EngineSessionStore, InMemorySessionStore],
+    },
+    {
+      provide: DSA_PROCTOR_STORE,
+      useFactory: (db: PrismaProctorStore, memory: InMemoryProctorStore) => (demoMode() ? memory : db),
+      inject: [PrismaProctorStore, InMemoryProctorStore],
+    },
     { provide: DSA_PROCTOR_POLICY, useFactory: () => policyFromEnv() },
-    { provide: JUDGE0_CLIENT, useFactory: () => new Judge0Client(judge0OptionsFromEnv()) },
+    // The engine that runs candidate code: Piston on the hosting machine (docs/dsa-piston-hosting.md).
+    { provide: CODE_RUNNER, useFactory: () => new PistonRunner(pistonOptionsFromEnv()) },
   ],
 })
 export class DsaModule {}

@@ -6,6 +6,7 @@ AI-powered hiring platform: from "HR has an opening" to "candidate sits in the f
 - **Full project documentation:** [`docs/HireFlow_AI_Documentation.md`](docs/HireFlow_AI_Documentation.md)
 - **Publish & apply guide (M06–M09):** [`docs/M06_M09_PUBLISH_AND_APPLY.md`](docs/M06_M09_PUBLISH_AND_APPLY.md)
 - **Assessment rounds guide (M05, HR side + round engine wiring):** [`docs/ASSESSMENT_ROUNDS.md`](docs/ASSESSMENT_ROUNDS.md)
+- **DSA coding round (HR setup, invitation, coding page, results):** [`docs/DSA_ASSESSMENT_ROUND.md`](docs/DSA_ASSESSMENT_ROUND.md)
 
 ---
 

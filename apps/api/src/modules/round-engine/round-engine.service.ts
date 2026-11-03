@@ -14,6 +14,15 @@ import { AssessmentsService } from '../assessments';
 import { AuditService } from '../audit';
 import { RoundsConfigService, type RoundsForEngine } from '../rounds-config';
 import type { Actor } from '../tenants';
+import {
+  CODING_CONSENT_VERSION,
+  codingAnswered,
+  codingMinutes,
+  codingResultInput,
+  emptyCodingState,
+  type CodingFinishReason,
+  type CodingState,
+} from './coding-round';
 import { TOKEN_SHAPE, hashAssessmentToken } from './link';
 import {
   DEADLINE_GRACE_MS,
@@ -21,10 +30,9 @@ import {
   SEVERITY,
   answeredCount,
   cleanAnswers,
-  isCodingRound,
-  isInvitedRound,
-  isOnlineRound,
   nextStep,
+  roundKind,
+  type RoundKind,
   publicQuestions,
   toRoundAnswers,
   type StoredAnswers,
@@ -49,28 +57,18 @@ export const engineError = (status: number, code: string, message: string, extra
 
 const invalidLink = () => engineError(HttpStatus.NOT_FOUND, 'ASSESSMENT_LINK_INVALID', 'This assessment link is not valid. Please use the link from your latest email.');
 
-/** Stored as the attempt's consent version: the DSA page records its own monitoring consent (dsa proctoring). */
-export const DSA_CONSENT_VERSION = 'dsa-proctoring';
-
-/** A coding round's link as the DSA page needs it. */
-export interface CodingInvite {
-  inviteId: string;
+/** What the dsa module needs to run one candidate's coding round (it never sees another candidate's data). */
+export interface CodingRoundContext {
   tenantId: string;
-  roundId: string;
+  applicationId: string;
+  jobId: string;
+  /** The round with its questions (HR's marks and the DSA problem each question points to). */
+  round: SavedRound;
   candidateName: string;
-  timeLimitMinutes: number | null;
+  minutes: number;
+  linkExpiresAt: Date;
+  attempt: AttemptRow | null;
 }
-
-/** A finished DSA attempt in the DSA module's own marks (best submission per problem). */
-export interface CodingScore {
-  score: number;
-  maxScore: number;
-  solved: number;
-  total: number;
-  /** One line per problem, kept as the result's notes for HR. */
-  summary: string;
-}
-export type CodingScorer = (inviteId: string) => Promise<CodingScore>;
 
 interface Opened {
   invite: InviteRow;
@@ -89,8 +87,6 @@ interface Opened {
 @Injectable()
 export class RoundEngineService {
   private readonly logger = new Logger('RoundEngine');
-  /** Set by the dsa module at start-up; coding attempts are graded through it. */
-  private codingScorer: CodingScorer | null = null;
 
   constructor(
     @Inject(RoundEngineStore) private readonly store: RoundEngineStore,
@@ -121,24 +117,18 @@ export class RoundEngineService {
       throw engineError(HttpStatus.BAD_REQUEST, 'CONSENT_REQUIRED', 'Please read and accept the instructions and monitoring notice before starting.');
     }
     const now = this.now();
+    // first candidate to start freezes the questions and pass rules (safe to call again)
+    await this.rounds.lockForAttempts(o.ctx.tenantId, o.ctx.jobId, now);
     const deadlineAt = o.round.timeLimitMinutes
       ? new Date(now.getTime() + o.round.timeLimitMinutes * 60_000)
       : o.invite.expiresAt; // no time limit: the link's validity is the limit
-    const attempt = await this.begin(o, now, deadlineAt, ASSESSMENT_CONSENT_VERSION);
-    return this.publicView({ ...o, attempt });
-  }
-
-  /** Creates the attempt once (the clock starts); a second call returns the same attempt. */
-  private async begin(o: Opened, now: Date, deadlineAt: Date | null, consentVersion: string): Promise<AttemptRow> {
-    // first candidate to start freezes the questions and pass rules (safe to call again)
-    await this.rounds.lockForAttempts(o.ctx.tenantId, o.ctx.jobId, now);
     const attempt = await this.store.createAttempt({
       tenantId: o.ctx.tenantId,
       applicationId: o.ctx.applicationId,
       jobId: o.ctx.jobId,
       roundId: o.round.id,
       inviteId: o.invite.id,
-      consentVersion,
+      consentVersion: ASSESSMENT_CONSENT_VERSION,
       startedAt: now,
       deadlineAt,
     });
@@ -153,49 +143,7 @@ export class RoundEngineService {
         metadata: { roundId: o.round.id },
       });
     }
-    return attempt;
-  }
-
-  // ---------------------------------------------------------------- coding rounds (DSA page, dsa module)
-
-  setCodingScorer(scorer: CodingScorer): void {
-    this.codingScorer = scorer;
-  }
-
-  /** The DSA page's token check: the link of a coding round, or null for any link that cannot be used. */
-  async codingInvite(token: string): Promise<CodingInvite | null> {
-    try {
-      const o = await this.open(token, { allowFinished: true, coding: true });
-      return { inviteId: o.invite.id, tenantId: o.ctx.tenantId, roundId: o.round.id, candidateName: o.ctx.candidateName, timeLimitMinutes: o.round.timeLimitMinutes };
-    } catch (err) {
-      if (err instanceof HttpException) return null;
-      throw err;
-    }
-  }
-
-  /** The DSA page started its clock: the round's attempt, with the DSA deadline (sweepOverdue grades it if abandoned). */
-  async codingStarted(token: string, startedAt: Date, deadlineAt: Date): Promise<void> {
-    const o = await this.open(token, { coding: true });
-    if (!o.attempt) await this.begin(o, startedAt, deadlineAt, DSA_CONSENT_VERSION);
-  }
-
-  /** The DSA page ended the attempt (finish, time-out or integrity end): graded and moved on, once. */
-  async codingFinished(token: string, reason: 'submitted' | 'time_expired' | 'disqualified'): Promise<void> {
-    const o = await this.open(token, { allowFinished: true, coding: true });
-    if (o.attempt) await this.finish(o.attempt, reason === 'time_expired' ? 'TIMED_OUT' : 'SUBMITTED');
-  }
-
-  /** The DSA score in the round's own pass-rule units: marks scaled to HR's total, solved problems to its question count. */
-  private async codingResult(attempt: AttemptRow, round: SavedRound) {
-    if (!this.codingScorer) throw new Error('coding score not available (dsa module not loaded)');
-    const s = await this.codingScorer(attempt.inviteId);
-    const fraction = s.maxScore > 0 ? Math.min(1, s.score / s.maxScore) : 0;
-    return {
-      // rounded down: scaling never lifts a student over the pass mark (1e-9 absorbs float noise on exact values)
-      marks: Math.floor(fraction * round.totals.marks * 100 + 1e-9) / 100,
-      correctCount: s.total > 0 ? Math.floor((s.solved / s.total) * round.questions.length) : 0,
-      notes: s.summary,
-    };
+    return this.publicView({ ...o, attempt });
   }
 
   /** PUT /public/assessment/answers - autosave of ALL answers so far. A late (older) save never overwrites a newer one. */
@@ -285,11 +233,12 @@ export class RoundEngineService {
       const config = await this.rounds.forRoundEngine(attempt.tenantId, attempt.jobId);
       const round = config?.rounds.find((r) => r.id === attempt.roundId);
       if (!config || !round) throw new Error('round no longer exists');
-      const graded = isCodingRound(round) ? await this.codingResult(attempt, round) : { answers: toRoundAnswers(round, attempt.answers) };
+      // a coding attempt is told apart by its state, not by the DSA_ROUNDS switch: it is graded as one even if coding rounds were switched off meanwhile
+      const result = attempt.codingState ? codingResultInput(round, attempt.codingState) : { answers: toRoundAnswers(round, attempt.answers) };
       const recorded = await this.assessments.record(attempt.tenantId, {
         applicationId: attempt.applicationId,
         roundId: round.id,
-        ...graded,
+        ...result,
         startedAt: attempt.startedAt.toISOString(),
         submittedAt: (attempt.submittedAt ?? this.now()).toISOString(),
       });
@@ -322,7 +271,7 @@ export class RoundEngineService {
   async inviteToFirstRound(row: { tenantId: string; applicationId: string; jobId: string; roundId: string }): Promise<boolean> {
     const config = await this.rounds.forRoundEngine(row.tenantId, row.jobId);
     const first = config?.status === 'COMPLETE' ? [...config.rounds].sort((a, b) => a.position - b.position)[0] : undefined;
-    if (!first || first.id !== row.roundId || !isOnlineRound(first)) return false;
+    if (!first || first.id !== row.roundId || !roundKind(first)) return false;
     const queued = await this.store.queueInvite(row.tenantId, row.applicationId, row.jobId, first.id);
     if (queued) {
       await this.audit.record({
@@ -337,23 +286,73 @@ export class RoundEngineService {
     return queued;
   }
 
-  /** Invites a student who passed the round before a coding round (and got "HR will contact you") to that round. */
-  async inviteToCodingRound(row: { tenantId: string; applicationId: string; jobId: string; roundId: string }): Promise<boolean> {
-    const config = await this.rounds.forRoundEngine(row.tenantId, row.jobId);
-    const round = config?.status === 'COMPLETE' ? config.rounds.find((r) => r.id === row.roundId) : undefined;
-    if (!round || !isCodingRound(round)) return false;
-    const queued = await this.store.queueInvite(row.tenantId, row.applicationId, row.jobId, round.id);
-    if (queued) {
-      await this.audit.record({
-        tenantId: row.tenantId,
-        actorUserId: null,
-        action: 'assessment.invite_queued',
-        subjectType: 'application',
-        subjectId: row.applicationId,
-        metadata: { roundId: round.id, after: 'previous_round_cleared' },
-      });
+  // ---------------------------------------------------------------- DSA coding rounds (used by the dsa module, in-process)
+
+  /**
+   * Link token -> the candidate's coding round. The same checks as the MCQ tests (link known, not withdrawn, not
+   * expired before the start); throws the same error bodies. Finished attempts are returned too (the page shows the end).
+   */
+  async openCodingRound(token: string | undefined): Promise<CodingRoundContext> {
+    const o = await this.open(token, { allowFinished: true, kind: 'CODING' });
+    return {
+      tenantId: o.ctx.tenantId,
+      applicationId: o.ctx.applicationId,
+      jobId: o.ctx.jobId,
+      round: o.round,
+      candidateName: o.ctx.candidateName,
+      minutes: codingMinutes(o.round),
+      linkExpiresAt: o.invite.expiresAt ?? this.now(),
+      attempt: o.attempt,
+    };
+  }
+
+  /** The candidate pressed Start (consent was recorded on the coding page): the attempt and its clock begin, once. */
+  async startCodingAttempt(token: string | undefined, startedAt: Date): Promise<AttemptRow> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    if (o.attempt) return o.attempt; // second tab / refresh: the same attempt, the same clock
+    const now = this.now();
+    // the clock of the coding page is only trusted inside a small window around ours
+    const at = Math.abs(startedAt.getTime() - now.getTime()) <= 60_000 ? startedAt : now;
+    await this.rounds.lockForAttempts(o.ctx.tenantId, o.ctx.jobId, now);
+    const attempt = await this.store.createAttempt({
+      tenantId: o.ctx.tenantId,
+      applicationId: o.ctx.applicationId,
+      jobId: o.ctx.jobId,
+      roundId: o.round.id,
+      inviteId: o.invite.id,
+      consentVersion: CODING_CONSENT_VERSION,
+      startedAt: at,
+      deadlineAt: new Date(at.getTime() + codingMinutes(o.round) * 60_000),
+      codingState: emptyCodingState(),
+    });
+    if (attempt.startedAt.getTime() === at.getTime()) {
+      await this.store.addEvents(o.ctx.tenantId, attempt.id, [{ type: 'ASSESSMENT_STARTED', severity: SEVERITY.ASSESSMENT_STARTED, occurredAt: at, detail: {} }]);
+      await this.audit.record({ tenantId: o.ctx.tenantId, actorUserId: null, action: 'assessment.started', subjectType: 'application', subjectId: o.ctx.applicationId, metadata: { roundId: o.round.id, kind: 'CODING' } });
     }
-    return queued;
+    return attempt;
+  }
+
+  /** Stores the candidate's progress (best score per problem) while the attempt runs. false = it is not running. */
+  async saveCodingProgress(token: string | undefined, state: CodingState): Promise<boolean> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    if (!o.attempt || o.attempt.status !== 'IN_PROGRESS') return false;
+    return this.store.saveCodingState(o.attempt.id, state);
+  }
+
+  /**
+   * Ends the coding attempt (once) and, through finish() and progress(), records the result and queues the next step:
+   * the next round's invitation, or the cleared / rejection email. Safe to repeat: nothing happens twice.
+   */
+  async finishCodingAttempt(token: string | undefined, reason: CodingFinishReason, state: CodingState): Promise<void> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    const attempt = o.attempt;
+    if (!attempt) throw engineError(HttpStatus.CONFLICT, 'ASSESSMENT_NOT_STARTED', 'Please start the assessment first.');
+    if (attempt.status === 'IN_PROGRESS') {
+      await this.store.saveCodingState(attempt.id, { ...state, finishReason: reason });
+      await this.finish(attempt, reason === 'time_expired' ? 'TIMED_OUT' : 'SUBMITTED');
+    } else if (!attempt.progressedAt) {
+      await this.progress(attempt.id); // finished earlier but the next step did not run yet
+    }
   }
 
   // ---------------------------------------------------------------- HR
@@ -364,15 +363,6 @@ export class RoundEngineService {
     const ctx = data && (await this.store.context(tenantId, applicationId));
     if (!data || !ctx) throw engineError(HttpStatus.NOT_FOUND, 'APPLICATION_NOT_FOUND', 'Student not found.');
     const config = await this.rounds.forRoundEngine(tenantId, ctx.jobId);
-    // coding rounds: "answered" = problems solved on the DSA page, out of its problems
-    const solved = new Map<string, { answered: number; questionCount: number }>();
-    for (const a of data.attempts) {
-      const r = config?.rounds.find((x) => x.id === a.roundId);
-      if (r && isCodingRound(r) && this.codingScorer) {
-        const s = await this.codingScorer(a.inviteId);
-        solved.set(a.id, { answered: s.solved, questionCount: s.total });
-      }
-    }
     return {
       applicationId,
       rounds: [...(config?.rounds ?? [])]
@@ -384,7 +374,8 @@ export class RoundEngineService {
           const email = data.outcomeEmails.find((e) => e.roundId === r.id);
           return {
             roundId: r.id,
-            online: isInvitedRound(r),
+            online: roundKind(r) !== null,
+            kind: roundKind(r),
             invite: invite
               ? {
                   emailStatus: invite.emailStatus,
@@ -401,9 +392,8 @@ export class RoundEngineService {
                   deadlineAt: attempt.deadlineAt?.toISOString() ?? null,
                   submittedAt: attempt.submittedAt?.toISOString() ?? null,
                   timeTakenSeconds: attempt.submittedAt ? Math.round((attempt.submittedAt.getTime() - attempt.startedAt.getTime()) / 1000) : null,
-                  answered: answeredCount(attempt.answers),
+                  answered: attempt.codingState ? codingAnswered(r, attempt.codingState) : answeredCount(attempt.answers),
                   questionCount: r.questions.length,
-                  ...solved.get(attempt.id),
                   warnings: events.filter((e) => e.severity === 'WARNING').length,
                 }
               : null,
@@ -435,7 +425,7 @@ export class RoundEngineService {
   // ---------------------------------------------------------------- helpers
 
   /** Token -> invite -> application + round. Every public call goes through here. */
-  private async open(token: string | undefined, opts: { allowFinished?: boolean; coding?: boolean } = {}): Promise<Opened> {
+  private async open(token: string | undefined, opts: { allowFinished?: boolean; kind?: RoundKind } = {}): Promise<Opened> {
     if (!token || !TOKEN_SHAPE.test(token)) throw invalidLink();
     const invite = await this.store.findInviteByHash(hashAssessmentToken(token));
     if (!invite || invite.emailStatus === 'FAILED') throw invalidLink();
@@ -446,8 +436,7 @@ export class RoundEngineService {
     if (!ctx || ctx.jobId !== invite.jobId) throw invalidLink();
     const config = await this.rounds.forRoundEngine(invite.tenantId, invite.jobId);
     const round = config?.rounds.find((r) => r.id === invite.roundId);
-    // a coding round's link works only on the DSA page, an MCQ round's only on the assessment page
-    if (!config || !round || config.status !== 'COMPLETE' || !(opts.coding ? isCodingRound(round) : isOnlineRound(round))) {
+    if (!config || !round || config.status !== 'COMPLETE' || roundKind(round) !== (opts.kind ?? 'TEST')) {
       throw engineError(HttpStatus.CONFLICT, 'ASSESSMENT_UNAVAILABLE', 'This assessment is not available right now. Please contact the hiring team.');
     }
     const attempt = await this.store.attemptByInvite(invite.id);

@@ -1,5 +1,7 @@
 # DSA assessment: browser proctoring
 
+> **Update (2026-11-02): code execution now runs on Piston, not Judge0.** The test sections below are a record of the proctoring change as it was verified at the time, when Judge0 was the runner; "real Judge0" and `dsa-judge0.integration.test.ts` there refer to that earlier setup, and that test file no longer exists. After the switch the proctoring browser suite was re-run against Piston: **56 / 56 checks passed**, including Run and Submit under proctoring. Current test counts and hosting: [dsa-integration-notes.md](dsa-integration-notes.md) §7 and [dsa-piston-hosting.md](dsa-piston-hosting.md).
+
 Browser-based integrity monitoring for the DSA coding assessment: full-screen mode, tab and window focus, clipboard and restricted shortcuts, with server-side violation records, a review policy and an HR reporting contract.
 
 > **What this is, and is not.** It is *browser-level detection and deterrence*. A normal web page cannot lock down a computer. It cannot see other applications, block operating-system shortcuts (Alt+Tab, the Windows key, Ctrl+T/W), stop a second device, or know why the browser reported an event. Every record is an **observation for a human reviewer, never proof of cheating**, and nothing here changes a candidate's score. See [Security limitations](#7-security-limitations).
