@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { atsPartSchema, screeningDecisionSchema } from './ats';
-import { difficultySchema, passModeSchema, passRuleSchema, questionKindSchema, roundTypeSchema, roundsStatusSchema } from './rounds';
+import { difficultySchema, passModeSchema, passRuleSchema, questionKindSchema, roundModuleSchema, roundTypeSchema, roundsStatusSchema } from './rounds';
 
 /**
  * Assessment results (the rounds after AI voice screening). Owner: assessments module (apps/api/src/modules/assessments).
@@ -62,8 +62,19 @@ export const roundCellSchema = z.object({
   passMark: z.number().nullable(),
   /** HR changed the result (outcome already includes it). */
   overridden: z.boolean(),
+  /** No result yet: where the student is in this round ("Invited", "Test in progress", "In a GD group"...), or null. */
+  progress: z.string().nullable(),
 });
 export type RoundCell = z.infer<typeof roundCellSchema>;
+
+/** The AI voice screening (between resume screening and the rounds) of one student. */
+export const aiScreeningProgressSchema = z.object({
+  /** INVITED = the link was emailed, not opened yet. */
+  status: z.enum(['INVITED', 'NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'ENDED_EARLY']),
+  /** HR's review of a finished screening; null before it has started. */
+  review: z.enum(['PENDING', 'REVIEWED', 'NEEDS_FOLLOW_UP']).nullable(),
+});
+export type AiScreeningProgress = z.infer<typeof aiScreeningProgressSchema>;
 
 export const assessmentRoundSummarySchema = z.object({
   id: z.string(),
@@ -78,6 +89,11 @@ export const assessmentRoundSummarySchema = z.object({
   questionCount: z.number().int(),
   totalMarks: z.number().int(),
   counts: z.object({ passed: z.number().int(), failed: z.number().int(), notAttempted: z.number().int() }),
+  /** ONLINE_TEST = the round engine runs it; MODULE = a round module (GD, DSA, SQL, AI interview); HR = by hand. */
+  runBy: z.enum(['ONLINE_TEST', 'MODULE', 'HR']),
+  module: roundModuleSchema.nullable(),
+  /** The module is part of this server and takes students (false = HR runs the round until it is connected). */
+  moduleConnected: z.boolean(),
 });
 export type AssessmentRoundSummary = z.infer<typeof assessmentRoundSummarySchema>;
 
@@ -87,6 +103,8 @@ export const assessmentStudentRowSchema = z.object({
   email: z.string(),
   college: z.string(),
   atsScore: z.number().int().nullable(),
+  /** null = no AI screening link sent. */
+  aiScreening: aiScreeningProgressSchema.nullable(),
   stage: assessmentStageSchema,
   rounds: z.array(roundCellSchema),
 });

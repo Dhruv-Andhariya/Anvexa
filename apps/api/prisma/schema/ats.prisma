@@ -126,6 +126,8 @@ model ScreeningInvite {
   tokenHash     String    @unique @map("token_hash")
   expiresAt     DateTime  @map("expires_at")
   usedAt        DateTime? @map("used_at")
+  /// Screening base URL the emailed link was built from (a tunnel URL changes on restart: see resendDeadLinks).
+  linkBase      String?   @map("link_base")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)

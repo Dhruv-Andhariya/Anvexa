@@ -24,6 +24,10 @@ export const PUBLIC_LIMITS = {
   // M13 online test rounds (round-engine module): page loads, autosaves (one per answer change) and proctoring
   // events. A 100-question test is a few hundred calls; a whole college lab on one IP must still get through.
   assessment: { max: 20000, windowMs: 60 * 60_000 },
+  // M18 group discussion (group-discussion module): lobby / join / state polls / events, and the audio chunks (one
+  // per student every 5 s). A whole college lab on one IP must still get through.
+  gd: { max: 30000, windowMs: 60 * 60_000 },
+  'gd-audio': { max: 40000, windowMs: 60 * 60_000 },
 } satisfies Record<string, Limit>;
 
 export type LimitName = keyof typeof PUBLIC_LIMITS;

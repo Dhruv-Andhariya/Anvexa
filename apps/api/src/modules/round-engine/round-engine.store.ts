@@ -110,6 +110,8 @@ export abstract class RoundEngineStore {
   // ---- progression / emails
   abstract queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string): Promise<boolean>;
   abstract queueOutcomeEmail(tenantId: string, applicationId: string, roundId: string, kind: RoundOutcomeEmailKind, nextRoundName: string | null): Promise<boolean>;
+  /** Students waiting for a round module's round (see RoundEngineService.waitingForModule). */
+  abstract moduleCandidates(types: string[], limit: number, tenantId?: string): Promise<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>;
   /**
    * Completed AI screenings whose job's FIRST round is an online test (or, with `codingRounds`, a DSA round) the
    * candidate was not invited to yet.
@@ -266,6 +268,40 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
   async queueOutcomeEmail(tenantId: string, applicationId: string, roundId: string, kind: RoundOutcomeEmailKind, nextRoundName: string | null) {
     const r = await this.db.roundOutcomeEmail.createMany({ data: { id: uuidv7(), tenantId, applicationId, roundId, kind, nextRoundName }, skipDuplicates: true });
     return r.count > 0;
+  }
+
+  moduleCandidates(types: string[], limit: number, tenantId?: string) {
+    if (!types.length) return Promise.resolve([]);
+    const typeList = Prisma.join(types.map((t) => Prisma.sql`${t}::round_type`));
+    const scope = tenantId ? Prisma.sql`AND r.tenant_id = ${tenantId}::uuid` : Prisma.empty;
+    return this.db.$queryRaw<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>(Prisma.sql`
+      SELECT a.tenant_id::text AS "tenantId", a.id::text AS "applicationId", a.job_id::text AS "jobId", r.id::text AS "roundId"
+        FROM job_rounds r
+        JOIN job_round_configs c ON c.job_id = r.job_id AND c.tenant_id = r.tenant_id AND c.status = 'COMPLETE'
+        JOIN applications a ON a.job_id = r.job_id AND a.tenant_id = r.tenant_id
+       WHERE r.type IN (${typeList}) ${scope}
+         -- a plain online test is the round engine's own (isOnlineRound)
+         AND NOT (r.pass_mode IS NOT NULL AND r.pass_mode <> 'INTERVIEWER_SCORE'
+                  AND EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id)
+                  AND NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id AND q.kind NOT IN ('MCQ', 'TRUE_FALSE')))
+         AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = a.id AND rr.round_id = r.id)
+         AND (
+           -- first round: AI screening completed (like the first online test)
+           (r.position = 1 AND EXISTS (
+              SELECT 1 FROM screening_sessions s
+               WHERE s.application_id = a.id AND s.tenant_id = a.tenant_id AND s.status = 'COMPLETED'))
+           OR
+           -- later round: every earlier round has a result that counts as passed (HR override first)
+           (r.position > 1 AND NOT EXISTS (
+              SELECT 1 FROM job_rounds e
+               WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position
+                 AND NOT EXISTS (
+                   SELECT 1 FROM round_results rr
+                    WHERE rr.application_id = a.id AND rr.round_id = e.id
+                      AND COALESCE(rr.override_passed, rr.system_passed))))
+         )
+       ORDER BY a.created_at
+       LIMIT ${limit}`);
   }
 
   screeningsToInvite(limit: number, codingRounds = true) {

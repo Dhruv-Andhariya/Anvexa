@@ -4,7 +4,7 @@ import type { RoundInput, SavedRound } from '@hireflow/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MailError } from '../../src/modules/applications';
 import { AssessmentsService } from '../../src/modules/assessments';
-import { RoundsConfigService } from '../../src/modules/rounds-config';
+import { RoundModules, RoundsConfigService } from '../../src/modules/rounds-config';
 import { buildRoundInviteEmail } from '../../src/modules/round-engine/emails';
 import { assessmentBaseUrlFromEnv, hashAssessmentToken, isPublicLink, newAssessmentToken } from '../../src/modules/round-engine/link';
 import { isOnlineRound, nextStep } from '../../src/modules/round-engine/online-test';
@@ -499,5 +499,115 @@ describe('links and emails', () => {
     expect(m.html).not.toContain('javascript:');
     expect(m.text).toContain('no fixed time limit');
     expect(m.html).toContain('<a href="https://c.example/assessment/abc">');
+  });
+});
+
+describe('round modules (DSA, SQL, AI interview)', () => {
+  const sql: RoundInput = {
+    type: 'SQL',
+    name: 'SQL Round',
+    passRule: { mode: 'PERCENTAGE', value: 50 },
+    questions: [{ kind: 'CODING', text: 'Top 3 salaries per department', marks: 10, language: 'SQL' }],
+  };
+  const aiInterview: RoundInput = { type: 'AI_INTERVIEW', name: 'AI Interview', passRule: { mode: 'INTERVIEWER_SCORE', value: 6, maxScore: 10 } };
+  const dsaBank: RoundInput = {
+    type: 'CODING',
+    name: 'DSA Round',
+    passRule: { mode: 'MARKS', value: 5 },
+    questions: [{ kind: 'CODING', text: 'DSA problem 1', marks: 10, difficulty: 'EASY', topics: ['dsa:dsa-001'] }],
+  };
+  const plainCoding: RoundInput = {
+    type: 'CODING',
+    name: 'Coding (HR)',
+    passRule: { mode: 'PERCENTAGE', value: 50 },
+    questions: [{ kind: 'CODING', text: 'Reverse a linked list', marks: 10, language: 'Python' }],
+  };
+  let modules: RoundModules;
+  let job: SavedRound[];
+
+  beforeEach(async () => {
+    modules = new RoundModules();
+    assessments = new AssessmentsService(results, rounds, audit, modules);
+    engine = new RoundEngineService(store, rounds, assessments, audit, { cameraRequired: true }, clock, modules);
+    job = (await rounds.save(TENANT, JOB, { rounds: [aptitude, sql, aiInterview], complete: true }, ACTOR)).rounds;
+  });
+
+  it('hands a student to the next round module only when it is connected; until then HR runs that round', () => {
+    expect(nextStep(job, job[0]!, true, { modules: modules.connected() })).toEqual({ kind: 'EMAIL', email: 'CLEARED_NEXT_BY_HR', nextRoundName: 'SQL Round' });
+    modules.connect('SQL');
+    expect(nextStep(job, job[0]!, true, { modules: modules.connected() })).toMatchObject({ kind: 'MODULE', module: 'SQL', round: { id: job[1]!.id } });
+    // an SQL-type round made of multiple-choice questions only is an online test (the round engine's own)
+    const mcqOnly = { ...job[1]!, questions: job[0]!.questions, passRule: job[0]!.passRule };
+    expect(nextStep([job[0]!, mcqOnly], job[0]!, true, { modules: modules.connected() })).toMatchObject({ kind: 'INVITE' });
+  });
+
+  it('a module records the result with answers; HR sees it and the student moves on once', async () => {
+    modules.connect('SQL');
+    const input = {
+      applicationId: APP,
+      roundId: job[1]!.id,
+      answers: [{ questionId: job[1]!.questions[0]!.id, answer: 'SELECT ...', marksAwarded: 8, feedback: 'correct rows' }],
+      notes: 'Checked on the sample database',
+    };
+    const res = await engine.recordModuleResult(TENANT, 'SQL', input);
+    expect(res).toMatchObject({ outcome: 'PASSED', score: 80 });
+    await engine.recordModuleResult(TENANT, 'SQL', input); // sent again: replaced, next step queued once
+    expect(results.results.filter((r) => r.roundId === job[1]!.id)).toHaveLength(1);
+    // AI interview module not connected yet: "HR will contact you about the AI Interview"
+    expect(store.outcomeEmails).toEqual([expect.objectContaining({ kind: 'CLEARED_NEXT_BY_HR', nextRoundName: 'AI Interview', roundId: job[1]!.id })]);
+
+    const review = await assessments.student(TENANT, APP);
+    expect(review.rounds[1]).toMatchObject({ outcome: 'PASSED', round: { runBy: 'MODULE', module: 'SQL', moduleConnected: true } });
+    expect(review.rounds[1]!.answers[0]).toMatchObject({ answer: 'SELECT ...', marksAwarded: 8 });
+    expect(audit.entries.at(-1)).toMatchObject({ action: 'assessment.progressed', metadata: { module: 'SQL', next: { email: 'CLEARED_NEXT_BY_HR' } } });
+  });
+
+  it('a connected next module gets the student instead of an email', async () => {
+    modules.connect('SQL');
+    modules.connect('AI_INTERVIEW');
+    await engine.recordModuleResult(TENANT, 'SQL', { applicationId: APP, roundId: job[1]!.id, marks: 9 });
+    expect(store.outcomeEmails).toHaveLength(0);
+    expect(audit.entries.at(-1)!.metadata).toMatchObject({ next: { module: 'AI_INTERVIEW', round: job[2]!.id } });
+  });
+
+  it('a module can only record its own rounds, of its own company', async () => {
+    expect(code(await caught(engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[1]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');
+    expect(code(await caught(engine.recordModuleResult(TENANT, 'SQL', { applicationId: APP, roundId: job[0]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');
+    expect(status(await caught(engine.recordModuleResult(OTHER_TENANT, 'SQL', { applicationId: APP, roundId: job[1]!.id, marks: 9 })))).toBe(404);
+    expect(results.results).toHaveLength(0);
+  });
+
+  it('lists the students waiting for a module by its round types', async () => {
+    store.waitingByType.set('SQL', [{ tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: job[1]!.id }]);
+    store.waitingByType.set('AI_INTERVIEW', [{ tenantId: OTHER_TENANT, applicationId: APP, jobId: OTHER_JOB, roundId: 'r' }]);
+    expect((await engine.waitingForModule('SQL')).map((w) => w.applicationId)).toEqual([APP]);
+    expect(await engine.waitingForModule('AI_INTERVIEW', { tenantId: TENANT })).toEqual([]);
+  });
+
+  it("DSA rounds stay the round engine's own (coding page); a coding round without DSA problems is run by HR", async () => {
+    modules.connect('DSA');
+    const dsaJob = (await rounds.save(TENANT, JOB, { rounds: [aptitude, dsaBank, plainCoding], complete: true }, ACTOR)).rounds;
+    expect(nextStep(dsaJob, dsaJob[0]!, true, { modules: modules.connected() })).toMatchObject({ kind: 'INVITE', roundKind: 'CODING', round: { id: dsaJob[1]!.id } });
+    expect(nextStep(dsaJob, dsaJob[1]!, true, { modules: modules.connected() })).toEqual({ kind: 'EMAIL', email: 'CLEARED_NEXT_BY_HR', nextRoundName: 'Coding (HR)' });
+    expect(code(await caught(engine.recordModuleResult(TENANT, 'DSA', { applicationId: APP, roundId: dsaJob[1]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');
+    store.waitingByType.set('CODING', [{ tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: dsaJob[2]!.id }]);
+    expect(await engine.waitingForModule('DSA')).toEqual([]);
+
+    const view = await assessments.job(TENANT, JOB);
+    expect(view.rounds.map((r) => [r.name, r.runBy, r.module, r.moduleConnected])).toEqual([
+      ['Aptitude & English Literacy', 'ONLINE_TEST', null, false],
+      ['DSA Round', 'MODULE', 'DSA', true],
+      ['Coding (HR)', 'HR', null, false],
+    ]);
+  });
+
+  it('the HR Assessments page says who runs each round', async () => {
+    modules.connect('SQL');
+    const view = await assessments.job(TENANT, JOB);
+    expect(view.rounds.map((r) => [r.name, r.runBy, r.module, r.moduleConnected])).toEqual([
+      ['Aptitude & English Literacy', 'ONLINE_TEST', null, false],
+      ['SQL Round', 'MODULE', 'SQL', true],
+      ['AI Interview', 'MODULE', 'AI_INTERVIEW', false],
+    ]);
   });
 });

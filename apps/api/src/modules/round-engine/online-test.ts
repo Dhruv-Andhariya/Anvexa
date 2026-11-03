@@ -1,11 +1,13 @@
 import {
-  ONLINE_TEST_KINDS,
+  ROUND_MODULE_OF,
   isDsaRound,
+  isOnlineRound,
   type AssessmentAnswer,
   type AssessmentQuestion,
   type ProctorEventType,
   type ProctorSeverity,
   type RoundAnswerInput,
+  type RoundModule,
   type RoundOutcomeEmailKind,
   type SavedRound,
 } from '@hireflow/contracts';
@@ -22,20 +24,8 @@ export const DEADLINE_GRACE_MS = 30_000;
 /** The answers as stored on the attempt: questionId -> selection. */
 export type StoredAnswers = Record<string, { selected: number[]; marked: boolean }>;
 
-const ONLINE = new Set<string>(ONLINE_TEST_KINDS);
-
-/**
- * Run online and graded automatically: a pass rule that is not an interviewer's score, at least one question, and
- * only multiple-choice / true-false questions. Anything else (coding, descriptive, interviews) is run by HR.
- */
-export function isOnlineRound(round: Pick<SavedRound, 'passRule' | 'questions'>): boolean {
-  return (
-    !!round.passRule &&
-    round.passRule.mode !== 'INTERVIEWER_SCORE' &&
-    round.questions.length > 0 &&
-    round.questions.every((q) => ONLINE.has(q.kind))
-  );
-}
+/** Which rounds run online (shared with the HR dashboard through contracts). */
+export { isOnlineRound };
 
 /** How the engine runs a round: an online test (MCQ page on the careers site), a DSA coding round, or not at all (HR runs it). */
 export type RoundKind = 'TEST' | 'CODING';
@@ -113,19 +103,33 @@ export function parseStoredAnswers(value: unknown): StoredAnswers {
 
 export type NextStep =
   | { kind: 'INVITE'; round: SavedRound; roundKind: RoundKind }
-  | { kind: 'EMAIL'; email: RoundOutcomeEmailKind; nextRoundName: string | null };
+  | { kind: 'EMAIL'; email: RoundOutcomeEmailKind; nextRoundName: string | null }
+  /** The next round is an AI group discussion: the group-discussion module (M18) takes the student from here. */
+  | { kind: 'GROUP_DISCUSSION'; round: SavedRound }
+  /** The next round is run by another connected round module (DSA, SQL, AI interview): it takes the student from here. */
+  | { kind: 'MODULE'; module: RoundModule; round: SavedRound };
 
 /**
  * What follows a finished round, in HR's round order (position): a failed round ends the journey (matches stageOf()
- * in grading.ts); a passed one leads to the next online round's invitation, or - when the next round is run by HR
- * (interview, coding...) or there is none - to an email saying so.
+ * in grading.ts); a passed one leads to the next online round's invitation, to the GD module's pool when the next
+ * round is a group discussion (and that module is on), to the next round's module when it is connected (DSA, SQL,
+ * AI interview), or - when the next round is run by HR (interview...) or there is none - to an email saying so.
  */
-export function nextStep(rounds: SavedRound[], current: SavedRound, passed: boolean): NextStep {
+export function nextStep(
+  rounds: SavedRound[],
+  current: SavedRound,
+  passed: boolean,
+  opts: { groupDiscussion?: boolean; modules?: ReadonlySet<RoundModule> } = {},
+): NextStep {
   if (!passed) return { kind: 'EMAIL', email: 'REJECTED', nextRoundName: null };
   const next = [...rounds].sort((a, b) => a.position - b.position).find((r) => r.position > current.position);
   if (!next) return { kind: 'EMAIL', email: 'CLEARED_ALL', nextRoundName: null };
   const nextKind = roundKind(next);
   if (nextKind) return { kind: 'INVITE', round: next, roundKind: nextKind };
+  if (opts.groupDiscussion && next.type === 'GROUP_DISCUSSION') return { kind: 'GROUP_DISCUSSION', round: next };
+  const module = ROUND_MODULE_OF[next.type];
+  // DSA rounds are the engine's own (roundKind CODING above); a coding round without DSA problems is run by HR
+  if (module && module !== 'GROUP_DISCUSSION' && module !== 'DSA' && opts.modules?.has(module)) return { kind: 'MODULE', module, round: next };
   return { kind: 'EMAIL', email: 'CLEARED_NEXT_BY_HR', nextRoundName: next.name };
 }
 

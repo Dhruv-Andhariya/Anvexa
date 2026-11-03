@@ -3,6 +3,7 @@
 #   CAREERS_SITE_URL in .env; when a code runner is set up (PISTON_URL in .env) a second tunnel -> candidate app
 #   :3001 (DSA coding round), URL written to CANDIDATE_APP_URL  4. pnpm dev (API :4000, HR :3000, careers :3300,
 #   candidate app :3001)  5. AI worker :8000
+#   6. GD worker :8010 + AI moderator bot (workers/gd-agent)
 # A quick tunnel gets a NEW random https://<words>.trycloudflare.com URL every time cloudflared starts, so Apply links
 # in posts made before a restart point to the old URL. The API edits those posts at start (same post, new link);
 # any it could not edit are flagged on the HR Publish page ("Update apply link in posts"). Assessment and DSA links
@@ -147,6 +148,21 @@ if ($dsaUrl) { WaitFor 'candidate app (DSA)' 300 { Listening 3001 } | Out-Null }
 if (-not (Listening 8000) -and (Get-Command uv -ErrorAction SilentlyContinue)) {
   Start-Process -WindowStyle Hidden -WorkingDirectory (Join-Path $root 'workers\ai-worker') powershell.exe `
     -ArgumentList '-NoProfile', '-Command', "uv run python -m ai_worker *> '$logs\ai-worker.log'"
+}
+
+# 6. GD worker (M18 group discussion): Whisper + evaluation API on :8010, and the AI moderator bot (LiveKit agent).
+#    Both are free and local; the GD itself (room, timer, banner) runs without them, only voice and results wait.
+$gdAgent = Join-Path $root 'workers\gd-agent'
+if ((Test-Path $gdAgent) -and (Get-Command uv -ErrorAction SilentlyContinue)) {
+  if (-not (Listening 8010)) {
+    Start-Process -WindowStyle Hidden -WorkingDirectory $gdAgent powershell.exe `
+      -ArgumentList '-NoProfile', '-Command', "uv run python -m gd_agent api *> '$logs\gd-worker.log'"
+  }
+  $moderator = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'gd_agent moderator' }
+  if (-not $moderator) {
+    Start-Process -WindowStyle Hidden -WorkingDirectory $gdAgent powershell.exe `
+      -ArgumentList '-NoProfile', '-Command', "uv run python -m gd_agent moderator start *> '$logs\gd-moderator.log'"
+  }
 }
 
 WaitFor "public link $publicUrl" 120 {

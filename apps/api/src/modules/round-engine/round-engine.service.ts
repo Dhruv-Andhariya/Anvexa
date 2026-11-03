@@ -1,18 +1,22 @@
-import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ASSESSMENT_CONSENT_VERSION,
   ASSESSMENT_LIMITS,
   proctorEventsRequestSchema,
   saveAssessmentAnswersRequestSchema,
+  ROUND_MODULE_OF,
   startAssessmentRequestSchema,
   type ApplicationRoundEngine,
   type AssessmentPublicView,
+  type RoundModule,
+  type RoundType,
   type SaveAssessmentAnswersResult,
   type SavedRound,
 } from '@hireflow/contracts';
+import { isFeatureOn } from '../../common/feature-flags';
 import { AssessmentsService } from '../assessments';
 import { AuditService } from '../audit';
-import { RoundsConfigService, type RoundsForEngine } from '../rounds-config';
+import { RoundModules, RoundsConfigService, type RoundsForEngine } from '../rounds-config';
 import type { Actor } from '../tenants';
 import {
   CODING_CONSENT_VERSION,
@@ -34,6 +38,7 @@ import {
   roundKind,
   type RoundKind,
   publicQuestions,
+  type NextStep,
   toRoundAnswers,
   type StoredAnswers,
 } from './online-test';
@@ -95,6 +100,8 @@ export class RoundEngineService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ROUND_ENGINE_CONFIG) private readonly config: RoundEngineConfig,
     @Inject(ROUND_ENGINE_CLOCK) private readonly now: () => Date,
+    /** Round modules (DSA, SQL, AI interview) that take students; none connected = HR runs those rounds. */
+    @Optional() @Inject(RoundModules) private readonly modules: RoundModules = new RoundModules(),
   ) {}
 
   // ---------------------------------------------------------------- candidate (public, token)
@@ -245,10 +252,11 @@ export class RoundEngineService {
       await this.store.setSystemPassed(attempt.id, recorded.systemPassed);
       if (!(await this.store.claimProgress(attempt.id, this.now()))) return; // another process did it
       // the outcome HR sees (an HR override made before this point included)
-      const step = nextStep(config.rounds, round, recorded.outcome === 'PASSED');
+      // a GD round next: no email here - the group-discussion module adds the student to its pool and invites them
+      const step = this.next(config.rounds, round, recorded.outcome === 'PASSED');
       try {
         if (step.kind === 'INVITE') await this.store.queueInvite(attempt.tenantId, attempt.applicationId, attempt.jobId, step.round.id);
-        else await this.store.queueOutcomeEmail(attempt.tenantId, attempt.applicationId, round.id, step.email, step.nextRoundName);
+        else if (step.kind === 'EMAIL') await this.store.queueOutcomeEmail(attempt.tenantId, attempt.applicationId, round.id, step.email, step.nextRoundName);
       } catch (err) {
         await this.store.releaseProgress(attempt.id);
         throw err;
@@ -259,12 +267,66 @@ export class RoundEngineService {
         action: 'assessment.progressed',
         subjectType: 'application',
         subjectId: attempt.applicationId,
-        metadata: { roundId: round.id, outcome: recorded.outcome, next: step.kind === 'INVITE' ? { invite: step.round.id } : { email: step.email } },
+        metadata: {
+          roundId: round.id,
+          outcome: recorded.outcome,
+          next: describeStep(step),
+        },
       });
     } catch (err) {
       const why = err instanceof HttpException ? ((err.getResponse() as { code?: string }).code ?? err.message) : err instanceof Error ? err.message : 'unknown';
       this.logger.warn(`assessment result not processed attempt=${attempt.id} (${why}) - retried later`);
     }
+  }
+
+  /** What follows a round: the next online test, the GD pool, a connected round module, or an email. */
+  private next(rounds: SavedRound[], round: SavedRound, passed: boolean): NextStep {
+    return nextStep(rounds, round, passed, { groupDiscussion: isFeatureOn('group_discussion'), modules: this.modules.connected() });
+  }
+
+  // ---------------------------------------------------------------- round modules (DSA, SQL, AI interview)
+
+  /**
+   * Students a round module should run its round for: every earlier round passed (HR override first), or AI screening
+   * completed when it is the first round, and no result in this round yet. Rounds that are plain online tests are the
+   * round engine's own. The module keeps track of whom it already invited.
+   */
+  waitingForModule(module: RoundModule, opts: { tenantId?: string; limit?: number } = {}) {
+    // DSA rounds are invited and run by this engine itself (roundKind CODING), never handed to a module
+    if (module === 'DSA') return Promise.resolve([]);
+    const types = (Object.entries(ROUND_MODULE_OF) as [RoundType, RoundModule][]).filter(([, m]) => m === module).map(([t]) => t);
+    return this.store.moduleCandidates(types, Math.min(Math.max(opts.limit ?? 100, 1), 500), opts.tenantId);
+  }
+
+  /**
+   * A round module records a student's result and answers (same shape as assessments.record()). It shows on the HR
+   * Assessments page, and the student moves on exactly as after an online test (next invitation or email). Sending the
+   * same result again is safe: the result is replaced and the next step is queued once.
+   */
+  async recordModuleResult(tenantId: string, module: RoundModule, input: unknown) {
+    const ids = input as { applicationId?: unknown; roundId?: unknown } | null;
+    const applicationId = typeof ids?.applicationId === 'string' ? ids.applicationId : '';
+    const roundId = typeof ids?.roundId === 'string' ? ids.roundId : '';
+    const ctx = applicationId ? await this.store.context(tenantId, applicationId) : null;
+    const config = ctx ? await this.rounds.forRoundEngine(tenantId, ctx.jobId) : null;
+    const round = config?.rounds.find((r) => r.id === roundId);
+    if (!ctx || !config || !round) throw engineError(HttpStatus.NOT_FOUND, 'ROUND_NOT_FOUND', 'This round was not found for this student.');
+    if (ROUND_MODULE_OF[round.type] !== module || module === 'DSA' || roundKind(round)) {
+      throw engineError(HttpStatus.CONFLICT, 'ROUND_NOT_FOR_MODULE', `This round is not run by the ${module} module.`);
+    }
+    const recorded = await this.assessments.record(tenantId, input);
+    const step = this.next(config.rounds, round, recorded.outcome === 'PASSED');
+    if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, ctx.jobId, step.round.id);
+    else if (step.kind === 'EMAIL') await this.store.queueOutcomeEmail(tenantId, applicationId, round.id, step.email, step.nextRoundName);
+    await this.audit.record({
+      tenantId,
+      actorUserId: null,
+      action: 'assessment.progressed',
+      subjectType: 'application',
+      subjectId: applicationId,
+      metadata: { roundId: round.id, module, outcome: recorded.outcome, next: describeStep(step) },
+    });
+    return recorded;
   }
 
   /** Invites a candidate whose AI screening is complete to the job's first round (when it is an online test). */
@@ -506,3 +568,12 @@ export class RoundEngineService {
     };
   }
 }
+
+const describeStep = (step: NextStep) =>
+  step.kind === 'INVITE'
+    ? { invite: step.round.id }
+    : step.kind === 'GROUP_DISCUSSION'
+      ? { groupDiscussion: step.round.id }
+      : step.kind === 'MODULE'
+        ? { module: step.module, round: step.round.id }
+        : { email: step.email };

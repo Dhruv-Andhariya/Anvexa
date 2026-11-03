@@ -39,6 +39,8 @@ export const roundTypeSchema = z.enum([
   'TECHNICAL_INTERVIEW',
   'HR_INTERVIEW',
   'CUSTOM',
+  /** A voice interview run and scored by AI (like the AI voice screening, but a round of the job). */
+  'AI_INTERVIEW',
 ]);
 export type RoundType = z.infer<typeof roundTypeSchema>;
 
@@ -69,6 +71,29 @@ export const ROUND_TYPES: Record<RoundType, { label: string; interview: boolean;
   TECHNICAL_INTERVIEW: { label: 'Technical Interview', interview: true, kinds: ['INTERVIEW'] },
   HR_INTERVIEW: { label: 'HR Interview', interview: true, kinds: ['INTERVIEW'] },
   CUSTOM: { label: 'Custom round', interview: false, kinds: ['MCQ', 'SHORT_ANSWER', 'DESCRIPTIVE'] },
+  AI_INTERVIEW: { label: 'AI Interview', interview: true, kinds: ['INTERVIEW'] },
+};
+
+/**
+ * Round modules: separate parts of HireFlow that run a round themselves (their own candidate page) and send the result
+ * and answers to the assessments module. A round whose questions are not a plain online test (round engine) goes to
+ * the module of its type when that module is connected, else HR runs it.
+ */
+export const roundModuleSchema = z.enum(['GROUP_DISCUSSION', 'DSA', 'SQL', 'AI_INTERVIEW']);
+export type RoundModule = z.infer<typeof roundModuleSchema>;
+
+export const ROUND_MODULE_OF: Partial<Record<RoundType, RoundModule>> = {
+  GROUP_DISCUSSION: 'GROUP_DISCUSSION',
+  CODING: 'DSA',
+  SQL: 'SQL',
+  AI_INTERVIEW: 'AI_INTERVIEW',
+};
+
+export const ROUND_MODULE_LABEL: Record<RoundModule, string> = {
+  GROUP_DISCUSSION: 'AI group discussion',
+  DSA: 'DSA coding round',
+  SQL: 'SQL round',
+  AI_INTERVIEW: 'AI interview',
 };
 
 export const QUESTION_KINDS: Record<QuestionKind, { label: string; autoGraded: boolean }> = {

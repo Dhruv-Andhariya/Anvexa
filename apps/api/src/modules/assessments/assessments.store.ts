@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { AtsPart, PassMode, RoundAnswer, ScreeningDecision } from '@hireflow/contracts';
+import type { AiScreeningProgress, AtsPart, PassMode, RoundAnswer, ScreeningDecision } from '@hireflow/contracts';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
@@ -22,6 +22,10 @@ export interface StudentRow {
     missingSkills: string[];
   } | null;
   hasVoiceScreening: boolean;
+  /** null = no AI screening link sent. */
+  aiScreening: AiScreeningProgress | null;
+  /** Round id -> where the student is in a round that has no result yet (invite, test, GD group). */
+  roundProgress: Record<string, string>;
 }
 
 export interface ResultRow {
@@ -89,7 +93,11 @@ const STUDENT_SELECT = {
   atsEvaluation: {
     select: { status: true, score: true, minAtsScore: true, systemDecision: true, hrDecision: true, breakdown: true, matchedSkills: true, missingSkills: true },
   },
-  screeningSession: { select: { id: true } },
+  screeningInvite: { select: { id: true } },
+  screeningSession: { select: { id: true, status: true, reviewStatus: true } },
+  roundInvites: { select: { roundId: true, revokedAt: true, sentAt: true, emailStatus: true } },
+  roundAttempts: { select: { roundId: true, status: true } },
+  gdParticipants: { select: { roundId: true, attendance: true, evaluation: { select: { status: true, recommendation: true, hrDecision: true } } } },
 } satisfies Prisma.ApplicationSelect;
 type StudentDbRow = Prisma.ApplicationGetPayload<{ select: typeof STUDENT_SELECT }>;
 
@@ -198,7 +206,40 @@ function toStudent(r: StudentDbRow): StudentRow {
         }
       : null,
     hasVoiceScreening: !!r.screeningSession,
+    aiScreening: r.screeningSession
+      ? { status: r.screeningSession.status, review: r.screeningSession.reviewStatus }
+      : r.screeningInvite
+        ? { status: 'INVITED', review: null }
+        : null,
+    roundProgress: roundProgress(r),
   };
+}
+
+const GD_ATTENDANCE: Record<StudentDbRow['gdParticipants'][number]['attendance'], string> = {
+  WAITING: 'Waiting for a GD group',
+  SCHEDULED: 'In a GD group',
+  INVITED: 'GD invite sent',
+  JOINED: 'Joined the GD',
+  ADMITTED_LATE: 'Joined the GD (late)',
+  ABSENT: 'Absent from the GD',
+};
+const selected = (d: string) => (d === 'SELECTED' ? 'Selected' : 'Not selected');
+
+/** What the round engine and the GD module know about a round before its result is recorded. */
+function roundProgress(r: StudentDbRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const i of r.roundInvites) {
+    out[i.roundId] = i.revokedAt ? 'Link revoked' : i.sentAt ? 'Invited' : i.emailStatus === 'FAILED' ? 'Invite email failed' : 'Invite queued';
+  }
+  for (const a of r.roundAttempts) out[a.roundId] = a.status === 'IN_PROGRESS' ? 'Test in progress' : 'Submitted, being graded';
+  for (const g of r.gdParticipants) {
+    const e = g.evaluation;
+    if (!e) out[g.roundId] = GD_ATTENDANCE[g.attendance];
+    else if (e.hrDecision) out[g.roundId] = `HR: ${selected(e.hrDecision)}, to confirm`;
+    else if (e.status === 'OK' && e.recommendation) out[g.roundId] = `AI: ${selected(e.recommendation)}, HR to confirm`;
+    else out[g.roundId] = 'Evaluated, HR to decide';
+  }
+  return out;
 }
 
 function toResult(r: Prisma.RoundResultGetPayload<object>): ResultRow {

@@ -1,8 +1,9 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import {
   describePassRule,
   overrideRoundResultRequestSchema,
   roundResultInputSchema,
+  roundRunnerOf,
   type AssessmentJob,
   type AssessmentRoundSummary,
   type JobAssessments,
@@ -13,7 +14,7 @@ import {
 import { apiError, parseBody } from '../../common/api-error';
 import { uuidv7 } from '../../common/uuidv7';
 import { AuditService } from '../audit';
-import { RoundsConfigService } from '../rounds-config';
+import { RoundModules, RoundsConfigService } from '../rounds-config';
 import type { Actor } from '../tenants';
 import { AssessmentsStore, type ResultRow } from './assessments.store';
 import { InvalidResultError, gradeResult, outcomeOf, stageOf } from './grading';
@@ -45,6 +46,8 @@ export class AssessmentsService {
     @Inject(AssessmentsStore) private readonly store: AssessmentsStore,
     @Inject(RoundsConfigService) private readonly rounds: RoundsConfigService,
     @Inject(AuditService) private readonly audit: AuditService,
+    /** Which round modules are connected ("run by" on the HR Assessments page). */
+    @Optional() @Inject(RoundModules) private readonly modules: RoundModules = new RoundModules(),
   ) {}
 
   // ---------- round engine (teammate): in-process only, through index.ts ----------
@@ -113,7 +116,8 @@ export class AssessmentsService {
       const ids = jobs.map((j) => j.id);
       const [configs, counts] = await Promise.all([this.rounds.listConfigs(tenantId, ids), this.store.countByJob(tenantId, ids)]);
       const configOf = new Map(configs.map((c) => [c.jobId, c]));
-      return jobs.map((j) => ({
+      // only the jobs HR set up assessment rounds for (draft or complete); other approved jobs have nothing to show
+      return jobs.filter((j) => (configOf.get(j.id)?.rounds.length ?? 0) > 0).map((j) => ({
         jobId: j.id,
         title: j.title,
         roundsStatus: configOf.get(j.id)?.status ?? 'NOT_STARTED',
@@ -146,6 +150,7 @@ export class AssessmentsService {
             maxScore: res?.maxScore ?? null,
             passMark: res?.passMark ?? r.passRule?.value ?? null,
             overridden: !!res?.override,
+            progress: res ? null : (s.roundProgress[r.id] ?? null),
           };
         });
         return {
@@ -154,6 +159,7 @@ export class AssessmentsService {
           email: s.email,
           college: s.college,
           atsScore: s.ats?.score ?? null,
+          aiScreening: s.aiScreening,
           stage: stageOf(cells.map((c) => c.outcome)),
           rounds: cells,
         };
@@ -166,7 +172,7 @@ export class AssessmentsService {
         rounds: rounds.map((r, i) => {
           const outcomes = rows.map((row) => row.rounds[i]!.outcome);
           return {
-            ...summary(r),
+            ...summary(r, this.modules),
             counts: {
               passed: outcomes.filter((o) => o === 'PASSED').length,
               failed: outcomes.filter((o) => o === 'FAILED').length,
@@ -190,7 +196,7 @@ export class AssessmentsService {
         this.store.listResults(tenantId, { applicationId }),
       ]);
       const resultOf = new Map(results.map((r) => [r.roundId, r]));
-      const rounds = (config?.rounds ?? []).map((r) => roundReview(r, resultOf.get(r.id)));
+      const rounds = (config?.rounds ?? []).map((r) => roundReview(r, resultOf.get(r.id), this.modules));
       return {
         applicationId,
         jobId: s.jobId,
@@ -241,7 +247,8 @@ export class AssessmentsService {
 
 const indexResults = (results: ResultRow[]) => new Map(results.map((r) => [`${r.applicationId}:${r.roundId}`, r]));
 
-function summary(r: SavedRound): Omit<AssessmentRoundSummary, 'counts'> {
+function summary(r: SavedRound, modules: RoundModules): Omit<AssessmentRoundSummary, 'counts'> {
+  const runner = roundRunnerOf(r);
   return {
     id: r.id,
     position: r.position,
@@ -253,13 +260,16 @@ function summary(r: SavedRound): Omit<AssessmentRoundSummary, 'counts'> {
     passRuleText: r.passRule ? describePassRule(r.passRule, r.questions) : null,
     questionCount: r.totals.questions,
     totalMarks: r.totals.marks,
+    runBy: runner.by,
+    module: runner.by === 'MODULE' ? runner.module : null,
+    moduleConnected: runner.by === 'MODULE' && modules.isConnected(runner.module),
   };
 }
 
-function roundReview(r: SavedRound, res: ResultRow | undefined): StudentAssessment['rounds'][number] {
+function roundReview(r: SavedRound, res: ResultRow | undefined, modules: RoundModules): StudentAssessment['rounds'][number] {
   const answerOf = new Map((res?.answers ?? []).map((a) => [a.questionId, a]));
   return {
-    round: summary(r),
+    round: summary(r, modules),
     outcome: outcomeOf(res),
     systemPassed: res?.systemPassed ?? null,
     score: res?.score ?? null,
