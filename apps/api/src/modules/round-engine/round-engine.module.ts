@@ -24,7 +24,7 @@ import { ROUND_ENGINE_WORKER_CONFIG, RoundEngineWorker, roundEngineWorkerConfigF
     { provide: ROUND_ENGINE_WORKER_CONFIG, useFactory: () => roundEngineWorkerConfigFromEnv() },
     { provide: ROUND_ENGINE_CLOCK, useValue: () => new Date() },
   ],
-  // the dsa module runs coding rounds through the engine service (index.ts), never through its store
+  // the dsa module runs the coding rounds' page through it
   exports: [RoundEngineService],
 })
 export class RoundEngineModule {}

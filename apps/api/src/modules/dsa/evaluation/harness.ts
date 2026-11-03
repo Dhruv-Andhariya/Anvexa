@@ -1,18 +1,12 @@
 import type { HarnessKind, Language } from '../questions/question.types';
 
-/** The problem shapes that wrap the candidate's function in a harness (everything but `stdio`). */
-type WrappedKind = Exclude<HarnessKind, 'stdio'>;
-
 /** Marks the line carrying the function's return value so candidate debug prints cannot corrupt it. */
 export const RESULT_MARKER = '__HF_RESULT__:';
 
 export interface BuiltProgram {
   source: string;
-  /**
-   * Maps a line number of the combined program to the line of the candidate's own code, or null when that line
-   * belongs to the harness. Used to point compiler and runtime messages at what the candidate actually wrote.
-   */
-  mapLine: (combinedLine: number) => number | null;
+  /** Lines the backend prepended before the candidate's code; used to fix up compiler line numbers. */
+  lineOffset: number;
 }
 
 const PRELUDE: Record<Language, string> = {
@@ -38,7 +32,7 @@ def _hf_emit(value):
     _hf_sys.stdout.flush()
 `;
 
-const PYTHON: Record<WrappedKind, string> = {
+const PYTHON: Record<HarnessKind, string> = {
   'two-sum': `${PY_COMMON}
 def _hf_main():
     lines = _hf_lines()
@@ -87,7 +81,7 @@ public class Main {
         java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
 `;
 
-const JAVA: Record<WrappedKind, string> = {
+const JAVA: Record<HarnessKind, string> = {
   'two-sum': `${JAVA_HEAD}        int[] nums = hfArr(hfLine(br));
         int target = Integer.parseInt(hfLine(br).trim());
         int[] r = new Solution().twoSum(nums, target);
@@ -135,7 +129,7 @@ static void hf_emit(const string& v) {
 int main() {
 `;
 
-const CPP: Record<WrappedKind, string> = {
+const CPP: Record<HarnessKind, string> = {
   'two-sum': `${CPP_HEAD}    vector<int> nums = hf_arr(hf_line());
     int target = stoi(hf_line());
     Solution sol;
@@ -165,57 +159,19 @@ const CPP: Record<WrappedKind, string> = {
 `,
 };
 
-const HARNESSES: Record<Language, Record<WrappedKind, string>> = { python: PYTHON, java: JAVA, cpp: CPP };
-
-const countLines = (s: string) => (s === '' ? 0 : s.split('\n').length - (s.endsWith('\n') ? 1 : 0));
-
-/** `import java.util.*;`, `import static java.lang.Math.*;` ... must precede every class in the file. */
-const JAVA_IMPORT = /^\s*import\s+(static\s+)?[\w.]+(\.\*)?\s*;\s*$/;
+const HARNESSES: Record<Language, Record<HarnessKind, string>> = { python: PYTHON, java: JAVA, cpp: CPP };
 
 export function buildProgram(language: Language, kind: HarnessKind, candidateCode: string): BuiltProgram {
-  const body = candidateCode.endsWith('\n') ? candidateCode : `${candidateCode}\n`;
-
-  // HR's own problems: the candidate's program is run as written (Java: its first class is launched).
-  if (kind === 'stdio') return { source: body, mapLine: (n) => n };
-
-  if (language === 'java') {
-    // Java runs in single-file source mode, which launches the FIRST class in the file. So the harness `Main` goes
-    // first, the candidate's imports move above it, and the candidate's own classes follow.
-    const lines = body.split('\n');
-    if (lines[lines.length - 1] === '') lines.pop();
-    const imports: { text: string; orig: number }[] = [];
-    const rest: { text: string; orig: number }[] = [];
-    lines.forEach((text, i) => (JAVA_IMPORT.test(text) ? imports : rest).push({ text, orig: i + 1 }));
-    const harness = HARNESSES.java[kind]; // starts with a newline, ends with a newline
-    const harnessLines = countLines(harness);
-    const head = imports.map((l) => l.text).join('\n');
-    const source = `${head}${imports.length ? '\n' : ''}${harness}${rest.map((l) => l.text).join('\n')}\n`;
-    const importCount = imports.length;
-    return {
-      source,
-      mapLine: (n) => {
-        if (n >= 1 && n <= importCount) return imports[n - 1].orig;
-        const afterHarness = n - importCount - harnessLines;
-        return afterHarness >= 1 && afterHarness <= rest.length ? rest[afterHarness - 1].orig : null;
-      },
-    };
-  }
-
   const prelude = PRELUDE[language];
-  const preludeLines = countLines(prelude);
-  const candidateLines = countLines(body);
+  const body = candidateCode.endsWith('\n') ? candidateCode : `${candidateCode}\n`;
   return {
     source: `${prelude}${body}${HARNESSES[language][kind]}`,
-    mapLine: (n) => (n > preludeLines && n <= preludeLines + candidateLines ? n - preludeLines : null),
+    lineOffset: prelude === '' ? 0 : prelude.split('\n').length - 1,
   };
 }
 
-/**
- * Pulls the returned value out of stdout; everything else is the candidate's own output. A `stdio` program has no
- * harness: its whole stdout is the answer.
- */
-export function splitStdout(stdout: string, kind?: HarnessKind): { result: string | null; userOutput: string } {
-  if (kind === 'stdio') return { result: stdout, userOutput: stdout };
+/** Pulls the returned value out of stdout; everything else is the candidate's own output. */
+export function splitStdout(stdout: string): { result: string | null; userOutput: string } {
   const idx = stdout.lastIndexOf(RESULT_MARKER);
   if (idx === -1) return { result: null, userOutput: stdout };
   const rest = stdout.slice(idx + RESULT_MARKER.length);
@@ -225,24 +181,13 @@ export function splitStdout(stdout: string, kind?: HarnessKind): { result: strin
   return { result, userOutput: before };
 }
 
-/**
- * Compiler / interpreter messages refer to the combined file and to the runner's own file names
- * (`main.cpp.cpp`, `Main.java.java`, `/box/submission/main.py`). Point them at the candidate's own lines instead.
- * A line that belongs to the harness is shown as `solution:?`.
- */
-export function cleanDiagnostics(text: string, mapLine: (combinedLine: number) => number | null): string {
+/** Compiler / interpreter messages refer to the combined file; point them at the candidate's own lines. */
+export function cleanDiagnostics(text: string, lineOffset: number): string {
   if (!text) return text;
-  const file = String.raw`(?:[\w./-]*/)?(?:main\.cpp(?:\.cpp)?|Main\.java(?:\.java)?|main\.py|script\.py)`;
-  const at = (line: string) => {
-    const n = mapLine(Number(line));
-    return n === null ? '?' : String(n);
-  };
   return text
-    .replace(new RegExp(`${file}:(\\d+)`, 'g'), (_m, line: string) => `solution:${at(line)}`)
-    .replace(new RegExp(`${file}", line (\\d+)`, 'g'), (_m, line: string) => `solution", line ${at(line)}`)
-    .replace(new RegExp(file, 'g'), 'solution')
-    .replace(/\/box\/(?:submission\/)?/g, '')
-    .split('\n')
-    .filter((l) => !/^chmod: cannot access 'a\.out'/.test(l))
-    .join('\n');
+    .replace(/(?:\/box\/)?(?:main\.cpp|Main\.java|script\.py)(:|", line )(\d+)/g, (_m, sep: string, line: string) => {
+      const n = Math.max(1, Number(line) - lineOffset);
+      return sep === ':' ? `solution:${n}` : `solution", line ${n}`;
+    })
+    .replace(/\/box\//g, '');
 }

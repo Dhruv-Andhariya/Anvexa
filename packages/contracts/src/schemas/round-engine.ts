@@ -175,8 +175,6 @@ export const roundEngineRoundSchema = z.object({
   roundId: z.string(),
   /** Run online by the round engine (only MCQ / true-false questions). Other rounds are run by HR. */
   online: z.boolean(),
-  /** How the engine runs it: TEST = multiple-choice page on the careers site, CODING = DSA coding page. null = HR runs it. */
-  kind: z.enum(['TEST', 'CODING']).nullable().default(null),
   invite: z
     .object({
       emailStatus: emailDeliveryStatusSchema,

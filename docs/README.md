@@ -11,9 +11,6 @@ Project documentation. Update when a module, event or version changes.
 | Document | What it covers |
 |---|---|
 | [APTITUDE_ASSESSMENT_ROUND.md](APTITUDE_ASSESSMENT_ROUND.md) | M13 online test rounds (Aptitude & English Literacy): invitation after AI screening, timed webcam-monitored test, server grading, next round / emails, HR view, deployment |
-| [DSA_ASSESSMENT_ROUND.md](DSA_ASSESSMENT_ROUND.md) | DSA coding round: HR setup (problem picker), invitation after AI screening, coding page, scoring, cleared / rejection emails, HR review, operations |
-| [dsa-piston-hosting.md](dsa-piston-hosting.md) | Code execution on the hosting PC with Piston: requirements, startup, limits, capacity, remote test, troubleshooting |
-| [dsa-integration-notes.md](dsa-integration-notes.md), [dsa-proctoring-implementation.md](dsa-proctoring-implementation.md) | DSA module notes (questions, harnesses, API) and browser proctoring |
 | [SCREENING_ROUND.md](SCREENING_ROUND.md) | M12 AI voice screening round: flow, voice architecture, security/privacy, running, tests, deployment plan, limits |
 | [PROJECT_MAP.md](PROJECT_MAP.md) | Simple one-file map: every folder, how apps/API/AI worker/database are wired, main flows, where to change what |
 | [HireFlow_AI_Documentation.md](HireFlow_AI_Documentation.md) | Full product + architecture spec |

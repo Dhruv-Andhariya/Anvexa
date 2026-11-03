@@ -1,7 +1,6 @@
 import type { RoundOutcomeEmailKind } from '@hireflow/contracts';
 import type { EmailMessage } from '../../src/modules/applications/email/confirmation-email';
 import type { Mailer } from '../../src/modules/applications';
-import type { CodingState } from '../../src/modules/round-engine/coding-round';
 import type { StoredAnswers } from '../../src/modules/round-engine/online-test';
 import {
   RoundEngineStore,
@@ -56,19 +55,12 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
       deadlineAt: data.deadlineAt,
       submittedAt: null,
       answers: {},
-      codingState: data.codingState ? structuredClone(data.codingState) : null,
       revision: 0,
       systemPassed: null,
       progressedAt: null,
     };
     this.attempts.push(row);
     return structuredClone(row);
-  }
-  async saveCodingState(attemptId: string, state: CodingState) {
-    const a = this.attempts.find((x) => x.id === attemptId);
-    if (!a || a.status !== 'IN_PROGRESS') return false;
-    a.codingState = structuredClone(state);
-    return true;
   }
   async saveAnswers(attemptId: string, revision: number, answers: StoredAnswers) {
     const a = this.attempts.find((x) => x.id === attemptId);
@@ -126,6 +118,11 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
   }
   async screeningsToInvite() {
     return this.completedScreenings.filter((s) => !this.invites.some((i) => i.applicationId === s.applicationId && i.roundId === s.roundId));
+  }
+  /** What clearedBeforeCodingRound() returns (the SQL lives in the Prisma store). */
+  clearedBeforeCoding: { tenantId: string; applicationId: string; jobId: string; roundId: string }[] = [];
+  async clearedBeforeCodingRound() {
+    return this.clearedBeforeCoding.filter((s) => !this.invites.some((i) => i.applicationId === s.applicationId && i.roundId === s.roundId));
   }
   async claimDueInvites() {
     const due = this.invites.filter((i) => i.emailStatus === 'QUEUED');

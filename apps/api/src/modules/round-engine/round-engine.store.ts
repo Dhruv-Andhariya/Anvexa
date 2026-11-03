@@ -1,9 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { DSA_BANK, dsaTopicFor, type EmailDeliveryStatus, type ProctorEventType, type ProctorSeverity, type RoundOutcomeEmailKind } from '@hireflow/contracts';
+import type { EmailDeliveryStatus, ProctorEventType, ProctorSeverity, RoundOutcomeEmailKind } from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
-import { parseCodingState, type CodingState } from './coding-round';
 import { parseStoredAnswers, type StoredAnswers } from './online-test';
 
 export interface InviteRow {
@@ -35,8 +34,6 @@ export interface AttemptRow {
   deadlineAt: Date | null;
   submittedAt: Date | null;
   answers: StoredAnswers;
-  /** DSA (coding) rounds only: what the candidate achieved so far (null for MCQ rounds). */
-  codingState: CodingState | null;
   revision: number;
   systemPassed: boolean | null;
   progressedAt: Date | null;
@@ -93,9 +90,7 @@ export abstract class RoundEngineStore {
   abstract attemptByInvite(inviteId: string): Promise<AttemptRow | null>;
   abstract getAttempt(attemptId: string): Promise<AttemptRow | null>;
   /** Creates the attempt, or returns the one that already exists for this invite (two tabs pressing Start). */
-  abstract createAttempt(data: Omit<AttemptRow, 'id' | 'answers' | 'codingState' | 'revision' | 'systemPassed' | 'progressedAt' | 'submittedAt' | 'status'> & { consentVersion: string; codingState?: CodingState }): Promise<AttemptRow>;
-  /** DSA rounds: stores the candidate's progress while the attempt is in progress (false = it is not, nothing stored). */
-  abstract saveCodingState(attemptId: string, state: CodingState): Promise<boolean>;
+  abstract createAttempt(data: Omit<AttemptRow, 'id' | 'answers' | 'revision' | 'systemPassed' | 'progressedAt' | 'submittedAt' | 'status'> & { consentVersion: string }): Promise<AttemptRow>;
   /** Stores the answers if the attempt is in progress and `revision` is newer. Returns the revision now stored. */
   abstract saveAnswers(attemptId: string, revision: number, answers: StoredAnswers): Promise<number | null>;
   /** IN_PROGRESS -> SUBMITTED / TIMED_OUT, once. Optional final answers (applied only when newer). true = this call finished it. */
@@ -110,11 +105,10 @@ export abstract class RoundEngineStore {
   // ---- progression / emails
   abstract queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string): Promise<boolean>;
   abstract queueOutcomeEmail(tenantId: string, applicationId: string, roundId: string, kind: RoundOutcomeEmailKind, nextRoundName: string | null): Promise<boolean>;
-  /**
-   * Completed AI screenings whose job's FIRST round is an online test (or, with `codingRounds`, a DSA round) the
-   * candidate was not invited to yet.
-   */
-  abstract screeningsToInvite(limit: number, codingRounds?: boolean): Promise<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>;
+  /** Completed AI screenings whose job's FIRST round is an online test the candidate was not invited to yet. */
+  abstract screeningsToInvite(limit: number): Promise<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>;
+  /** Students told "cleared - HR will contact you" whose next round is a coding round they were not invited to yet. */
+  abstract clearedBeforeCodingRound(limit: number): Promise<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>;
   abstract claimDueInvites(now: Date, staleBefore: Date, limit: number): Promise<InviteRow[]>;
   abstract setInviteToken(inviteId: string, tokenHash: string, expiresAt: Date): Promise<void>;
   abstract inviteSent(inviteId: string, sentAt: Date, expiresAt: Date): Promise<void>;
@@ -200,16 +194,10 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
         consentAt: data.startedAt,
         startedAt: data.startedAt,
         deadlineAt: data.deadlineAt,
-        ...(data.codingState ? { codingState: data.codingState as unknown as Prisma.InputJsonObject } : {}),
       },
       skipDuplicates: true,
     });
     return toAttempt(await this.db.roundAttempt.findUniqueOrThrow({ where: { inviteId: data.inviteId } }));
-  }
-
-  async saveCodingState(attemptId: string, state: CodingState) {
-    const r = await this.db.roundAttempt.updateMany({ where: { id: attemptId, status: 'IN_PROGRESS' }, data: { codingState: state as unknown as Prisma.InputJsonObject } });
-    return r.count > 0;
   }
 
   async saveAnswers(attemptId: string, revision: number, answers: StoredAnswers) {
@@ -268,8 +256,7 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
     return r.count > 0;
   }
 
-  screeningsToInvite(limit: number, codingRounds = true) {
-    const bankTopics = DSA_BANK.map((p) => dsaTopicFor(p.id));
+  screeningsToInvite(limit: number) {
     return this.db.$queryRaw<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>(Prisma.sql`
       SELECT a.tenant_id::text AS "tenantId", a.id::text AS "applicationId", a.job_id::text AS "jobId", r.id::text AS "roundId"
         FROM screening_sessions s
@@ -279,15 +266,28 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
        WHERE s.status = 'COMPLETED'
          AND r.pass_mode IS NOT NULL AND r.pass_mode <> 'INTERVIEWER_SCORE'
          AND EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id)
-         AND (
-           NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id AND q.kind NOT IN ('MCQ', 'TRUE_FALSE'))
-           OR (${codingRounds}::boolean AND NOT EXISTS (
-                 SELECT 1 FROM round_questions q WHERE q.round_id = r.id
-                    AND NOT (q.kind = 'CODING' AND (q.topics && ${bankTopics}::text[] OR q.coding_spec IS NOT NULL))))
-         )
+         AND NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id AND q.kind NOT IN ('MCQ', 'TRUE_FALSE'))
          AND NOT EXISTS (SELECT 1 FROM round_invites i WHERE i.application_id = a.id AND i.round_id = r.id)
          AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = a.id AND rr.round_id = r.id)
        ORDER BY s.completed_at
+       LIMIT ${limit}`);
+  }
+
+  clearedBeforeCodingRound(limit: number) {
+    return this.db.$queryRaw<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>(Prisma.sql`
+      SELECT e.tenant_id::text AS "tenantId", e.application_id::text AS "applicationId", r.job_id::text AS "jobId", n.id::text AS "roundId"
+        FROM round_outcome_emails e
+        JOIN job_rounds r ON r.id = e.round_id AND r.tenant_id = e.tenant_id
+        JOIN job_round_configs c ON c.job_id = r.job_id AND c.tenant_id = r.tenant_id AND c.status = 'COMPLETE'
+        JOIN job_rounds n ON n.job_id = r.job_id AND n.tenant_id = r.tenant_id
+         AND n.position = (SELECT min(x.position) FROM job_rounds x WHERE x.job_id = r.job_id AND x.tenant_id = r.tenant_id AND x.position > r.position)
+       WHERE e.kind = 'CLEARED_NEXT_BY_HR'::round_outcome_email_kind
+         AND n.pass_mode IS NOT NULL AND n.pass_mode <> 'INTERVIEWER_SCORE'
+         AND EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = n.id)
+         AND NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = n.id AND q.kind <> 'CODING')
+         AND NOT EXISTS (SELECT 1 FROM round_invites i WHERE i.application_id = e.application_id AND i.round_id = n.id)
+         AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = e.application_id AND rr.round_id = n.id)
+       ORDER BY e.created_at
        LIMIT ${limit}`);
   }
 
@@ -444,7 +444,6 @@ function toAttempt(r: AttemptDb): AttemptRow {
     deadlineAt: r.deadlineAt,
     submittedAt: r.submittedAt,
     answers: parseStoredAnswers(r.answers),
-    codingState: r.codingState === null ? null : parseCodingState(r.codingState),
     revision: r.revision,
     systemPassed: r.systemPassed,
     progressedAt: r.progressedAt,

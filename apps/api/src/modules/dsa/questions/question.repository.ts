@@ -1,4 +1,3 @@
-import type { DsaInvitation } from '../session/invitation.resolver';
 import type { DsaQuestion } from './question.types';
 
 export const DSA_QUESTION_REPOSITORY = Symbol('DSA_QUESTION_REPOSITORY');
@@ -10,5 +9,5 @@ export const DSA_QUESTION_REPOSITORY = Symbol('DSA_QUESTION_REPOSITORY');
  */
 export interface QuestionRepository {
   /** Questions for an assessment, in the order the candidate sees them. */
-  findForAssessment(assessmentId: string, invitation?: DsaInvitation): Promise<DsaQuestion[]>;
+  findForAssessment(assessmentId: string): Promise<DsaQuestion[]>;
 }

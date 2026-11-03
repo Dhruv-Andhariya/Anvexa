@@ -2,17 +2,17 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CodeRunner, RunnerJob, RunnerResult } from '../../src/modules/dsa/execution/code-runner';
+import type { CodeRunner, Judge0Job, Judge0Result } from '../../src/modules/dsa/judge0/judge0.client';
 
 /**
  * TEST-ONLY runner that executes programs with the toolchains installed on the developer machine.
- * It exists so the harnesses, test data and evaluator can be verified without a sandboxed runner.
- * It is NOT a sandbox and must never be used by the application. Results from it are not Piston results.
+ * It exists so the harnesses, test data and evaluator can be verified when Judge0 cannot execute code.
+ * It is NOT a sandbox and must never be used by the application. Results from it are not Judge0 results.
  */
 const CPU_LIMIT_MS = 4000;
 const PYTHON = process.env.DSA_LOCAL_PYTHON || 'python';
 
-const result = (r: Partial<RunnerResult>): RunnerResult => ({
+const result = (r: Partial<Judge0Result>): Judge0Result => ({
   verdict: 'ok',
   statusText: 'Accepted',
   stdout: '',
@@ -43,14 +43,14 @@ export class LocalRunner implements CodeRunner {
     return problems;
   }
 
-  async runBatch(jobs: RunnerJob[]): Promise<RunnerResult[]> {
-    const out: RunnerResult[] = [];
-    // Compile once per distinct source, mirroring what a single sandboxed compile would produce for each job.
+  async runBatch(jobs: Judge0Job[]): Promise<Judge0Result[]> {
+    const out: Judge0Result[] = [];
+    // Compile once per distinct source, mirroring what a single Judge0 compile would produce for each job.
     for (const job of jobs) out.push(this.runOne(job));
     return out;
   }
 
-  private runOne(job: RunnerJob): RunnerResult {
+  private runOne(job: Judge0Job): Judge0Result {
     const dir = mkdtempSync(join(tmpdir(), 'dsa-run-'));
     try {
       let runCmd: [string, string[]];

@@ -31,6 +31,8 @@ model RoundInvite {
   application Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   round       JobRound      @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
   attempt     RoundAttempt?
+  /// Coding rounds: the DSA page's state (round_engine_dsa.prisma).
+  dsaSession  DsaSession?
 
   @@unique([applicationId, roundId])
   @@index([emailStatus, nextAttemptAt])
@@ -64,9 +66,6 @@ model RoundAttempt {
   submittedAt    DateTime?          @map("submitted_at")
   /// { [questionId]: { selected: number[], marked: boolean } } - the autosaved answers.
   answers        Json               @default("{}")
-  /// DSA (coding) rounds only: { progress: { [questionId]: best score, passed, total, attempts, language, bestCode },
-  /// finishReason } - what the candidate achieved so far. null for MCQ rounds. Never sent to the browser as is.
-  codingState    Json?              @map("coding_state")
   /// Highest autosave revision applied; an older (late) save never overwrites a newer one.
   revision       Int                @default(0)
   /// Result as graded by the assessments module (null until graded).
@@ -163,23 +162,4 @@ model RoundOutcomeEmail {
   @@index([status, nextAttemptAt])
   @@index([tenantId])
   @@map("round_outcome_emails")
-}
-
-/// DSA (coding) rounds: what the browser noticed during the assessment (full-screen exits, tab switches, clipboard,
-/// restricted shortcuts) with the review verdict computed on the server. Evidence for HR's review only. One row per
-/// invitation, found by `invite_ref` (a SHA-256 derived reference, never the link token). Deleted with the application.
-model DsaProctorSession {
-  inviteRef     String   @id @map("invite_ref")
-  tenantId      String   @map("tenant_id") @db.Uuid
-  applicationId String   @map("application_id") @db.Uuid
-  roundId       String   @map("round_id") @db.Uuid
-  /// The module's own record (consent, events with durations, resumes). Small facts only: never images or text typed.
-  session       Json
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId, applicationId])
-  @@map("dsa_proctor_sessions")
 }

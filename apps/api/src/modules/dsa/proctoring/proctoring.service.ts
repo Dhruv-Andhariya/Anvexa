@@ -131,12 +131,6 @@ export class ProctoringService {
     return session ? summarize(session, this.policy, this.now()) : null;
   }
 
-  /** HR review of stored sessions (already filtered to one company and application by the caller). */
-  reviewOf(session: ProctorSession, eventLimit: number): { summary: ProctoringSummary; events: ProctorEventView[] } {
-    const ordered = [...session.events].sort((a, b) => a.at - b.at || a.id - b.id);
-    return { summary: summarize(session, this.policy, this.now()), events: ordered.slice(0, eventLimit).map(toView) };
-  }
-
   async events(inviteRef: string, limit: number, offset: number): Promise<{ total: number; events: ProctorEventView[] } | null> {
     const session = await this.store.get(inviteRef);
     if (!session) return null;

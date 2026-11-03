@@ -5,7 +5,6 @@ import {
   passMarkLimit,
   saveRoundsRequestSchema,
   type Difficulty,
-  type DsaProblemSpec,
   type GeneratedQuestion,
   type PassMode,
   type QuestionKind,
@@ -31,18 +30,6 @@ export interface QuestionDraft {
   difficulty: Difficulty | null;
   topics: string[];
   source: 'HR' | 'AI';
-  /** Coding questions: HR's own DSA problem (null = none; a bank problem or a question HR runs). */
-  coding: CodingDraft | null;
-}
-
-/** HR's own DSA problem while it is edited. The question text is the statement. */
-export interface CodingDraft {
-  title: string;
-  inputFormat: string;
-  outputFormat: string;
-  /** One per line. */
-  constraints: string;
-  tests: { key: string; input: string; output: string; hidden: boolean }[];
 }
 
 export interface RoundDraft {
@@ -81,31 +68,8 @@ export function newQuestion(kind: QuestionKind): QuestionDraft {
     difficulty: null,
     topics: [],
     source: 'HR',
-    coding: null,
   };
 }
-
-/** A new DSA problem: one sample test and one hidden test to fill in. */
-export function newCodingDraft(title = ''): CodingDraft {
-  return {
-    title,
-    inputFormat: '',
-    outputFormat: '',
-    constraints: '',
-    tests: [newTestDraft(false), newTestDraft(true)],
-  };
-}
-
-export const newTestDraft = (hidden: boolean): CodingDraft['tests'][number] => ({ key: key(), input: '', output: '', hidden });
-
-const codingFromSaved = (c: DsaProblemSpec | null): CodingDraft | null =>
-  c && {
-    title: c.title,
-    inputFormat: c.inputFormat,
-    outputFormat: c.outputFormat,
-    constraints: c.constraints,
-    tests: c.tests.map((t) => ({ key: key(), input: t.input, output: t.output, hidden: t.hidden })),
-  };
 
 /** A new round with sensible defaults: interviews are scored by the interviewer out of 10. */
 export function newRound(type: RoundType, name?: string): RoundDraft {
@@ -148,7 +112,6 @@ export function fromSaved(rounds: SavedRound[]): RoundDraft[] {
       difficulty: q.difficulty,
       topics: q.topics,
       source: q.source,
-      coding: codingFromSaved(q.coding),
     })),
   }));
 }
@@ -166,7 +129,6 @@ export function fromGenerated(q: GeneratedQuestion): QuestionDraft {
     difficulty: q.difficulty,
     topics: q.topics,
     source: 'AI',
-    coding: null,
   };
 }
 
@@ -218,16 +180,6 @@ export function toRequest(drafts: RoundDraft[], complete: boolean): SaveRoundsRe
         difficulty: q.difficulty,
         topics: q.topics,
         source: q.source,
-        coding:
-          q.kind === 'CODING' && q.coding
-            ? {
-                title: q.coding.title,
-                inputFormat: q.coding.inputFormat,
-                outputFormat: q.coding.outputFormat,
-                constraints: q.coding.constraints,
-                tests: q.coding.tests.map(({ input, output, hidden }) => ({ input, output, hidden })),
-              }
-            : null,
       })),
     })),
   };

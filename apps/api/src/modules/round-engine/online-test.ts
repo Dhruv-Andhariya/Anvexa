@@ -1,6 +1,5 @@
 import {
   ONLINE_TEST_KINDS,
-  isDsaRound,
   type AssessmentAnswer,
   type AssessmentQuestion,
   type ProctorEventType,
@@ -9,7 +8,6 @@ import {
   type RoundOutcomeEmailKind,
   type SavedRound,
 } from '@hireflow/contracts';
-import { codingRoundsEnabled } from './coding-round';
 
 /**
  * Pure rules of the online test rounds (no I/O): which rounds run online, what the candidate may see, which answers
@@ -37,15 +35,22 @@ export function isOnlineRound(round: Pick<SavedRound, 'passRule' | 'questions'>)
   );
 }
 
-/** How the engine runs a round: an online test (MCQ page on the careers site), a DSA coding round, or not at all (HR runs it). */
-export type RoundKind = 'TEST' | 'CODING';
-
-/** A round the engine runs by itself, and how. Coding rounds follow DSA_ROUNDS (off = HR runs them). */
-export function roundKind(round: Pick<SavedRound, 'passRule' | 'questions'>, codingEnabled: boolean = codingRoundsEnabled()): RoundKind | null {
-  if (isOnlineRound(round)) return 'TEST';
-  if (codingEnabled && isDsaRound(round)) return 'CODING';
-  return null;
+/**
+ * Run on the DSA coding page (candidate app /dsa/[token], dsa module) and graded from its score: a pass rule that is
+ * not an interviewer's score and only coding questions. HR's questions describe the round; the problems the student
+ * solves (with hidden tests) come from the dsa module.
+ */
+export function isCodingRound(round: Pick<SavedRound, 'passRule' | 'questions'>): boolean {
+  return (
+    !!round.passRule &&
+    round.passRule.mode !== 'INTERVIEWER_SCORE' &&
+    round.questions.length > 0 &&
+    round.questions.every((q) => q.kind === 'CODING')
+  );
 }
+
+/** The round engine invites students to it (an MCQ test on the careers site or the DSA coding page). */
+export const isInvitedRound = (round: Pick<SavedRound, 'passRule' | 'questions'>) => isOnlineRound(round) || isCodingRound(round);
 
 /** What the candidate sees of each question: never the correct option(s), model answer or topics. */
 export function publicQuestions(round: SavedRound): AssessmentQuestion[] {
@@ -112,20 +117,19 @@ export function parseStoredAnswers(value: unknown): StoredAnswers {
 }
 
 export type NextStep =
-  | { kind: 'INVITE'; round: SavedRound; roundKind: RoundKind }
+  | { kind: 'INVITE'; round: SavedRound }
   | { kind: 'EMAIL'; email: RoundOutcomeEmailKind; nextRoundName: string | null };
 
 /**
  * What follows a finished round, in HR's round order (position): a failed round ends the journey (matches stageOf()
- * in grading.ts); a passed one leads to the next online round's invitation, or - when the next round is run by HR
- * (interview, coding...) or there is none - to an email saying so.
+ * in grading.ts); a passed one leads to the next online or coding round's invitation, or - when the next round is
+ * run by HR (interview, descriptive...) or there is none - to an email saying so.
  */
 export function nextStep(rounds: SavedRound[], current: SavedRound, passed: boolean): NextStep {
   if (!passed) return { kind: 'EMAIL', email: 'REJECTED', nextRoundName: null };
   const next = [...rounds].sort((a, b) => a.position - b.position).find((r) => r.position > current.position);
   if (!next) return { kind: 'EMAIL', email: 'CLEARED_ALL', nextRoundName: null };
-  const nextKind = roundKind(next);
-  if (nextKind) return { kind: 'INVITE', round: next, roundKind: nextKind };
+  if (isInvitedRound(next)) return { kind: 'INVITE', round: next };
   return { kind: 'EMAIL', email: 'CLEARED_NEXT_BY_HR', nextRoundName: next.name };
 }
 

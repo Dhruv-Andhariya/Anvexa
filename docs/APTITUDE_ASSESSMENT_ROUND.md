@@ -33,7 +33,9 @@ HR: Assessments -> job -> student -> round card: score, pass mark, answers (exis
 
 **Which rounds run online:** a score-based pass rule (correct answers, marks or percentage) and only multiple-choice
 or true/false questions. That is what an Aptitude & English Literacy round is in the M05 editor (type Aptitude allows
-MCQ and true/false; a Custom round with only MCQ also works). Coding, descriptive and interview rounds are run by HR.
+MCQ and true/false; a Custom round with only MCQ also works). A round with only **coding** questions and a score rule
+runs on the DSA coding page instead (same invitation flow, link `DSA_SITE_URL/dsa/<token>`; see
+[dsa-integration-notes.md](dsa-integration-notes.md)). Descriptive and interview rounds are run by HR.
 
 ## 2. What the student sees (careers site `/assessment/[token]`)
 
