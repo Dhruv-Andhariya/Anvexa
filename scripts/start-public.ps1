@@ -132,8 +132,11 @@ if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new UR
 # 4. API + dashboards (pnpm is not on PATH on this laptop, so the pinned version runs through npx)
 if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (Listening 3001))) {
   if (Listening 4000) { 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
+  # CAREERS_SITE_URL is the live tunnel here, so the API may rewrite old posts to it at start even when .env keeps
+  # PUBLISHER_AUTO_REFRESH_LINKS=false (that guards plain `pnpm dev` with a localhost URL). The process env wins
+  # over .env: process.loadEnvFile never overwrites a variable that is already set.
   Start-Process -WindowStyle Hidden -WorkingDirectory $root powershell.exe `
-    -ArgumentList '-NoProfile', '-Command', "npx -y pnpm@9.15.0 dev *> '$logs\dev.log'"
+    -ArgumentList '-NoProfile', '-Command', "`$env:PUBLISHER_AUTO_REFRESH_LINKS='true'; npx -y pnpm@9.15.0 dev *> '$logs\dev.log'"
 }
 if (-not (WaitFor 'API + careers site' 300 { (Listening 4000) -and (Listening 3300) })) { exit 1 }
 if ($dsaUrl) { WaitFor 'candidate app (DSA)' 300 { Listening 3001 } | Out-Null }
