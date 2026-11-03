@@ -1,14 +1,13 @@
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { dsaError, parseCodeRequest, type CodeRequestDto } from './dsa.dto';
 import { Evaluator, type CaseResult, type Evaluation, type Verdict } from './evaluation/evaluator';
-import { JUDGE0_CLIENT, Judge0UnavailableError, type CodeRunner } from './judge0/judge0.client';
+import { CODE_RUNNER, CodeRunnerBusyError, CodeRunnerUnavailableError, type CodeRunner } from './execution/code-runner';
 import { DSA_CLOCK } from './dsa.tokens';
 import { parseProctorEvents, parseProctorStart } from './proctoring/proctoring.dto';
 import { ProctoringService, inviteRefFor, type RecordResult } from './proctoring/proctoring.service';
 import type { CandidateProctorState, ClientProctoringConfig } from './proctoring/proctoring.types';
 import { DSA_QUESTION_REPOSITORY, type QuestionRepository } from './questions/question.repository';
 import { LANGUAGES, toPublicQuestion, type DsaQuestion, type Language, type PublicQuestion } from './questions/question.types';
-import { DSA_LIFECYCLE, type AssessmentLifecycle } from './session/assessment-lifecycle';
 import {
   DSA_INVITATION_RESOLVER,
   type DsaInvitation,
@@ -61,10 +60,12 @@ export interface AssessmentState {
   remainingSeconds: number | null;
   /** Only present while the assessment is in progress. Contains NO hidden test cases. */
   questions?: PublicQuestion[];
-  progress: QuestionProgress[];
+  progress: PublicProgress[];
   result?: FinalResult;
   /** Monitoring rules and the candidate's own standing. Contains no thresholds and no event log. */
   proctoring: ClientProctoringConfig & { started: boolean } & CandidateProctorState;
+  /** False for HR rounds: the final page shows no score (the outcome comes by email) and `result` carries none. */
+  showScore: boolean;
 }
 
 export interface RunResponse {
@@ -81,8 +82,12 @@ export interface RunResponse {
 export interface SubmitResponse extends RunResponse {
   score: number;
   maxScore: number;
-  progress: QuestionProgress;
+  progress: PublicProgress;
 }
+
+/** Progress as the browser sees it: never the stored source code. */
+export type PublicProgress = Omit<QuestionProgress, 'bestCode'>;
+const toPublicProgress = ({ bestCode: _bestCode, ...rest }: QuestionProgress): PublicProgress => rest;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -90,17 +95,16 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export class DsaService {
   private readonly logger = new Logger(DsaService.name);
   private readonly evaluator: Evaluator;
-  /** Tokens with a run/submit executing, to stop a candidate flooding the code runner (one process). */
+  /** Candidates whose run / submit is executing right now (one at a time each, so nobody floods the code runner). */
   private readonly running = new Set<string>();
 
   constructor(
     @Inject(DSA_INVITATION_RESOLVER) private readonly invitations: InvitationResolver,
     @Inject(DSA_QUESTION_REPOSITORY) private readonly questions: QuestionRepository,
     @Inject(DSA_SESSION_STORE) private readonly sessions: SessionStore,
-    @Inject(JUDGE0_CLIENT) runner: CodeRunner,
+    @Inject(CODE_RUNNER) runner: CodeRunner,
     @Optional() @Inject(DSA_CLOCK) private readonly now: () => number = Date.now,
     @Optional() @Inject(ProctoringService) private readonly proctoring: ProctoringService = new ProctoringService(),
-    @Optional() @Inject(DSA_LIFECYCLE) private readonly lifecycle: AssessmentLifecycle | null = null,
   ) {
     this.evaluator = new Evaluator(runner);
   }
@@ -108,27 +112,25 @@ export class DsaService {
   // ---------------------------------------------------------------- public API
 
   async getState(token: string): Promise<AssessmentState> {
-    const { session, questions } = await this.load(token);
-    return this.toState(session, questions);
+    const { session, questions, invitation } = await this.load(token);
+    return this.toState(session, questions, invitation);
   }
 
   async start(token: string): Promise<AssessmentState> {
-    const { session, questions } = await this.load(token);
+    const { session, questions, invitation } = await this.load(token);
     if (session.status === 'not_started') {
       // With proctoring on, the candidate must have accepted the monitoring notice (and been in full screen) first.
       if (this.proctoring.enabled && !(await this.proctoring.isStarted(inviteRefFor(token)))) {
         throw dsaError(HttpStatus.CONFLICT, 'PROCTORING_NOT_STARTED', 'Accept the monitoring notice and enter full screen before starting.');
       }
       const at = this.now();
-      const deadlineAt = at + session.durationSec * 1000;
-      await this.lifecycle?.started(token, at, deadlineAt);
       session.status = 'in_progress';
       session.startedAt = at;
-      session.deadlineAt = deadlineAt;
+      session.deadlineAt = at + session.durationSec * 1000;
       await this.sessions.save(session);
       await this.proctoring.markAssessmentStarted(inviteRefFor(token), session.assessmentId, at);
     }
-    return this.toState(session, questions);
+    return this.toState(session, questions, invitation);
   }
 
   // ---------------------------------------------------------------- proctoring (candidate side)
@@ -205,6 +207,8 @@ export class DsaService {
       total: evaluation.total,
       language: best ? dto.language : previous.language,
       lastVerdict: evaluation.verdict,
+      // the best submission's source is kept for HR's review (assessments answer limit: 50,000 characters)
+      bestCode: best ? dto.code.slice(0, 50_000) : (previous.bestCode ?? null),
     };
     // Re-read: a finish may have raced with this evaluation; never resurrect a manually finished session.
     const fresh = (await this.sessions.get(token)) ?? session;
@@ -213,16 +217,16 @@ export class DsaService {
       await this.sessions.save(fresh);
     }
     const response = this.toResponse(session, question, dto, evaluation);
-    return { ...response, score, maxScore: question.marks, progress };
+    return { ...response, score, maxScore: question.marks, progress: toPublicProgress(progress) };
   }
 
   async finish(token: string): Promise<AssessmentState> {
-    const { session, questions } = await this.load(token);
+    const { session, questions, invitation } = await this.load(token);
     if (session.status === 'not_started') {
       throw dsaError(HttpStatus.CONFLICT, 'NOT_STARTED', 'The assessment has not been started.');
     }
     if (session.status === 'in_progress') await this.closeSession(session, 'submitted');
-    return this.toState(session, questions);
+    return this.toState(session, questions, invitation);
   }
 
   // ---------------------------------------------------------------- internals
@@ -234,16 +238,6 @@ export class DsaService {
     session.finishReason = reason;
     await this.sessions.save(session);
     await this.proctoring.end(inviteRefFor(session.token), session.finishedAt);
-    await this.notifyFinished(session);
-  }
-
-  /** A failure here is not the candidate's problem: the round engine grades the attempt when its time runs out. */
-  private async notifyFinished(session: DsaSession): Promise<void> {
-    try {
-      await this.lifecycle?.finished(session.token, session.finishReason ?? 'submitted');
-    } catch (err) {
-      this.logger.warn(`assessment end not passed on (${err instanceof Error ? err.message : 'unknown'}); graded when its time runs out`);
-    }
   }
 
   private finishedError(session: DsaSession) {
@@ -258,12 +252,12 @@ export class DsaService {
     return { assessmentId: session.assessmentId, startedAt: session.startedAt, endsAt: session.deadlineAt };
   }
 
-  private async load(token: string): Promise<{ session: DsaSession; questions: DsaQuestion[] }> {
+  private async load(token: string): Promise<{ session: DsaSession; questions: DsaQuestion[]; invitation: DsaInvitation }> {
     const invitation = await this.invitations.resolve(token);
     if (!invitation) {
       throw dsaError(HttpStatus.NOT_FOUND, 'INVALID_TOKEN', 'This assessment link is not valid.');
     }
-    const questions = await this.questions.findForAssessment(invitation.assessmentId);
+    const questions = await this.questions.findForAssessment(invitation.assessmentId, invitation);
     let session = await this.sessions.get(token);
     if (!session) {
       session = this.newSession(invitation);
@@ -272,9 +266,8 @@ export class DsaService {
     if (this.expireIfNeeded(session)) {
       await this.sessions.save(session);
       await this.proctoring.end(inviteRefFor(session.token), session.finishedAt ?? this.now());
-      await this.notifyFinished(session);
     }
-    return { session, questions };
+    return { session, questions, invitation };
   }
 
   private newSession(inv: DsaInvitation): DsaSession {
@@ -329,9 +322,13 @@ export class DsaService {
     try {
       return await this.evaluator.evaluate(question, dto.language, dto.code, cases);
     } catch (err) {
-      if (err instanceof Judge0UnavailableError) {
-        this.logger.error(`Judge0 failure: ${err.message} (${err.detail ?? 'no detail'})`);
-        throw dsaError(HttpStatus.SERVICE_UNAVAILABLE, 'JUDGE0_UNAVAILABLE', err.message);
+      if (err instanceof CodeRunnerBusyError) {
+        // Too many runs are waiting on the hosting machine. Nothing is recorded; the candidate can retry.
+        throw dsaError(HttpStatus.SERVICE_UNAVAILABLE, 'CODE_RUNNER_BUSY', err.message);
+      }
+      if (err instanceof CodeRunnerUnavailableError) {
+        this.logger.error(`Code runner failure: ${err.message} (${err.detail ?? 'no detail'})`);
+        throw dsaError(HttpStatus.SERVICE_UNAVAILABLE, 'CODE_RUNNER_UNAVAILABLE', err.message);
       }
       throw err;
     } finally {
@@ -366,7 +363,7 @@ export class DsaService {
     };
   }
 
-  private async toState(session: DsaSession, questions: DsaQuestion[]): Promise<AssessmentState> {
+  private async toState(session: DsaSession, questions: DsaQuestion[], invitation: DsaInvitation): Promise<AssessmentState> {
     const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
     const ref = inviteRefFor(session.token);
     const state: AssessmentState = {
@@ -381,15 +378,23 @@ export class DsaService {
       startedAt: iso(session.startedAt),
       deadlineAt: iso(session.deadlineAt),
       remainingSeconds: this.remainingSeconds(session),
-      progress: questions.map((q) => session.progress[q.id] ?? this.emptyProgress(q.id)),
+      progress: questions.map((q) => toPublicProgress(session.progress[q.id] ?? this.emptyProgress(q.id))),
       proctoring: {
         ...this.proctoring.config(),
         started: await this.proctoring.isStarted(ref),
         ...(await this.proctoring.candidateStateFor(ref)),
       },
+      showScore: true,
     };
     if (session.status === 'in_progress') state.questions = questions.map(toPublicQuestion);
-    if (session.status === 'finished') state.result = this.buildResult(session, questions);
+    const showScore = invitation.showResult !== false;
+    state.showScore = showScore;
+    if (session.status === 'finished') {
+      const result = this.buildResult(session, questions);
+      // an HR round: no score, no per-question marks and no pass / fail ever reach the candidate
+      state.result = showScore ? result : { reason: result.reason, finishedAt: result.finishedAt, totalScore: 0, maxScore: 0, percentage: 0, questions: [] };
+      if (!showScore) state.progress = state.progress.map((p) => ({ ...p, bestScore: 0, passed: 0, total: 0 }));
+    }
     return state;
   }
 

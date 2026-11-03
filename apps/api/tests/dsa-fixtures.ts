@@ -181,3 +181,34 @@ export const BROKEN: Record<'compile' | 'runtime' | 'infinite', Record<Language,
     cpp: 'class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) { while (true) {} return {}; }\n};\n',
   },
 };
+
+/** HR's own problem as typed in the rounds editor (stdin / stdout program, no harness): sum of n integers. */
+export const HR_PROBLEM = {
+  kind: 'CODING' as const,
+  text: 'Given n integers, print their sum.',
+  marks: 10,
+  difficulty: 'EASY' as const,
+  coding: {
+    title: 'Sum of numbers',
+    inputFormat: 'The first line holds n. The second line holds n integers.',
+    outputFormat: 'Print the sum.',
+    constraints: '1 <= n <= 1000\n-10^6 <= a[i] <= 10^6',
+    tests: [
+      { input: '3\n1 2 3', output: '6', hidden: false },
+      { input: '1\n-5', output: '-5', hidden: true },
+      { input: '4\n1000000 1000000 1000000 1000000', output: '4000000', hidden: true },
+    ],
+  },
+};
+
+/** Whole programs for HR_PROBLEM: correct ones, and wrong ones that always print 6 (pass the sample only). */
+export const HR_CORRECT: Record<Language, string> = {
+  python: 'import sys\nd = sys.stdin.read().split()\nn = int(d[0])\nprint(sum(int(x) for x in d[1:1 + n]))\n',
+  java: 'import java.util.*;\n\npublic class Main {\n    public static void main(String[] a) {\n        Scanner s = new Scanner(System.in);\n        int n = s.nextInt();\n        long t = 0;\n        for (int i = 0; i < n; i++) t += s.nextLong();\n        System.out.println(t);\n    }\n}\n',
+  cpp: '#include <bits/stdc++.h>\nusing namespace std;\nint main() { int n; cin >> n; long long t = 0, x; for (int i = 0; i < n; i++) { cin >> x; t += x; } cout << t << endl; }\n',
+};
+export const HR_WRONG: Record<Language, string> = {
+  python: 'print(6)\n',
+  java: 'public class Main {\n    public static void main(String[] a) {\n        System.out.println(6);\n    }\n}\n',
+  cpp: '#include <cstdio>\nint main() { std::puts("6"); }\n',
+};

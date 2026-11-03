@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DsaService } from '../src/modules/dsa/dsa.service';
 import { RESULT_MARKER } from '../src/modules/dsa/evaluation/harness';
-import type { CodeRunner, Judge0Job } from '../src/modules/dsa/judge0/judge0.client';
+import type { CodeRunner, RunnerJob } from '../src/modules/dsa/execution/code-runner';
 import { DISABLED_POLICY, policyFromEnv, type ProctorPolicy } from '../src/modules/dsa/proctoring/proctoring.policy';
 import { ProctoringService, inviteRefFor } from '../src/modules/dsa/proctoring/proctoring.service';
 import { InMemoryProctorStore } from '../src/modules/dsa/proctoring/proctoring.store';
@@ -16,7 +16,7 @@ const B = 'demo-dsa-short'; // 1 minute
 const T0 = 1_700_000_000_000;
 const expectedByStdin = new Map(MOCK_QUESTIONS.flatMap((q) => q.testCases.map((t) => [t.stdin, t.expectedOutput] as const)));
 const perfectRunner: CodeRunner = {
-  async runBatch(jobs: Judge0Job[]) {
+  async runBatch(jobs: RunnerJob[]) {
     return jobs.map((j) => ({
       verdict: 'ok' as const, statusText: 'Accepted', stderr: '', compileOutput: '', timeMs: 3, memoryKb: 100,
       stdout: `\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`,

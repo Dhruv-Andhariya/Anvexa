@@ -25,7 +25,7 @@ export interface InviteEmailInput extends CandidateEmailBase {
   link: string;
   linkExpiresAt: Date;
   cameraRequired: boolean;
-  /** A coding round on the DSA page: coding problems instead of questions, full-screen monitoring, no camera. */
+  /** A DSA coding round (candidate-app page) instead of a multiple-choice test: the wording changes, nothing else. */
   coding?: boolean;
 }
 
@@ -48,18 +48,18 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
     `Dear ${v.name},`,
     `Thank you for completing the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}. We are pleased to invite you to the next stage of our recruitment process: the ${round}.`,
     i.coding
-      ? `Assessment: ${round} · coding problems, solved in Python, Java or C++ · ${duration}.`
+      ? `Assessment: ${round} · ${i.questionCount} coding problem${i.questionCount === 1 ? '' : 's'} · ${duration}.`
       : `Assessment: ${round} · ${i.questionCount} question${i.questionCount === 1 ? '' : 's'} · ${duration}.`,
     ...(instructions ? [`Instructions from the hiring team: ${instructions}`] : []),
     `Please take the assessment using this personal link: ${i.link}`,
     `The link works until ${dateText(i.linkExpiresAt)}. Once you start, the timer keeps running even if you close the page, so please begin when you can finish in one sitting.`,
     i.coding
-      ? 'The assessment is monitored: it runs in full screen on a laptop or desktop, and the page records events such as leaving full screen or switching tabs for the hiring team to review. Repeated violations can end the assessment. No camera is used.'
+      ? 'This is a proctored coding test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. You may write each solution in Python, Java or C++. Nothing needs to be installed because your code runs on our servers. No camera, microphone or screen recording is used.'
       : i.cameraRequired
-        ? 'The assessment is monitored: you will need a laptop or phone with a working webcam, and the page records events such as leaving the test tab or the camera turning off for the hiring team to review. No video is recorded.'
-        : 'The assessment page records events such as leaving the test tab for the hiring team to review.',
+      ? 'The assessment is monitored: you will need a laptop or phone with a working webcam, and the page records events such as leaving the test tab or the camera turning off for the hiring team to review. No video is recorded.'
+      : 'The assessment page records events such as leaving the test tab for the hiring team to review.',
     i.coding
-      ? 'Use a recent version of Chrome, Edge or Firefox and a stable internet connection. Your best submission for each problem counts.'
+      ? 'Use a recent version of Chrome, Edge or Firefox and a stable internet connection. The best submission for each problem counts, so you may submit as often as you like before the time is over.'
       : 'Use a recent version of Chrome, Edge, Firefox or Safari and a stable internet connection. Your answers are saved as you go.',
     'If you have any questions, please reply to this email.',
     'We wish you the very best!',

@@ -11,6 +11,8 @@ export interface QuestionProgress {
   total: number;
   language: Language | null;
   lastVerdict: string | null;
+  /** Source of the best submission, kept for HR's review. Server side only: never part of the state sent to the browser. */
+  bestCode?: string | null;
 }
 
 export type SessionStatus = 'not_started' | 'in_progress' | 'finished';
@@ -29,8 +31,8 @@ export interface DsaSession {
 }
 
 /**
- * Persistence for assessment state. The in-memory implementation loses state on API restart; the app uses the
- * database (table `dsa_sessions`, integration/round-engine.bridge.ts).
+ * Persistence for assessment state. The in-memory implementation (demo tokens only) loses state on API restart; for HR
+ * rounds `EngineSessionStore` keeps it on the round engine's attempt, so nothing is lost on restart.
  */
 export interface SessionStore {
   get(token: string): Promise<DsaSession | undefined>;

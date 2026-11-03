@@ -1,11 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import type { CodeRunner } from '../../src/modules/dsa/judge0/judge0.client';
+import type { CodeRunner } from '../../src/modules/dsa/execution/code-runner';
 import { DsaService } from '../../src/modules/dsa/dsa.service';
+import { BankQuestionRepository } from '../../src/modules/dsa/questions/bank-question.repository';
 import { MockQuestionRepository } from '../../src/modules/dsa/questions/mock-question.repository';
 import { LANGUAGES } from '../../src/modules/dsa/questions/question.types';
-import { DemoInvitationResolver } from '../../src/modules/dsa/session/invitation.resolver';
+import { DemoInvitationResolver, type DsaInvitation, type InvitationResolver } from '../../src/modules/dsa/session/invitation.resolver';
 import { InMemorySessionStore } from '../../src/modules/dsa/session/session.store';
-import { BROKEN, CORRECT, WRONG } from '../dsa-fixtures';
+import { BROKEN, CORRECT, HR_CORRECT, HR_PROBLEM, HR_WRONG, WRONG } from '../dsa-fixtures';
+
+const HR_TOKEN = 'hr-round-token';
+const HR_QUESTION_ID = '0192f3a1-cccc-7000-8000-000000000001';
+
+/** An HR round whose only question is HR's own problem (what the round engine's invitation resolves to). */
+const hrRound: InvitationResolver = {
+  resolve: async (token: string): Promise<DsaInvitation | null> =>
+    token === HR_TOKEN
+      ? {
+          token,
+          assessmentId: 'app.round',
+          candidateName: 'Asha',
+          durationMinutes: 45,
+          round: {
+            questions: [
+              {
+                id: HR_QUESTION_ID,
+                bankId: '',
+                marks: HR_PROBLEM.marks,
+                custom: { statement: HR_PROBLEM.text, difficulty: HR_PROBLEM.difficulty, spec: { ...HR_PROBLEM.coding } },
+              },
+            ],
+          },
+        }
+      : null,
+};
 
 const QUESTION_IDS = ['dsa-001', 'dsa-002', 'dsa-003'];
 const T = 240_000;
@@ -85,6 +112,22 @@ export function defineExecutionSuite(label: string, makeRunner: () => CodeRunner
         const res = await service.run(TOKEN, { questionId: 'dsa-001', language, code: BROKEN.infinite[language] });
         expect(res.verdict).toBe('failed');
         expect(res.cases.every((c) => c.status === 'time_limit')).toBe(true);
+      }, T);
+    }
+
+    // HR's own problem from the rounds editor: the candidate's whole program runs with each test on stdin
+    for (const language of LANGUAGES) {
+      it(`HR's own problem ${language}: Run uses the sample only; Submit grades every test; the score counts`, async () => {
+        const service = new DsaService(hrRound, new BankQuestionRepository(), new InMemorySessionStore(), makeRunner());
+        await service.start(HR_TOKEN);
+        const run = await service.run(HR_TOKEN, { questionId: HR_QUESTION_ID, language, code: HR_CORRECT[language] });
+        expect(run.cases, JSON.stringify(run.cases)).toMatchObject([{ status: 'passed', hidden: false, expected: '6' }]);
+        const wrong = await service.submit(HR_TOKEN, { questionId: HR_QUESTION_ID, language, code: HR_WRONG[language] });
+        expect(wrong, JSON.stringify(wrong.cases)).toMatchObject({ verdict: 'failed', passed: 1, total: 3 });
+        const right = await service.submit(HR_TOKEN, { questionId: HR_QUESTION_ID, language, code: HR_CORRECT[language] });
+        expect(right, JSON.stringify(right.cases)).toMatchObject({ verdict: 'passed', passed: 3, total: 3, score: 10, maxScore: 10 });
+        const state = await service.finish(HR_TOKEN);
+        expect(state.result?.totalScore).toBe(10);
       }, T);
     }
 

@@ -175,7 +175,7 @@ export function Assessment({ token }: { token: string }) {
   if (!state) return <LoadingScreen />;
 
   if (state.status === 'finished' && state.result) {
-    return <ResultScreen result={state.result} candidateName={state.candidateName} />;
+    return <ResultScreen result={state.result} candidateName={state.candidateName} showScore={state.showScore} />;
   }
 
   if (state.status === 'not_started') {
