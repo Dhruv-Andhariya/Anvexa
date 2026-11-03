@@ -3,8 +3,9 @@ import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
 import { buildRoundClearedEmail, buildRoundInviteEmail, buildRoundRejectionEmail } from './emails';
+import { codingMinutes, codingRoundsEnabled } from './coding-round';
 import { DEFAULT_LINK_DAYS, assessmentBaseUrlFromEnv, assessmentLink, dsaBaseUrlFromEnv, isPublicLink, newAssessmentToken } from './link';
-import { DEADLINE_GRACE_MS, isCodingRound, isInvitedRound } from './online-test';
+import { DEADLINE_GRACE_MS, roundKind } from './online-test';
 import { ROUND_ENGINE_CLOCK, ROUND_ENGINE_CONFIG, RoundEngineService, type RoundEngineConfig } from './round-engine.service';
 import { RoundEngineStore, type InviteRow, type OutcomeEmailRow, type SendFailure } from './round-engine.store';
 
@@ -18,7 +19,7 @@ export interface RoundEngineWorkerConfig {
   autoInvite: boolean;
   /** Base of the assessment link (ASSESSMENT_URL or CAREERS_SITE_URL/assessment/{token}); null = not set up. */
   baseUrl: string | null;
-  /** Base of the DSA coding page link (DSA_URL or DSA_SITE_URL/dsa/{token}); null = coding invitations wait. */
+  /** Base of the DSA coding page link (DSA_ASSESSMENT_URL or CANDIDATE_APP_URL/dsa/{token}); null = not set up. */
   dsaBaseUrl: string | null;
   linkDays: number;
   /** Local testing only (e.g. Mailpit): also email links whose host is localhost (ROUND_ALLOW_LOCAL_LINKS). */
@@ -60,7 +61,8 @@ class WaitingForLinkError extends Error {}
 /** "Table does not exist": P2021 from Prisma queries, P2010 + Postgres 42P01 from raw SQL. */
 const isMissingTable = (err: unknown) => {
   const e = err as { code?: unknown; meta?: { code?: unknown } } | null;
-  return e?.code === 'P2021' || (e?.code === 'P2010' && e.meta?.code === '42P01');
+  // P2022: a column the code needs is missing (migration 20261102120000_dsa_round not applied)
+  return e?.code === 'P2021' || e?.code === 'P2022' || (e?.code === 'P2010' && e.meta?.code === '42P01');
 };
 
 /**
@@ -89,6 +91,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
   onApplicationBootstrap() {
     if (!this.config.enabled) return;
     if (!this.config.baseUrl) this.logger.warn('assessment link not set up (ASSESSMENT_URL / CAREERS_SITE_URL): invitations wait in the queue');
+    if (!this.config.dsaBaseUrl) this.logger.warn('DSA link not set up (DSA_ASSESSMENT_URL / CANDIDATE_APP_URL): coding round invitations wait in the queue');
     this.timer = setInterval(() => void this.tick(), this.config.pollMs);
     this.timer.unref();
   }
@@ -110,7 +113,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
     } catch (err) {
       if (isMissingTable(err)) {
         this.pausedUntil = Date.now() + NOT_READY_PAUSE_MS;
-        this.logger.warn('round engine tables are missing (migration 20261030120000_round_engine not applied) - paused 5 minutes');
+        this.logger.warn('round engine tables or columns are missing (migrations 20261030120000_round_engine / 20261102120000_dsa_round not applied) - paused 5 minutes');
       } else {
         this.logger.error(`round engine tick failed (${err instanceof Error ? err.name : 'unknown'})`);
       }
@@ -119,18 +122,11 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
     }
   }
 
-  /**
-   * AI screening COMPLETED -> invitation to the job's first round (when that round is an online test). Students who
-   * passed a round before the coding round got "HR will contact you" before coding rounds ran online: they are
-   * invited to it now.
-   */
+  /** AI screening COMPLETED -> invitation to the job's first round (when that round is an online test). */
   async discover(): Promise<number> {
     let queued = 0;
-    for (const row of await this.store.screeningsToInvite(50)) {
+    for (const row of await this.store.screeningsToInvite(50, codingRoundsEnabled())) {
       if (await this.engine.inviteToFirstRound(row)) queued++;
-    }
-    for (const row of await this.store.clearedBeforeCodingRound(50)) {
-      if (await this.engine.inviteToCodingRound(row)) queued++;
     }
     return queued;
   }
@@ -170,23 +166,16 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
       const config = await this.rounds.forRoundEngine(row.tenantId, row.jobId);
       const ordered = [...(config?.rounds ?? [])].sort((a, b) => a.position - b.position);
       const round = ordered.find((r) => r.id === row.roundId);
-      if (!round || !isInvitedRound(round)) throw new PermanentEmailError('This round is no longer an online test.');
-      const coding = isCodingRound(round);
+      const kind = round ? roundKind(round) : null;
+      if (!round || !kind) throw new PermanentEmailError('This round is no longer an online test.');
+      const coding = kind === 'CODING';
       const base = coding ? this.config.dsaBaseUrl : this.config.baseUrl;
       // never a broken link in a candidate's inbox: hold the invitation until a public link exists
       if (!base) {
-        throw new WaitingForLinkError(
-          coding
-            ? 'Waiting for the coding test link to be set up (DSA_URL or DSA_SITE_URL).'
-            : 'Waiting for the assessment link to be set up (ASSESSMENT_URL or CAREERS_SITE_URL).',
-        );
+        throw new WaitingForLinkError(coding ? 'Waiting for the DSA link to be set up (DSA_ASSESSMENT_URL or CANDIDATE_APP_URL).' : 'Waiting for the assessment link to be set up (ASSESSMENT_URL or CAREERS_SITE_URL).');
       }
       if (!this.config.allowLocalLinks && !isPublicLink(base)) {
-        throw new WaitingForLinkError(
-          coding
-            ? 'Waiting for a public coding test link (start the public link for the candidate app); it is sent automatically then.'
-            : 'Waiting for a public assessment link (start the public link or deploy the careers site); it is sent automatically then.',
-        );
+        throw new WaitingForLinkError('Waiting for a public assessment link (start the public link or deploy the site); it is sent automatically then.');
       }
       const previous = ordered.filter((r) => r.position < round.position).at(-1);
 
@@ -201,12 +190,12 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
         companyWebsite: ctx.companyWebsite,
         roundName: round.name,
         clearedStep: previous ? previous.name : 'AI screening round',
-        timeLimitMinutes: round.timeLimitMinutes,
+        timeLimitMinutes: coding ? codingMinutes(round) : round.timeLimitMinutes,
         questionCount: round.questions.length,
         instructions: round.description,
         link: assessmentLink(base, token.token),
         linkExpiresAt: expiresAt,
-        cameraRequired: !coding && this.engineConfig.cameraRequired,
+        cameraRequired: coding ? false : this.engineConfig.cameraRequired,
         coding,
       });
       await this.mailer.send(ctx.email, message);

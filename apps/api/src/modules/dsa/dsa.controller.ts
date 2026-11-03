@@ -1,15 +1,17 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { featureFlag } from '../../common/feature-flags';
+import { rateLimit } from '../applications';
 import { Public } from '../auth';
 import { DsaService, type AssessmentState, type RunResponse, type SubmitResponse } from './dsa.service';
 
 /**
  * Candidate-facing DSA assessment API. The invitation token in the URL identifies the assessment.
- * Responses never contain hidden test cases.
- *
- * @Public: there is no HR session here. The invitation token is the only credential, and it is validated by the
- * InvitationResolver on every call (unknown, expired or used tokens get 404).
+ * Responses never contain hidden test cases. PUBLIC (no login): the link token is the credential and is scoped to ONE
+ * application's ONE round; per-IP rate limit; writes need `x-requested-with: hireflow` (AuthGuard CSRF).
+ * Off with FEATURE_DSA=off.
  */
 @Public()
+@UseGuards(featureFlag('dsa'), rateLimit('assessment'))
 @Controller('dsa')
 export class DsaController {
   constructor(@Inject(DsaService) private readonly service: DsaService) {}

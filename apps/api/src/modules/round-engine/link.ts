@@ -10,21 +10,21 @@ export const DEFAULT_LINK_DAYS = 7;
  * refused (a candidate could never open it).
  */
 export function assessmentBaseUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  return baseUrl(env.ASSESSMENT_URL, env.CAREERS_SITE_URL, '/assessment/{token}', env);
+  return baseUrlFrom(env.ASSESSMENT_URL, env.CAREERS_SITE_URL, '/assessment/{token}', env);
 }
 
 /**
- * Base URL of the DSA coding page (candidate app /dsa/[token]): DSA_URL, or `${DSA_SITE_URL}/dsa/{token}`. The
- * candidate app has its own public address (scripts/start-public.ps1 runs a second tunnel for it).
+ * Base URL of the DSA coding page (candidate-app /dsa/[token]): DSA_ASSESSMENT_URL, or - when that is empty -
+ * `${CANDIDATE_APP_URL}/dsa/{token}`. Same rules as the assessment link: http(s) only, and in production never localhost.
  */
 export function dsaBaseUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  return baseUrl(env.DSA_URL, env.DSA_SITE_URL, '/dsa/{token}', env);
+  return baseUrlFrom(env.DSA_ASSESSMENT_URL, env.CANDIDATE_APP_URL, '/dsa/{token}', env);
 }
 
-function baseUrl(explicitUrl: string | undefined, siteUrl: string | undefined, path: string, env: NodeJS.ProcessEnv): string | null {
-  const explicit = (explicitUrl ?? '').trim();
-  const site = (siteUrl ?? '').trim().replace(/\/+$/, '');
-  const raw = explicit || (site ? `${site}${path}` : '');
+function baseUrlFrom(explicitRaw: string | undefined, rootRaw: string | undefined, path: string, env: NodeJS.ProcessEnv): string | null {
+  const explicit = (explicitRaw ?? '').trim();
+  const root = (rootRaw ?? '').trim().replace(/\/+$/, '');
+  const raw = explicit || (root ? `${root}${path}` : '');
   if (!raw) return null;
   try {
     const url = new URL(raw.replace('{token}', 'x'));

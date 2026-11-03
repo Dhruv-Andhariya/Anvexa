@@ -6,7 +6,7 @@ import { MailError } from '../../src/modules/applications';
 import { AssessmentsService } from '../../src/modules/assessments';
 import { RoundsConfigService } from '../../src/modules/rounds-config';
 import { buildRoundInviteEmail } from '../../src/modules/round-engine/emails';
-import { assessmentBaseUrlFromEnv, dsaBaseUrlFromEnv, hashAssessmentToken, isPublicLink, newAssessmentToken } from '../../src/modules/round-engine/link';
+import { assessmentBaseUrlFromEnv, hashAssessmentToken, isPublicLink, newAssessmentToken } from '../../src/modules/round-engine/link';
 import { isOnlineRound, nextStep } from '../../src/modules/round-engine/online-test';
 import { RoundEngineService } from '../../src/modules/round-engine/round-engine.service';
 import { RoundEngineWorker, type RoundEngineWorkerConfig } from '../../src/modules/round-engine/round-engine.worker';
@@ -93,7 +93,7 @@ function worker(config: Partial<RoundEngineWorkerConfig> = {}, mailer = new Fake
     rounds,
     mailer,
     audit,
-    { enabled: false, pollMs: 5000, autoInvite: true, baseUrl: 'https://careers.example.com/assessment/{token}', dsaBaseUrl: null, linkDays: 7, allowLocalLinks: false, ...config },
+    { enabled: false, pollMs: 5000, autoInvite: true, baseUrl: 'https://careers.example.com/assessment/{token}', linkDays: 7, allowLocalLinks: false, ...config },
     { cameraRequired: true },
     clock,
   );
@@ -477,9 +477,6 @@ describe('links and emails', () => {
     expect(assessmentBaseUrlFromEnv({})).toBeNull();
     expect(isPublicLink('http://localhost:3300/assessment/{token}')).toBe(false);
     expect(isPublicLink('https://x.trycloudflare.com/assessment/{token}')).toBe(true);
-    expect(dsaBaseUrlFromEnv({ DSA_SITE_URL: 'https://y.trycloudflare.com/' })).toBe('https://y.trycloudflare.com/dsa/{token}');
-    expect(dsaBaseUrlFromEnv({ DSA_URL: 'https://code.example.com/t/{token}', DSA_SITE_URL: 'https://y.example' })).toBe('https://code.example.com/t/{token}');
-    expect(dsaBaseUrlFromEnv({ CAREERS_SITE_URL: 'https://x.trycloudflare.com' })).toBeNull();
   });
 
   it('the invitation email cannot be broken by names with line breaks or HTML', () => {

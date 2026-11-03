@@ -7,6 +7,7 @@ export * from './schemas/application';
 export * from './schemas/ats';
 export * from './schemas/screening';
 export * from './schemas/rounds';
+export * from './schemas/dsa-bank';
 export * from './schemas/assessments';
 export * from './schemas/round-engine';
 export * from './events';

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Difficulty, PassMode, QuestionKind, RoundType, RoundsStatus } from '@hireflow/contracts';
-import type { Prisma } from '@prisma/client';
+import { dsaProblemSpecSchema, type Difficulty, type DsaProblemSpec, type PassMode, type QuestionKind, type RoundType, type RoundsStatus } from '@hireflow/contracts';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
 export interface StoredQuestion {
@@ -16,7 +16,16 @@ export interface StoredQuestion {
   difficulty: Difficulty | null;
   topics: string[];
   source: 'HR' | 'AI';
+  /** HR's own DSA problem (coding questions only), round_questions.coding_spec. */
+  coding: DsaProblemSpec | null;
 }
+
+/** The stored problem as the contract describes it; anything unreadable counts as no problem (the round is then run by HR). */
+const parseCodingSpec = (raw: Prisma.JsonValue | null): DsaProblemSpec | null => {
+  if (raw === null) return null;
+  const parsed = dsaProblemSpecSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
 
 export interface StoredRound {
   id: string;
@@ -140,7 +149,14 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
             passMaxScore: r.passMaxScore,
           })),
         });
-        const questions = rounds.flatMap((r) => r.questions.map((q) => ({ ...q, roundId: r.id, tenantId })));
+        const questions = rounds.flatMap((r) =>
+          r.questions.map(({ coding, ...q }) => ({
+            ...q,
+            codingSpec: coding ? (coding as unknown as Prisma.InputJsonObject) : Prisma.DbNull,
+            roundId: r.id,
+            tenantId,
+          })),
+        );
         if (questions.length) await tx.roundQuestion.createMany({ data: questions });
       }
       return tx.jobRoundConfig.findFirstOrThrow({ where: { tenantId, jobId }, include: CONFIG_INCLUDE });
@@ -184,6 +200,7 @@ function toConfig(row: ConfigRow): StoredConfig {
         difficulty: q.difficulty,
         topics: q.topics,
         source: q.source,
+        coding: parseCodingSpec(q.codingSpec),
       })),
     })),
   };

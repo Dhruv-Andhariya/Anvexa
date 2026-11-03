@@ -11,23 +11,32 @@ Literacy*, after the AI voice screening: invitation email -> secure link -> time
 site (`/assessment/[token]`) -> server-side grading through the assessments module -> next round's invitation, or an
 outcome email. Full guide: [`docs/APTITUDE_ASSESSMENT_ROUND.md`](../../../../../docs/APTITUDE_ASSESSMENT_ROUND.md).
 
-A round runs online when it has a score-based pass rule and only MCQ / true-false questions (`isOnlineRound`). Other
-rounds (coding, descriptive, interviews) are run by HR; the engine stops before them and emails the candidate that
-HR will contact them.
+A round runs online (`roundKind`) in one of two ways, both with a score-based pass rule:
+
+- **TEST**: only MCQ / true-false questions. The candidate takes it on the careers site (`/assessment/[token]`).
+- **CODING (DSA round)**: every question is a **DSA bank problem** (a CODING question with the topic `dsa:<id>`, picked in
+  the rounds editor; `isDsaRound` in contracts). The candidate takes it on the candidate app (`/dsa/[token]`), served by
+  the `dsa` module. Same invitation, clock, result and next-step machinery; the engine only stores the candidate's
+  progress (`round_attempts.coding_state`) and turns it into marks. Switch off with `DSA_ROUNDS=off`. Guide:
+  [`docs/DSA_ASSESSMENT_ROUND.md`](../../../../../docs/DSA_ASSESSMENT_ROUND.md).
+
+Other rounds (descriptive questions, coding questions without a bank problem, interviews) are run by HR; the engine
+stops before them and emails the candidate that HR will contact them.
 
 ## Files
 | File | What it does |
 |---|---|
-| `online-test.ts` | Pure rules: which rounds run online, public questions (no answers), answer checks, next step, event severity |
+| `online-test.ts` | Pure rules: which rounds run online and how (`roundKind`), public questions (no answers), answer checks, next step, event severity |
+| `coding-round.ts` | Pure rules of DSA rounds: the state kept per attempt, marks (best submission per problem), answers handed to assessments |
 | `round-engine.service.ts` | Candidate flow (view / start / autosave / submit / events), grading + next step (once), HR view, revoke, resend |
 | `round-engine.worker.ts` | Background loop: invite after AI screening, send invitations + outcome emails, time-outs, interrupted next steps |
 | `round-engine.store.ts` | All database access (abstract class; tests use an in-memory store) |
-| `link.ts` | Link token (32 random bytes; only its SHA-256 is stored) and link base URL |
-| `emails.ts` | Invitation, rejection and "cleared" emails (no score, no pass mark, no proctoring details) |
+| `link.ts` | Link token (32 random bytes; only its SHA-256 is stored) and the link base URLs (assessment page, DSA page) |
+| `emails.ts` | Invitation (multiple-choice or coding wording), rejection and "cleared" emails (no score, no pass mark, no proctoring details) |
 | `public-assessment.controller.ts` / `hr-round-engine.controller.ts` | Routes |
 
-Tables: `prisma/schema/round_engine.prisma` (`round_invites`, `round_attempts`, `round_proctor_events`,
-`round_outcome_emails`). Results: `round_results` through `AssessmentsService.record()` (pass / fail decided only in
+Tables: `prisma/schema/round_engine.prisma` (`round_invites`, `round_attempts` incl. `coding_state`, `round_proctor_events`,
+`round_outcome_emails`, `dsa_proctor_sessions`). Results: `round_results` through `AssessmentsService.record()` (pass / fail decided only in
 `assessments/grading.ts`).
 
 | Method | Path | Who |
@@ -40,6 +49,10 @@ Tables: `prisma/schema/round_engine.prisma` (`round_invites`, `round_attempts`, 
 | GET | `/round-engine/applications/:applicationId` | HR `jobs.read` |
 | POST | `/round-engine/applications/:applicationId/rounds/:roundId/revoke` | HR `jobs.write` |
 | POST | `/round-engine/applications/:applicationId/rounds/:roundId/resend` | HR `jobs.write` (FAILED invitation only) |
+
+In-process API used by the `dsa` module (through `index.ts` only): `RoundEngineService.openCodingRound(token)`,
+`startCodingAttempt`, `saveCodingProgress`, `finishCodingAttempt`. Finishing records the result and queues the next
+step exactly like a submitted test; a candidate who never comes back is timed out by the worker with the saved progress.
 
 Feature flag: `FEATURE_ROUND_ENGINE=off`. Rate limit: `assessment` in `PUBLIC_RATE_LIMITS`. Audit: `assessment.invite_queued`,
 `.invite_sent`, `.started`, `.submitted`, `.timed_out`, `.progressed`, `.outcome_email_sent`, `.invite_revoked`,
