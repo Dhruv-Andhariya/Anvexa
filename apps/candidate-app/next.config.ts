@@ -11,10 +11,6 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: '/api/v1/dsa/:path*', destination: `${apiUrl}/dsa/:path*` }];
   },
-  // Next.js cuts a proxied request off after 30 s by default (HTTP 500), but a Submit can legitimately take longer
-  // when many candidates submit at once and their runs queue for the code runner (measured: up to ~2 minutes for 20
-  // simultaneous C++ submissions). The backend bounds the wait itself (DSA_RUNNER_QUEUE_TIMEOUT_MS).
-  experimental: { proxyTimeout: 240_000 },
   // The page URL holds the candidate's personal token: never sent on as a referrer, never cached or indexed.
   // No camera or microphone is used; full screen may only be used by this site itself.
   async headers() {

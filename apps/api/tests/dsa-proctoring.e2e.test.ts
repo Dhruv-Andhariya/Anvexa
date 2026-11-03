@@ -3,11 +3,9 @@ import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { RateLimiter } from '../src/modules/applications';
-import { publicLimitsFromEnv } from '../src/modules/applications/abuse/rate-limiter';
 import { DsaController } from '../src/modules/dsa/dsa.controller';
 import { DsaService } from '../src/modules/dsa/dsa.service';
-import { CODE_RUNNER, type CodeRunner } from '../src/modules/dsa/execution/code-runner';
+import { JUDGE0_CLIENT, type CodeRunner } from '../src/modules/dsa/judge0/judge0.client';
 import { ProctoringAdminController } from '../src/modules/dsa/proctoring/proctoring-admin.controller';
 import { ProctoringController } from '../src/modules/dsa/proctoring/proctoring.controller';
 import { DSA_PROCTOR_POLICY, policyFromEnv } from '../src/modules/dsa/proctoring/proctoring.policy';
@@ -24,8 +22,6 @@ const idleRunner: CodeRunner = { runBatch: async () => [] };
 @Module({
   controllers: [DsaController, ProctoringController, ProctoringAdminController],
   providers: [
-    // the controllers carry the shared per-IP limit; the real module gets this provider from ApplicationsModule
-    { provide: RateLimiter, useFactory: () => new RateLimiter(publicLimitsFromEnv()) },
     DsaService,
     ProctoringService,
     { provide: DSA_QUESTION_REPOSITORY, useClass: MockQuestionRepository },
@@ -33,7 +29,7 @@ const idleRunner: CodeRunner = { runBatch: async () => [] };
     { provide: DSA_SESSION_STORE, useClass: InMemorySessionStore },
     { provide: DSA_PROCTOR_STORE, useClass: InMemoryProctorStore },
     { provide: DSA_PROCTOR_POLICY, useValue: { ...policyFromEnv({}), enabled: true } },
-    { provide: CODE_RUNNER, useValue: idleRunner },
+    { provide: JUDGE0_CLIENT, useValue: idleRunner },
   ],
 })
 class TestModule {}

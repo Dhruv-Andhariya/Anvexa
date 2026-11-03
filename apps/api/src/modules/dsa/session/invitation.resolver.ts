@@ -1,28 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { Difficulty, DsaProblemSpec } from '@hireflow/contracts';
 
 export const DSA_INVITATION_RESOLVER = Symbol('DSA_INVITATION_RESOLVER');
-
-/**
- * The questions of an HR round: the id each question has in the round, HR's marks, and the problem behind it - a bank
- * problem (`bankId`) or HR's own (`custom`: the question text is the statement, the spec holds the tests).
- */
-export interface DsaRoundQuestion {
-  id: string;
-  bankId: string;
-  marks: number;
-  custom?: { statement: string; difficulty: Difficulty | null; spec: DsaProblemSpec };
-}
 
 export interface DsaInvitation {
   token: string;
   assessmentId: string;
   candidateName: string;
   durationMinutes: number;
-  /** Set for an HR round (the round engine's invitation); absent for the demo tokens. */
-  round?: { questions: DsaRoundQuestion[] };
-  /** Show the candidate their score on the last page. Off for HR rounds: the outcome comes by email. */
-  showResult?: boolean;
 }
 
 /**
@@ -56,7 +40,7 @@ export function demoTokensFromEnv(raw: string | undefined = process.env.DSA_DEMO
 /**
  * Temporary resolver.
  *
- * The DSA routes are public (the token is the only credential) and run code on the hosting machine, so the well-known demo
+ * The DSA routes are public (the token is the only credential) and run code through Judge0, so the well-known demo
  * tokens must never work on a deployed API. They are refused when NODE_ENV=production unless DSA_ALLOW_DEMO_TOKENS=on.
  *
  * For a temporary public demo (e.g. a Cloudflare quick tunnel) set DSA_DEMO_TOKENS to long random tokens, one per

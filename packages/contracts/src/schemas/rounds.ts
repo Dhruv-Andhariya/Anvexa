@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { dsaBankEntry, dsaBankIdOf, dsaProblemSpecSchema, dsaSpecProblems, type DsaProblemSpec } from './dsa-bank';
 import { SELECTION_PROCESS_LIMITS } from './publisher';
 
 /**
@@ -103,8 +102,6 @@ export const roundQuestionInputSchema = z
     difficulty: difficultySchema.nullable().default(null),
     topics: z.array(z.string().trim().min(1).max(ROUNDS_LIMITS.topicMax)).max(ROUNDS_LIMITS.topicsMax).default([]),
     source: z.enum(['HR', 'AI']).default('HR'),
-    /** Coding questions only: HR's own DSA problem (format, constraints, test cases), graded on the DSA page. */
-    coding: dsaProblemSpecSchema.nullable().default(null),
   })
   .superRefine((q, ctx) => {
     for (const msg of questionProblems(q)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg });
@@ -113,21 +110,8 @@ export type RoundQuestionInput = z.input<typeof roundQuestionInputSchema>;
 export type RoundQuestion = z.output<typeof roundQuestionInputSchema>;
 
 /** What is wrong with one question (empty = fine). Same text in the editor and in the API. */
-export function questionProblems(
-  q: Pick<RoundQuestion, 'kind' | 'options' | 'correct'> & { topics?: readonly string[]; coding?: Pick<DsaProblemSpec, 'tests'> | null },
-): string[] {
+export function questionProblems(q: Pick<RoundQuestion, 'kind' | 'options' | 'correct'>): string[] {
   const problems: string[] = [];
-  // a DSA problem marker (dsa:<id>) only makes sense on a coding question and must name a problem of the bank
-  const bankId = dsaBankIdOf(q.topics ?? []);
-  if (bankId !== null) {
-    if (q.kind !== 'CODING') problems.push('A DSA problem can only be attached to a coding question.');
-    else if (!dsaBankEntry(bankId)) problems.push('This DSA problem is not in the problem bank.');
-  }
-  if (q.coding) {
-    if (q.kind !== 'CODING') problems.push('A DSA problem can only be attached to a coding question.');
-    else if (bankId !== null) problems.push('Choose a bank problem or write your own, not both.');
-    else problems.push(...dsaSpecProblems(q.coding));
-  }
   if (q.kind === 'MCQ') {
     const filled = q.options.filter((o) => o.trim()).length;
     if (filled !== q.options.length) problems.push('Fill in every option or remove the empty ones.');
@@ -275,8 +259,6 @@ export const savedRoundSchema = z.object({
       difficulty: difficultySchema.nullable(),
       topics: z.array(z.string()),
       source: z.enum(['HR', 'AI']),
-      /** HR's own DSA problem (coding questions only), hidden tests included: HR and the API only. */
-      coding: dsaProblemSpecSchema.nullable(),
     }),
   ),
   totals: z.object({ questions: z.number().int(), marks: z.number().int() }),

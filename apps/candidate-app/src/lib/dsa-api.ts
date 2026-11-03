@@ -1,5 +1,6 @@
-// The browser talks ONLY to the HireFlow API. The code runner (Piston) is reachable only from the backend.
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+// The browser talks ONLY to the HireFlow API. Judge0 URLs and credentials live on the backend.
+// Same origin by default: next.config.ts forwards /api/v1/dsa/* to the API, so the page works from its public URL.
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 // These types mirror apps/api/src/modules/dsa (dsa.service.ts, evaluator.ts, question.types.ts).
 export type Language = 'python' | 'java' | 'cpp';
@@ -127,8 +128,6 @@ export interface AssessmentState {
   progress: QuestionProgress[];
   result?: FinalResult;
   proctoring: ProctoringState;
-  /** False for an HR round: the last page shows no score (the outcome comes by email). */
-  showScore: boolean;
 }
 
 /** Hidden test cases arrive with only a label, status and timing: no input, expected value or output. */

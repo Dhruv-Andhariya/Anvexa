@@ -1,6 +1,4 @@
-import { Body, Controller, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { featureFlag } from '../../../common/feature-flags';
-import { rateLimit } from '../../applications';
+import { Body, Controller, HttpCode, Inject, Param, Post } from '@nestjs/common';
 import { Public } from '../../auth';
 import { DsaService } from '../dsa.service';
 import type { RecordResult } from './proctoring.service';
@@ -9,10 +7,10 @@ import type { ClientProctoringConfig } from './proctoring.types';
 /**
  * Candidate-facing proctoring API. The invitation token in the URL is the only identity: bodies that name a
  * candidate or assessment are refused. Candidates can write events but cannot read the event log.
+ *
+ * @Public: no HR session; the invitation token is validated on every call (see DsaController).
  */
-// PUBLIC like the rest of the candidate routes: the token is the credential, per-IP rate limit, CSRF header on writes.
 @Public()
-@UseGuards(featureFlag('dsa'), rateLimit('assessment'))
 @Controller('dsa')
 export class ProctoringController {
   constructor(@Inject(DsaService) private readonly service: DsaService) {}

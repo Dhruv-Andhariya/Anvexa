@@ -3,11 +3,9 @@ import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { RateLimiter } from '../src/modules/applications';
-import { publicLimitsFromEnv } from '../src/modules/applications/abuse/rate-limiter';
 import { DsaController } from '../src/modules/dsa/dsa.controller';
 import { DsaService } from '../src/modules/dsa/dsa.service';
-import { CODE_RUNNER } from '../src/modules/dsa/execution/code-runner';
+import { JUDGE0_CLIENT } from '../src/modules/dsa/judge0/judge0.client';
 import { MockQuestionRepository } from '../src/modules/dsa/questions/mock-question.repository';
 import { MOCK_QUESTIONS } from '../src/modules/dsa/questions/mock-questions.data';
 import { DSA_QUESTION_REPOSITORY } from '../src/modules/dsa/questions/question.repository';
@@ -17,19 +15,17 @@ import { CORRECT, WRONG } from './dsa-fixtures';
 import { LocalRunner } from './support/local-runner';
 
 /**
- * Real HTTP, real Nest controllers/DI/validation. Code is executed with local toolchains (not Piston),
+ * Real HTTP, real Nest controllers/DI/validation. Code is executed with local toolchains (not Judge0),
  * so hidden cases genuinely pass and fail. Every response body is captured and scanned for hidden data.
  */
 @Module({
   controllers: [DsaController],
   providers: [
-    // the controllers carry the shared per-IP limit; the real module gets this provider from ApplicationsModule
-    { provide: RateLimiter, useFactory: () => new RateLimiter(publicLimitsFromEnv()) },
     DsaService,
     { provide: DSA_QUESTION_REPOSITORY, useClass: MockQuestionRepository },
     { provide: DSA_INVITATION_RESOLVER, useClass: DemoInvitationResolver },
     { provide: DSA_SESSION_STORE, useClass: InMemorySessionStore },
-    { provide: CODE_RUNNER, useValue: new LocalRunner() },
+    { provide: JUDGE0_CLIENT, useValue: new LocalRunner() },
   ],
 })
 class TestModule {}

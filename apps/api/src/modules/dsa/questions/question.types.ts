@@ -3,17 +3,11 @@ export type Language = (typeof LANGUAGES)[number];
 
 export type Difficulty = 'Easy' | 'Medium' | 'Hard';
 
-/**
- * How the evaluator compares the answer: `exact` / `float` for a harness' single result line, `lines` for a whole
- * program's stdout (line by line, trailing spaces and trailing blank lines ignored).
- */
-export type Comparator = 'exact' | 'float' | 'lines';
+/** How a harness prints the answer and how the evaluator compares it. */
+export type Comparator = 'exact' | 'float';
 
-/**
- * Which harness template wraps the candidate's function. One per bank problem shape; `stdio` = HR's own problems,
- * where the candidate writes the whole program (reads stdin, prints the answer) and nothing is wrapped around it.
- */
-export type HarnessKind = 'two-sum' | 'longest-substring' | 'median-sorted-arrays' | 'stdio';
+/** Which harness template wraps the candidate's function. One per supported problem shape. */
+export type HarnessKind = 'two-sum' | 'longest-substring' | 'median-sorted-arrays';
 
 export interface TestCase {
   id: string;

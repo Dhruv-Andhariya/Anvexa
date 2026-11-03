@@ -68,7 +68,6 @@ model Application {
   roundInvites       RoundInvite[]
   roundAttempts      RoundAttempt[]
   roundOutcomeEmails RoundOutcomeEmail[]
-  dsaProctorSessions DsaProctorSession[]
 
   @@unique([tenantId, jobId, candidateId])
   @@unique([tenantId, jobId, email])

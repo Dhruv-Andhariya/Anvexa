@@ -34,30 +34,23 @@ export function ProblemPanel({ question }: { question: PublicQuestion }) {
         </div>
       </Section>
 
-      {/* HR's own problems may leave a section empty */}
-      {question.inputFormat && (
-        <Section title="Input format">
-          <p className="whitespace-pre-line text-sm">{question.inputFormat}</p>
-        </Section>
-      )}
+      <Section title="Input format">
+        <p className="text-sm">{question.inputFormat}</p>
+      </Section>
 
-      {question.outputFormat && (
-        <Section title="Output format">
-          <p className="whitespace-pre-line text-sm">{question.outputFormat}</p>
-        </Section>
-      )}
+      <Section title="Output format">
+        <p className="text-sm">{question.outputFormat}</p>
+      </Section>
 
-      {question.constraints.length > 0 && (
-        <Section title="Constraints">
-          <ul className="list-disc space-y-1 pl-5 text-sm">
-            {question.constraints.map((c) => (
-              <li key={c} className="font-mono text-xs leading-relaxed">
-                {c}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+      <Section title="Constraints">
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {question.constraints.map((c) => (
+            <li key={c} className="font-mono text-xs leading-relaxed">
+              {c}
+            </li>
+          ))}
+        </ul>
+      </Section>
 
       <Section title="Sample">
         <div className="flex flex-col gap-3">
@@ -71,12 +64,10 @@ export function ProblemPanel({ question }: { question: PublicQuestion }) {
                 <p className="mb-1 text-xs font-medium text-muted">Output</p>
                 <pre className={codeBlock}>{s.output}</pre>
               </div>
-              {s.explanation && (
-                <div>
-                  <p className="mb-1 text-xs font-medium text-muted">Explanation</p>
-                  <p className="text-sm">{s.explanation}</p>
-                </div>
-              )}
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted">Explanation</p>
+                <p className="text-sm">{s.explanation}</p>
+              </div>
             </div>
           ))}
         </div>

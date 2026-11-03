@@ -131,9 +131,6 @@ model RoundQuestion {
   difficulty  RoundQuestionDifficulty?
   topics      String[]                 @default([])
   source      RoundQuestionSource      @default(HR)
-  /// CODING questions only: HR's own DSA problem { title, inputFormat, outputFormat, constraints, tests: [{ input,
-  /// output, hidden }] } (contracts dsaProblemSpecSchema). Hidden tests never leave the API. null = none.
-  codingSpec  Json?                    @map("coding_spec")
   createdAt   DateTime                 @default(now()) @map("created_at")
 
   round JobRound @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
