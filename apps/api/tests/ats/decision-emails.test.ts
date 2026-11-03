@@ -30,6 +30,14 @@ describe('shortlist email', () => {
   });
 
   it('never mentions scores', () => expect(`${m.subject} ${m.text} ${m.html}`).not.toMatch(/score|ats|\d+%/i));
+
+  it('a replaced link says the earlier one no longer works', () => {
+    const again = buildShortlistEmail({ ...INPUT, screeningLink: LINK, linkReplaced: true });
+    expect(again.subject).toBe("New Link – Congratulations! You've Been Shortlisted for Backend Developer – Next Step: AI Screening");
+    expect(again.text).toContain('The AI screening link in our earlier email no longer works.');
+    expect(again.html).toContain(`<a href="${LINK}">${LINK}</a>`);
+    expect(m.text).not.toContain('earlier email');
+  });
 });
 
 describe('rejection email', () => {

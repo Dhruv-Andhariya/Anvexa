@@ -23,11 +23,15 @@ const escapeHtml = (s: string) =>
 /** Names typed by students or HR must not be able to add headers or extra lines. */
 const oneLine = (s: string) => s.replace(/[\r\n\t]+/g, ' ').trim();
 
-export function buildShortlistEmail(i: DecisionEmailInput & { screeningLink: string }): EmailMessage {
+/** `linkReplaced`: the link in an earlier shortlist email stopped working; this email carries a new one. */
+export function buildShortlistEmail(i: DecisionEmailInput & { screeningLink: string; linkReplaced?: boolean }): EmailMessage {
   const v = values(i);
-  const subject = `Congratulations! You've Been Shortlisted for ${v.job} – Next Step: AI Screening`;
+  const subject = `${i.linkReplaced ? 'New Link – ' : ''}Congratulations! You've Been Shortlisted for ${v.job} – Next Step: AI Screening`;
   const paragraphs = [
     `Dear ${v.name},`,
+    ...(i.linkReplaced
+      ? ['The AI screening link in our earlier email no longer works. Please use the new link in this email instead; the old link has been switched off.']
+      : []),
     'Congratulations!',
     `We are pleased to inform you that your application for the ${v.job} position at ${v.company} has successfully passed our initial resume screening process. Based on your resume, skills, experience, and project relevance to the job requirements, you have been shortlisted for the next stage of our recruitment process.`,
     `Please complete your AI screening round using this link: ${i.screeningLink}`,

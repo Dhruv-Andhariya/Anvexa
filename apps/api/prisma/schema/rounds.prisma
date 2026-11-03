@@ -23,6 +23,7 @@ enum RoundType {
   TECHNICAL_INTERVIEW
   HR_INTERVIEW
   CUSTOM
+  AI_INTERVIEW // run and scored by the AI interview round module
 
   @@map("round_type")
 }
@@ -99,13 +100,16 @@ model JobRound {
   passMaxScore     Int?           @map("pass_max_score")
   createdAt        DateTime       @default(now()) @map("created_at")
 
-  config    JobRoundConfig  @relation(fields: [jobId, tenantId], references: [jobId, tenantId], onDelete: Cascade)
-  questions RoundQuestion[]
-  results   RoundResult[]
+  config         JobRoundConfig      @relation(fields: [jobId, tenantId], references: [jobId, tenantId], onDelete: Cascade)
+  questions      RoundQuestion[]
+  results        RoundResult[]
   /// M13 round engine (round_engine.prisma).
-  invites       RoundInvite[]
-  attempts      RoundAttempt[]
-  outcomeEmails RoundOutcomeEmail[]
+  invites        RoundInvite[]
+  attempts       RoundAttempt[]
+  outcomeEmails  RoundOutcomeEmail[]
+  /// M18 AI group discussion (group_discussion.prisma).
+  gdEvents       GdEvent[]
+  gdParticipants GdParticipant[]
 
   @@unique([jobId, position])
   @@unique([id, tenantId])

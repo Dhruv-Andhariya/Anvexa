@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TenantsModule } from '../tenants';
 import { QuestionGeneratorClient, questionGeneratorOptionsFromEnv } from './question-generator.client';
+import { RoundModules } from './round-modules';
 import { RoundsConfigController } from './rounds-config.controller';
 import { RoundsConfigService } from './rounds-config.service';
 import { PrismaRoundsConfigStore, RoundsConfigStore } from './rounds-config.store';
@@ -14,9 +15,10 @@ import { PrismaRoundsConfigStore, RoundsConfigStore } from './rounds-config.stor
   controllers: [RoundsConfigController],
   providers: [
     RoundsConfigService,
+    RoundModules,
     { provide: RoundsConfigStore, useClass: PrismaRoundsConfigStore },
     { provide: QuestionGeneratorClient, useFactory: () => new QuestionGeneratorClient(questionGeneratorOptionsFromEnv()) },
   ],
-  exports: [RoundsConfigService],
+  exports: [RoundsConfigService, RoundModules],
 })
 export class RoundsConfigModule {}

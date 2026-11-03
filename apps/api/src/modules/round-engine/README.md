@@ -23,6 +23,9 @@ A round runs online (`roundKind`) in one of two ways, both with a score-based pa
 Other rounds (descriptive questions, coding questions without a bank problem, interviews) are run by HR; the engine
 stops before them and emails the candidate that HR will contact them.
 
+Exception: when the next round is a **Group Discussion** and `FEATURE_GROUP_DISCUSSION` is on, `nextStep()` returns
+`GROUP_DISCUSSION` and no email is sent; the group-discussion module (M18) picks the student up.
+
 ## Files
 | File | What it does |
 |---|---|
@@ -57,6 +60,36 @@ step exactly like a submitted test; a candidate who never comes back is timed ou
 Feature flag: `FEATURE_ROUND_ENGINE=off`. Rate limit: `assessment` in `PUBLIC_RATE_LIMITS`. Audit: `assessment.invite_queued`,
 `.invite_sent`, `.started`, `.submitted`, `.timed_out`, `.progressed`, `.outcome_email_sent`, `.invite_revoked`,
 `.invite_resent` (plus `assessment.result_recorded` from the assessments module).
+
+## Round modules (GD, DSA, SQL, AI interview)
+A round that is not a plain online test can be run by a **round module** with its own candidate page. Which module
+runs which round type is `ROUND_MODULE_OF` in `packages/contracts` (`GROUP_DISCUSSION` -> GD, `CODING` -> DSA,
+`SQL` -> SQL, `AI_INTERVIEW` -> AI interview). The round engine sends a student who passed the round before to that
+module only when the module is **connected**; until then HR runs the round (the "next round is run by HR" email), so
+HR can already add these rounds to a job. **DSA** is the exception: a DSA round (every question a DSA problem) is run
+by this engine itself (`roundKind` CODING, see above), so the DSA module is connected whenever `DSA_ROUNDS` is on; a
+coding round without DSA problems is run by HR. To plug a new module in (see `rounds-config/round-modules.ts`):
+
+```ts
+// my-module.module.ts: imports RoundEngineModule (and RoundsConfigModule)
+onModuleInit() { this.roundModules.connect('SQL'); }
+
+// who is waiting: passed every earlier round (HR override first), no result in this round yet
+const waiting = await roundEngine.waitingForModule('SQL', { tenantId });   // [{ tenantId, applicationId, jobId, roundId }]
+
+// after the student finished on the module's own page:
+await roundEngine.recordModuleResult(tenantId, 'SQL', {
+  applicationId, roundId,
+  marks: 34,                                                     // what the round's pass rule needs
+  answers: [{ questionId, answer: 'SELECT ...', marksAwarded: 8, feedback: 'correct rows' }],
+  notes: 'Checked on the sample database',
+});
+```
+
+The result and every answer show on the HR **Assessments** page (code in a monospace block), and the student moves on
+exactly as after an online test (next invitation or email, queued once). A module can only record rounds of its own
+type (`409 ROUND_NOT_FOR_MODULE`) and of the given company (`404`). The GD module connects itself when
+`FEATURE_GROUP_DISCUSSION` is on, DSA when `DSA_ROUNDS` is on. Not connected yet: SQL, AI interview.
 
 ## Not yet
 - No event bus (M30): progression is done here, idempotently, instead of a central orchestrator.

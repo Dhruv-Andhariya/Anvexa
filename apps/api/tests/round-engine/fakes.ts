@@ -26,6 +26,8 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
   outcomeEmails: OutcomeEmailRow[] = [];
   /** What screeningsToInvite() returns (the SQL lives in the Prisma store). */
   completedScreenings: { tenantId: string; applicationId: string; jobId: string; roundId: string }[] = [];
+  /** What moduleCandidates() returns, per round type (the SQL lives in the Prisma store). */
+  waitingByType = new Map<string, { tenantId: string; applicationId: string; jobId: string; roundId: string }[]>();
 
   async findInviteByHash(tokenHash: string) {
     return this.invites.find((i) => i.tokenHash === tokenHash) ?? null;
@@ -123,6 +125,9 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     if (this.outcomeEmails.some((e) => e.applicationId === applicationId && e.roundId === roundId)) return false;
     this.outcomeEmails.push({ id: id(), tenantId, applicationId, roundId, kind, nextRoundName, status: 'QUEUED', attempts: 0, sentAt: null });
     return true;
+  }
+  async moduleCandidates(types: string[], limit: number, tenantId?: string) {
+    return types.flatMap((t) => this.waitingByType.get(t) ?? []).filter((c) => !tenantId || c.tenantId === tenantId).slice(0, limit);
   }
   async screeningsToInvite() {
     return this.completedScreenings.filter((s) => !this.invites.some((i) => i.applicationId === s.applicationId && i.roundId === s.roundId));

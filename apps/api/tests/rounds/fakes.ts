@@ -77,6 +77,8 @@ export const student = (overrides: Partial<StudentRow> = {}): StudentRow => ({
   graduationYear: 2026,
   ats: { score: 82, minAtsScore: 70, decision: 'SHORTLISTED', breakdown: null, matchedSkills: ['Python'], missingSkills: [] },
   hasVoiceScreening: true,
+  aiScreening: { status: 'COMPLETED', review: 'PENDING' },
+  roundProgress: {},
   ...overrides,
 });
 

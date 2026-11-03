@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { emailDeliveryStatusSchema } from './ats';
+import { isDsaRound } from './dsa-bank';
+import { ROUND_MODULE_OF, type RoundModule, type SavedRound } from './rounds';
 
 /**
  * M13 round engine: the candidate-facing online test rounds (Aptitude & English, Technical MCQ...) that follow the AI
@@ -13,6 +15,27 @@ import { emailDeliveryStatusSchema } from './ats';
 /** Question kinds a round needs (only) to be run online and graded automatically. */
 export const ONLINE_TEST_KINDS = ['MCQ', 'TRUE_FALSE'] as const;
 export const onlineQuestionKindSchema = z.enum(ONLINE_TEST_KINDS);
+
+const ONLINE = new Set<string>(ONLINE_TEST_KINDS);
+
+/**
+ * Run online and graded automatically by the round engine: a pass rule that is not an interviewer's score, at least
+ * one question, and only multiple-choice / true-false questions. Anything else goes to a round module or HR.
+ */
+export function isOnlineRound(round: Pick<SavedRound, 'passRule' | 'questions'>): boolean {
+  return !!round.passRule && round.passRule.mode !== 'INTERVIEWER_SCORE' && round.questions.length > 0 && round.questions.every((q) => ONLINE.has(q.kind));
+}
+
+/** Who runs a round: the round engine's online test, a round module (GD, DSA, SQL, AI interview), or HR by hand. */
+export type RoundRunner = { by: 'ONLINE_TEST' } | { by: 'MODULE'; module: RoundModule } | { by: 'HR' };
+
+export function roundRunnerOf(round: Pick<SavedRound, 'type' | 'passRule' | 'questions'>): RoundRunner {
+  if (isOnlineRound(round)) return { by: 'ONLINE_TEST' };
+  // a DSA round (every question a DSA problem) is run by the DSA coding page; any other coding round by HR
+  if (isDsaRound(round)) return { by: 'MODULE', module: 'DSA' };
+  const module = ROUND_MODULE_OF[round.type];
+  return module && module !== 'DSA' ? { by: 'MODULE', module } : { by: 'HR' };
+}
 
 /** Bump when the consent text on the assessment page changes (stored with every attempt). */
 export const ASSESSMENT_CONSENT_VERSION = 'assessment-2026-10';

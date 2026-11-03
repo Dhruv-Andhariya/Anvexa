@@ -31,6 +31,8 @@ interface Claimed {
   application_id: string;
   kind: 'SHORTLIST' | 'REJECTION';
   attempts: number;
+  /** Set when this email was sent before and is going again (its screening link stopped working). */
+  sent_at: Date | null;
 }
 
 class PermanentEmailError extends Error {}
@@ -47,6 +49,17 @@ const WAIT_FOR_LINK_MS = 5 * 60_000;
 export const isPublicLink = (base: string): boolean => {
   try {
     return !['localhost', '127.0.0.1', '[::1]'].includes(new URL(base.replace('{token}', 'x')).hostname);
+  } catch {
+    return false;
+  }
+};
+
+export const LINK_STILL_OPENS = Symbol('LINK_STILL_OPENS');
+/** The site behind a screening link still answers (a replaced Cloudflare quick tunnel does not resolve any more). */
+export const linkStillOpens = async (base: string): Promise<boolean> => {
+  try {
+    const res = await fetch(new URL(base.replace('{token}', 'x')).origin, { redirect: 'manual', signal: AbortSignal.timeout(10_000) });
+    return res.status < 400;
   } catch {
     return false;
   }
@@ -75,12 +88,15 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
     /** Local testing only (e.g. with Mailpit): also send shortlist emails whose link is localhost. */
     @Optional() @Inject(ALLOW_LOCAL_SCREENING_LINKS) private readonly allowLocalLinks: boolean = allowLocalScreeningLinksFromEnv(),
     @Optional() @Inject(AUTO_SHORTLIST) private readonly autoShortlist: boolean = autoShortlistFromEnv(),
+    /** Tests only: whether an earlier link's site still answers. */
+    @Optional() @Inject(LINK_STILL_OPENS) private readonly stillOpens: (base: string) => Promise<boolean> = linkStillOpens,
   ) {}
 
   onApplicationBootstrap() {
     if (!(this.config.emailsEnabled ?? this.config.enabled)) return;
     this.timer = setInterval(() => void this.tick(), this.config.pollMs);
     this.timer.unref();
+    void this.resendDeadLinks();
     if (this.autoShortlist) {
       void this.queueMissedShortlists();
       this.sweepTimer = setInterval(() => void this.queueMissedShortlists(), SWEEP_MS);
@@ -116,6 +132,57 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
       return queued;
     } catch (err) {
       if (!isMissingTable(err)) this.logger.error(`shortlist sweep failed (${err instanceof Error ? err.name : 'unknown'})`);
+      return [];
+    }
+  }
+
+  /**
+   * The screening link follows CAREERS_SITE_URL, and a Cloudflare quick tunnel gets a new address on every restart:
+   * the links already emailed then stop opening. At start, every candidate whose emailed link is unused and unexpired
+   * but no longer opens gets the shortlist email again, with a fresh link (the old token is replaced). A link that
+   * still opens (e.g. sent by a teammate's API on the shared database) is left alone. Never throws. Returns the
+   * application ids queued again.
+   */
+  async resendDeadLinks(now = new Date()): Promise<string[]> {
+    if (!this.canSendShortlists()) return [];
+    try {
+      const invites = await this.db.screeningInvite.findMany({
+        where: {
+          ...(this.config.onlyTenantId ? { tenantId: this.config.onlyTenantId } : {}),
+          usedAt: null,
+          expiresAt: { gt: now },
+          OR: [{ linkBase: null }, { linkBase: { not: this.screeningBaseUrl! } }],
+          application: { decisionEmail: { is: { kind: 'SHORTLIST', status: 'SENT' } } },
+        },
+        select: { tenantId: true, applicationId: true, linkBase: true },
+      });
+      const opens = new Map<string, Promise<boolean>>();
+      const queued: string[] = [];
+      for (const invite of invites) {
+        // no linkBase: sent before it was recorded, so where the link points is unknown - it gets a current one
+        if (invite.linkBase) {
+          if (!opens.has(invite.linkBase)) opens.set(invite.linkBase, this.stillOpens(invite.linkBase));
+          if (await opens.get(invite.linkBase)) continue;
+        }
+        const { count } = await this.db.candidateEmail.updateMany({
+          where: { tenantId: invite.tenantId, applicationId: invite.applicationId, kind: 'SHORTLIST', status: 'SENT' },
+          data: { status: 'QUEUED', attempts: 0, nextAttemptAt: now, lockedAt: null, lastError: null },
+        });
+        if (!count) continue; // another API queued it first
+        queued.push(invite.applicationId);
+        await this.audit.record({
+          tenantId: invite.tenantId,
+          actorUserId: null,
+          action: 'ats.screening_link_replaced',
+          subjectType: 'application',
+          subjectId: invite.applicationId,
+          metadata: {},
+        });
+      }
+      if (queued.length) this.logger.log(`screening link address changed: shortlist email queued again for ${queued.length} candidate(s)`);
+      return queued;
+    } catch (err) {
+      if (!isMissingTable(err)) this.logger.error(`screening link refresh failed (${err instanceof Error ? err.name : 'unknown'})`);
       return [];
     }
   }
@@ -162,7 +229,7 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
           ORDER BY next_attempt_at
           LIMIT 10
           FOR UPDATE SKIP LOCKED)
-      RETURNING id, tenant_id, application_id, kind::text AS kind, attempts`);
+      RETURNING id, tenant_id, application_id, kind::text AS kind, attempts, sent_at`);
   }
 
   private async send(row: Claimed) {
@@ -197,12 +264,13 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
         const token = newScreeningToken();
         tokenHash = token.tokenHash;
         // a fresh link for every send attempt: an earlier attempt's link (never delivered) stops working
+        const linkBase = this.screeningBaseUrl;
         await this.db.screeningInvite.upsert({
           where: { applicationId: row.application_id },
-          create: { id: uuidv7(), tenantId: row.tenant_id, applicationId: row.application_id, tokenHash, expiresAt: new Date(Date.now() + SCREENING_LINK_DAYS * DAY_MS) },
-          update: { tokenHash, expiresAt: new Date(Date.now() + SCREENING_LINK_DAYS * DAY_MS), usedAt: null },
+          create: { id: uuidv7(), tenantId: row.tenant_id, applicationId: row.application_id, tokenHash, linkBase, expiresAt: new Date(Date.now() + SCREENING_LINK_DAYS * DAY_MS) },
+          update: { tokenHash, linkBase, expiresAt: new Date(Date.now() + SCREENING_LINK_DAYS * DAY_MS), usedAt: null },
         });
-        message = buildShortlistEmail({ ...input, screeningLink: screeningLink(this.screeningBaseUrl, token.token) });
+        message = buildShortlistEmail({ ...input, screeningLink: screeningLink(linkBase, token.token), linkReplaced: row.sent_at !== null });
       } else {
         message = buildRejectionEmail(input);
       }

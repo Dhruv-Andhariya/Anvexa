@@ -126,6 +126,21 @@ describe('HR results view', () => {
     expect(view.students.find((s) => s.applicationId === SECOND_APP)!.stage).toBe('NOT_CLEARED');
   });
 
+  it('shows the AI screening, and where a student is in a round that has no result yet', async () => {
+    store.students[1]!.aiScreening = { status: 'INVITED', review: null };
+    store.students[1]!.roundProgress = { [saved[0]!.id]: 'Invited', [saved[1]!.id]: 'Test in progress' };
+    const view = await service.job(TENANT, JOB);
+    expect(view.students.find((s) => s.applicationId === APP)!.aiScreening).toEqual({ status: 'COMPLETED', review: 'PENDING' });
+    const ravi = view.students.find((s) => s.applicationId === SECOND_APP)!;
+    expect(ravi.aiScreening).toEqual({ status: 'INVITED', review: null });
+    // a recorded result wins over the progress text
+    expect(ravi.rounds.map((c) => [c.outcome, c.progress])).toEqual([
+      ['FAILED', null],
+      ['NOT_ATTEMPTED', 'Test in progress'],
+      ['NOT_ATTEMPTED', null],
+    ]);
+  });
+
   it('the full review has the resume score, the voice screening flag and every question with the answer', async () => {
     const review = await service.student(TENANT, APP);
     expect(review).toMatchObject({ jobTitle: 'AI Engineer', hasVoiceScreening: true, resume: { score: 82, decision: 'SHORTLISTED' } });
@@ -154,6 +169,13 @@ describe('HR results view', () => {
     expect(status(await service.override(OTHER_TENANT, APP, saved[0]!.id, { passed: true, reason: 'Trying to change it' }, ACTOR).catch((e) => e))).toBe(404);
     expect((await service.jobs(OTHER_TENANT)).map((j) => j.jobId)).toEqual([OTHER_JOB]);
     expect((await service.jobs(TENANT))[0]).toMatchObject({ jobId: JOB, roundsStatus: 'COMPLETE', roundCount: 3, students: 2, resultsReceived: 2 });
+  });
+
+  it('the job list has only the jobs HR created assessment rounds for', async () => {
+    const NO_ROUNDS = '0192f3a1-bbbb-7000-8000-000000000009';
+    roundsStore.addJob(TENANT, NO_ROUNDS);
+    store.jobs.push({ id: NO_ROUNDS, tenantId: TENANT, title: 'No rounds yet' });
+    expect((await service.jobs(TENANT)).map((j) => j.jobId)).toEqual([JOB]);
   });
 });
 

@@ -268,6 +268,40 @@ describe.skipIf(!DB)('HR decisions and decision emails (real database)', () => {
       expect(await emailOf(strong.applicationId)).toMatchObject({ kind: 'SHORTLIST', status: 'SENT' });
     });
 
+    it('a link whose address stopped opening (tunnel restarted) is sent again with a fresh link; a working one is not', async () => {
+      const { strong } = await screened(false, true);
+      const OLD = 'https://old-words.trycloudflare.com/screening/{token}';
+      const NEW = 'https://new-words.trycloudflare.com/screening/{token}';
+      const at = (url: string, opens: boolean) =>
+        new DecisionEmailSender(prisma, mailer, audit as never, url, { ...CONFIG, onlyTenantId: tenantId }, false, true, async () => opens);
+      await at(OLD, true).tick();
+      const first = await db.screeningInvite.findUniqueOrThrow({ where: { applicationId: strong.applicationId } });
+      expect(first.linkBase).toBe(OLD);
+
+      expect(await at(NEW, true).resendDeadLinks()).toEqual([]); // old address still answers: leave it
+      expect(await at(NEW, false).resendDeadLinks()).toEqual([strong.applicationId]);
+      expect(await at(NEW, false).resendDeadLinks()).toEqual([]); // queued once only
+      await at(NEW, false).tick();
+      const again = mailer.sent.filter((m) => m.to === strong.email);
+      expect(again).toHaveLength(2);
+      expect(again[1]!.message.subject).toMatch(/^New Link – /);
+      expect(again[1]!.message.text).toContain('https://new-words.trycloudflare.com/screening/');
+      const second = await db.screeningInvite.findUniqueOrThrow({ where: { applicationId: strong.applicationId } });
+      expect(second.linkBase).toBe(NEW);
+      expect(second.tokenHash).not.toBe(first.tokenHash); // the old link is switched off
+      expect(await emailOf(strong.applicationId)).toMatchObject({ status: 'SENT', attempts: 1 });
+    });
+
+    it('a used or expired link is never sent again', async () => {
+      const { strong } = await screened(false, true);
+      await sender().tick();
+      const dead = new DecisionEmailSender(prisma, mailer, audit as never, 'https://new.example/s/{token}', { ...CONFIG, onlyTenantId: tenantId }, false, true, async () => false);
+      await db.screeningInvite.update({ where: { applicationId: strong.applicationId }, data: { usedAt: new Date() } });
+      expect(await dead.resendDeadLinks()).toEqual([]);
+      await db.screeningInvite.update({ where: { applicationId: strong.applicationId }, data: { usedAt: null, expiresAt: new Date(Date.now() - 1000) } });
+      expect(await dead.resendDeadLinks()).toEqual([]);
+    });
+
     it('off: shortlisted candidates wait for HR, exactly as before', async () => {
       const { strong } = await screened(true, false);
       expect(await emailOf(strong.applicationId)).toBeNull();

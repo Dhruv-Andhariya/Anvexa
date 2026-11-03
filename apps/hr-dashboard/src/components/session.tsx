@@ -153,6 +153,7 @@ function AppHeader({ session, onChanged }: { session: Session; onChanged: () => 
           { href: '/publish', label: 'Publish' },
           { href: '/applications', label: 'Applications' },
           { href: '/shortlisted', label: 'Shortlisted Students' },
+          // the Group Discussion page is opened from a GD round on Assessments ("Manage groups")
           { href: '/assessments', label: 'Assessments' },
           { href: '/company', label: 'Company profile' },
         ]

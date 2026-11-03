@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Inject, Module, type OnModuleInit } from '@nestjs/common';
 import { ApplicationsModule } from '../applications';
 import { AssessmentsModule } from '../assessments';
-import { RoundsConfigModule } from '../rounds-config';
+import { RoundModules, RoundsConfigModule } from '../rounds-config';
 import { TenantsModule } from '../tenants';
+import { codingRoundsEnabled } from './coding-round';
 import { HrRoundEngineController } from './hr-round-engine.controller';
 import { PublicAssessmentController } from './public-assessment.controller';
 import { ROUND_ENGINE_CLOCK, ROUND_ENGINE_CONFIG, RoundEngineService, roundEngineConfigFromEnv } from './round-engine.service';
@@ -27,4 +28,11 @@ import { ROUND_ENGINE_WORKER_CONFIG, RoundEngineWorker, roundEngineWorkerConfigF
   // the dsa module runs coding rounds through the engine service (index.ts), never through its store
   exports: [RoundEngineService],
 })
-export class RoundEngineModule {}
+export class RoundEngineModule implements OnModuleInit {
+  constructor(@Inject(RoundModules) private readonly roundModules: RoundModules) {}
+
+  /** DSA rounds are run here (coding page of the dsa module); the HR dashboard shows them as a connected module. */
+  onModuleInit() {
+    if (codingRoundsEnabled()) this.roundModules.connect('DSA');
+  }
+}

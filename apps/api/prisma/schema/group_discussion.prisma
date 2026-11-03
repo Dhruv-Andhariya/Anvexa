@@ -1,0 +1,432 @@
+// =====================================================================================
+// M18 AI group discussion
+// Code: apps/api/src/modules/group-discussion. The round itself (name, topics = its questions, pass rule) comes from
+// rounds.prisma (M05, read only). Students reach the round's pool on their own when they pass the round before it.
+// Every table carries tenant_id. Deleted with the application / the round.
+// =====================================================================================
+
+enum GdEventStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+
+  @@map("gd_event_status")
+}
+
+enum GdBatchStatus {
+  SCHEDULED
+  LOBBY_OPEN // start time reached: the grace period runs, students can enter
+  IN_PROGRESS // the grace period ended: room locked, the moderator runs the phases
+  COMPLETED
+  CANCELLED
+
+  @@map("gd_batch_status")
+}
+
+enum GdAttendance {
+  WAITING // in the round's pool, not in a group yet
+  SCHEDULED // in a group, invitation not sent yet
+  INVITED
+  JOINED
+  ABSENT // did not join before the room locked (kept, never deleted)
+  ADMITTED_LATE // HR let an absent student in
+
+  @@map("gd_attendance")
+}
+
+enum GdPhase {
+  NOT_STARTED
+  INTRO
+  THINKING
+  DISCUSSION
+  SUMMARY
+  HR_QUESTIONS
+  CLOSE
+  ENDED
+
+  @@map("gd_phase")
+}
+
+enum GdProcessingStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+
+  @@map("gd_processing_status")
+}
+
+enum GdSpeaker {
+  STUDENT
+  HR
+
+  @@map("gd_speaker")
+}
+
+enum GdClientEventType {
+  JOINED
+  LEFT
+  CAMERA_OFF
+  CAMERA_ON
+  MIC_OFF
+  MIC_ON
+  HAND_RAISED
+  HAND_LOWERED
+  TAB_HIDDEN
+
+  @@map("gd_client_event_type")
+}
+
+enum GdHrActivityKind {
+  JOINED
+  SPEAK_START
+  SPEAK_END
+  TIMER_PAUSED
+  TIMER_RESUMED
+  PRIVATE_START
+  PRIVATE_END
+  PRIVATE_INCLUDED
+  PRIVATE_EXCLUDED
+  ADMITTED_LATE
+  RESCHEDULED
+  OVERRIDE
+  CONFIRMED
+
+  @@map("gd_hr_activity_kind")
+}
+
+enum GdRecommendation {
+  SELECTED
+  NOT_SELECTED
+
+  @@map("gd_recommendation")
+}
+
+enum GdEvaluationStatus {
+  OK
+  NO_AUDIO // nothing usable was recorded for this student
+  FAILED // the evaluator failed after its retry; HR decides by hand
+
+  @@map("gd_evaluation_status")
+}
+
+enum GdEmailKind {
+  INVITE
+  REMINDER
+  HR_LINK
+  SELECTED
+  NOT_SELECTED
+
+  @@map("gd_email_kind")
+}
+
+/// One GD drive of a round, e.g. "Campus drive - day 1". HR schedules it; the round's waiting students are split into
+/// groups (gd_batches) that run one after another. The settings apply to every group of the event.
+model GdEvent {
+  id                   String        @id @db.Uuid
+  tenantId             String        @map("tenant_id") @db.Uuid
+  jobId                String        @map("job_id") @db.Uuid
+  roundId              String        @map("round_id") @db.Uuid
+  name                 String
+  /// The first group's start.
+  startsAt             DateTime      @map("starts_at")
+  status               GdEventStatus @default(SCHEDULED)
+  minGroupSize         Int           @map("min_group_size")
+  maxGroupSize         Int           @map("max_group_size")
+  graceMinutes         Int           @map("grace_minutes")
+  introSeconds         Int           @map("intro_seconds")
+  thinkingSeconds      Int           @map("thinking_seconds")
+  discussionMinutes    Int           @map("discussion_minutes")
+  summarySeconds       Int           @map("summary_seconds")
+  hrQuestionsEnabled   Boolean       @map("hr_questions_enabled")
+  hrQuestionsMinutes   Int           @map("hr_questions_minutes")
+  silencePromptSeconds Int           @map("silence_prompt_seconds")
+  breakMinutes         Int           @map("break_minutes")
+  /// Some groups are below min_group_size (not enough students to do better); HR was warned.
+  undersized           Boolean       @default(false)
+  createdById          String?       @map("created_by_id") @db.Uuid
+  cancelledAt          DateTime?     @map("cancelled_at")
+  cancelledById        String?       @map("cancelled_by_id") @db.Uuid
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  round   JobRound  @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  batches GdBatch[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, roundId])
+  @@map("gd_events")
+}
+
+/// One group of an event: its own LiveKit room, time slot and topic.
+model GdBatch {
+  id                 String              @id @db.Uuid
+  tenantId           String              @map("tenant_id") @db.Uuid
+  eventId            String              @map("event_id") @db.Uuid
+  /// 1, 2, 3... within the event.
+  number             Int
+  startsAt           DateTime            @map("starts_at")
+  /// Estimated from the settings and the group size when scheduled.
+  endsAt             DateTime            @map("ends_at")
+  status             GdBatchStatus       @default(SCHEDULED)
+  /// LiveKit room name (random, never shown to students).
+  roomName           String              @unique @map("room_name")
+  /// The round question used as the topic (no foreign key: HR may edit the round; the text below is the snapshot).
+  topicQuestionId    String?             @map("topic_question_id") @db.Uuid
+  topicText          String?             @map("topic_text")
+  /// Start time reached: students may enter (joining window = grace_minutes).
+  lobbyOpenedAt      DateTime?           @map("lobby_opened_at")
+  /// Joining window over: room locked, missing students ABSENT, the moderator starts.
+  lockedAt           DateTime?           @map("locked_at")
+  endedAt            DateTime?           @map("ended_at")
+  /// The moderator's timeline. The server owns it; clients and the bot follow it through the LiveKit room metadata.
+  phase              GdPhase             @default(NOT_STARTED)
+  phaseStartedAt     DateTime?           @map("phase_started_at")
+  /// Shifted later by every pause (HR speaking during the discussion).
+  phaseEndsAt        DateTime?           @map("phase_ends_at")
+  pausedAt           DateTime?           @map("paused_at")
+  /// [{ phase, from, to }] every pause, for HR and the evaluation.
+  pausedIntervals    Json                @default("[]") @map("paused_intervals")
+  /// [{ phase, at }] when each phase began (the evaluation places what was said in its phase).
+  phaseLog           Json                @default("[]") @map("phase_log")
+  /// Summary round: participant ids in speaking order, and whose turn it is.
+  summaryOrder       String[]            @default([]) @map("summary_order")
+  summaryIndex       Int                 @default(0) @map("summary_index")
+  hrSpeaking         Boolean             @default(false) @map("hr_speaking")
+  agentDispatchedAt  DateTime?           @map("agent_dispatched_at")
+  /// After the GD: transcription + evaluation (null = not ended yet).
+  processingStatus   GdProcessingStatus? @map("processing_status")
+  processingAttempts Int                 @default(0) @map("processing_attempts")
+  processingLockedAt DateTime?           @map("processing_locked_at")
+  processingNextAt   DateTime?           @map("processing_next_at")
+  processingError    String?             @map("processing_error")
+  /// The whole session as one audio file (every recording mixed, <group folder>/session.webm); null = not built yet.
+  sessionAudioAt     DateTime?           @map("session_audio_at")
+  sessionAudioMs     Int?                @map("session_audio_ms")
+  sessionAudioBytes  Int?                @map("session_audio_bytes")
+  /// Why the last build failed (safe short text); cleared on success.
+  sessionAudioError  String?             @map("session_audio_error")
+  processedAt        DateTime?           @map("processed_at")
+  /// HR confirmed the selection (results recorded, result emails queued).
+  confirmedAt        DateTime?           @map("confirmed_at")
+  confirmedById      String?             @map("confirmed_by_id") @db.Uuid
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  event        GdEvent              @relation(fields: [eventId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  participants GdParticipant[]
+  recordings   GdRecording[]
+  events       GdParticipantEvent[]
+  privateTalks GdPrivateTalk[]
+  hrActivity   GdHrActivity[]
+  transcripts  GdTranscript[]
+  evaluations  GdEvaluation[]
+  emails       GdEmail[]
+
+  @@unique([eventId, number])
+  @@unique([id, tenantId])
+  @@index([status, startsAt])
+  @@map("gd_batches")
+}
+
+/// One student in one GD round: in the pool (batch_id null) or in a group. One row per student per round.
+model GdParticipant {
+  id             String       @id @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  applicationId  String       @map("application_id") @db.Uuid
+  jobId          String       @map("job_id") @db.Uuid
+  roundId        String       @map("round_id") @db.Uuid
+  batchId        String?      @map("batch_id") @db.Uuid
+  attendance     GdAttendance @default(WAITING)
+  /// SHA-256 of the personal join link (the link itself only exists in the email). New link per invitation.
+  tokenHash      String?      @unique @map("token_hash")
+  tokenExpiresAt DateTime?    @map("token_expires_at")
+  /// The same link, encrypted with ENCRYPTION_KEY, so the reminder can carry it again (never logged or returned).
+  tokenSealed    String?      @map("token_sealed")
+  consentVersion String?      @map("consent_version")
+  consentAt      DateTime?    @map("consent_at")
+  joinedAt       DateTime?    @map("joined_at")
+  lastSeenAt     DateTime?    @map("last_seen_at")
+  admittedLateAt DateTime?    @map("admitted_late_at")
+  admittedById   String?      @map("admitted_by_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  application  Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round        JobRound             @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  batch        GdBatch?             @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  recordings   GdRecording[]
+  events       GdParticipantEvent[]
+  privateTalks GdPrivateTalk[]
+  transcripts  GdTranscript[]
+  evaluation   GdEvaluation?
+  emails       GdEmail[]
+
+  @@unique([applicationId, roundId])
+  @@index([tenantId, roundId, attendance])
+  @@index([batchId])
+  @@map("gd_participants")
+}
+
+/// One continuous recording made by a browser (a student's own microphone, or HR's while speaking). A reload or a
+/// reconnect starts a new segment. The audio chunks are files under storage_prefix (GD_STORAGE_DIR), never in the
+/// database. started_at is the SERVER time the segment began, so every segment can be placed on one timeline.
+model GdRecording {
+  id            String    @id @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  batchId       String    @map("batch_id") @db.Uuid
+  /// null = HR.
+  participantId String?   @map("participant_id") @db.Uuid
+  hrUserId      String?   @map("hr_user_id") @db.Uuid
+  speaker       GdSpeaker
+  mimeType      String    @map("mime_type")
+  startedAt     DateTime  @map("started_at")
+  lastChunkAt   DateTime? @map("last_chunk_at")
+  chunkCount    Int       @default(0) @map("chunk_count")
+  bytes         Int       @default(0)
+  storagePrefix String    @map("storage_prefix")
+  /// Files removed (retention period over); the row stays as a record that it existed.
+  deletedAt     DateTime? @map("deleted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  batch       GdBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  participant GdParticipant? @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  transcript  GdTranscript?
+
+  @@index([tenantId, batchId])
+  @@map("gd_recordings")
+}
+
+/// What a student's browser noticed (camera / mic off and on, hand raised, joined, left). Flags for HR only.
+model GdParticipantEvent {
+  id            String            @id @db.Uuid
+  tenantId      String            @map("tenant_id") @db.Uuid
+  batchId       String            @map("batch_id") @db.Uuid
+  participantId String            @map("participant_id") @db.Uuid
+  type          GdClientEventType
+  occurredAt    DateTime          @map("occurred_at")
+
+  batch       GdBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  participant GdParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, occurredAt])
+  @@map("gd_participant_events")
+}
+
+/// HR took one student into a private room. Excluded from scoring unless HR ticks "Include in evaluation".
+model GdPrivateTalk {
+  id                  String    @id @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  batchId             String    @map("batch_id") @db.Uuid
+  participantId       String    @map("participant_id") @db.Uuid
+  hrUserId            String?   @map("hr_user_id") @db.Uuid
+  roomName            String    @unique @map("room_name")
+  startedAt           DateTime  @map("started_at")
+  endedAt             DateTime? @map("ended_at")
+  includeInEvaluation Boolean   @default(false) @map("include_in_evaluation")
+
+  batch       GdBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  participant GdParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("gd_private_talks")
+}
+
+/// Every HR action in a GD, with time: speaking, timer pauses, private talks, admits, overrides, confirmation.
+model GdHrActivity {
+  id            String           @id @db.Uuid
+  tenantId      String           @map("tenant_id") @db.Uuid
+  batchId       String           @map("batch_id") @db.Uuid
+  hrUserId      String?          @map("hr_user_id") @db.Uuid
+  hrName        String?          @map("hr_name")
+  kind          GdHrActivityKind
+  participantId String?          @map("participant_id") @db.Uuid
+  occurredAt    DateTime         @map("occurred_at")
+  detail        Json             @default("{}")
+
+  batch GdBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, occurredAt])
+  @@map("gd_hr_activity")
+}
+
+/// Whisper's transcript of one recording: [{ start, end, text }] in ms on the GROUP's timeline (since locked_at).
+model GdTranscript {
+  id            String    @id @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  batchId       String    @map("batch_id") @db.Uuid
+  recordingId   String    @unique @map("recording_id") @db.Uuid
+  participantId String?   @map("participant_id") @db.Uuid
+  speaker       GdSpeaker
+  segments      Json      @default("[]")
+  language      String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  batch       GdBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  recording   GdRecording    @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  participant GdParticipant? @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("gd_transcripts")
+}
+
+/// The AI's evaluation of one student (rubric scores, evidence quotes, recommendation) and HR's final decision.
+model GdEvaluation {
+  id               String             @id @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  batchId          String             @map("batch_id") @db.Uuid
+  participantId    String             @unique @map("participant_id") @db.Uuid
+  status           GdEvaluationStatus
+  /// Speaking metrics: talk time, words per minute, fillers, interruptions, turns.
+  metrics          Json               @default("{}")
+  /// { content, communication, initiative, listening, balance, summary, hr_response } 1-10 (hr_response may be null).
+  scores           Json?
+  overall          Float?
+  recommendation   GdRecommendation?
+  /// [{ criterion, quote, reason }]
+  evidence         Json               @default("[]")
+  feedback         String             @default("")
+  model            String?
+  error            String?
+  /// HR's decision; null = follow the AI recommendation.
+  hrDecision       GdRecommendation?  @map("hr_decision")
+  hrDecisionReason String?            @map("hr_decision_reason")
+  hrDecidedById    String?            @map("hr_decided_by_id") @db.Uuid
+  hrDecidedByName  String?            @map("hr_decided_by_name")
+  hrDecidedAt      DateTime?          @map("hr_decided_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  batch       GdBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  participant GdParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("gd_evaluations")
+}
+
+/// Every GD email (invitation, reminder, HR link, result) - the email log. dedupe_key makes each one happen once.
+model GdEmail {
+  id            String              @id @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  batchId       String              @map("batch_id") @db.Uuid
+  /// null = an email to HR.
+  participantId String?             @map("participant_id") @db.Uuid
+  kind          GdEmailKind
+  toEmail       String              @map("to_email")
+  dedupeKey     String              @unique @map("dedupe_key")
+  status        EmailDeliveryStatus @default(QUEUED)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?           @map("locked_at")
+  lastError     String?             @map("last_error")
+  sentAt        DateTime?           @map("sent_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  batch       GdBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  participant GdParticipant? @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([batchId])
+  @@map("gd_emails")
+}

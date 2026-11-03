@@ -1,12 +1,13 @@
 'use client';
 
-import { ROUND_TYPES, type AssessmentJob, type AssessmentStage, type JobAssessments, type RoundCell } from '@hireflow/contracts';
+import { ROUND_MODULE_LABEL, ROUND_TYPES, type AiScreeningProgress, type AssessmentRoundSummary, type AssessmentJob, type AssessmentStage, type JobAssessments, type RoundCell } from '@hireflow/contracts';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { getJobAssessments, listAssessmentJobs } from '@/lib/rounds-api';
+import { GdRecordings } from './gd-recordings';
 import { OUTCOME_STYLE, OUTCOME_TEXT, STAGE_STYLE, STAGE_TEXT, pill, scoreText } from './assessment-styles';
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
@@ -14,8 +15,9 @@ type Tab = 'students' | 'rounds';
 const STAGES: (AssessmentStage | 'ALL')[] = ['ALL', 'IN_PROGRESS', 'CLEARED', 'NOT_CLEARED', 'NOT_STARTED'];
 
 /**
- * HR "Assessments": per job, every student who reached the assessment rounds with their status and score in each
- * round (sent by the round engine), pass / fail counts per round, and the job's own rounds. HR only, same company.
+ * HR "Assessments": per job, every student who reached the assessment rounds with their resume (ATS) score, AI voice
+ * screening, and status and score in each round (online tests, group discussion...), pass / fail counts per round, and
+ * the job's own rounds. HR only, same company.
  */
 export function AssessmentsBoard() {
   const router = useRouter();
@@ -39,7 +41,7 @@ export function AssessmentsBoard() {
   }, [loadJobs]);
 
   const tab: Tab = params.get('tab') === 'rounds' ? 'rounds' : 'students';
-  const jobId = params.get('job') ?? jobs?.find((j) => j.roundCount > 0)?.jobId ?? jobs?.[0]?.jobId ?? null;
+  const jobId = params.get('job') ?? jobs?.[0]?.jobId ?? null;
   const go = (next: { job?: string; tab?: Tab }) => {
     const q = new URLSearchParams({ job: next.job ?? jobId ?? '', tab: next.tab ?? tab });
     router.replace(`/assessments?${q.toString()}`);
@@ -68,16 +70,17 @@ export function AssessmentsBoard() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Assessments</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
-          Results of the assessment rounds after resume and AI voice screening. Pick a job to see every shortlisted student,
+          Every round of the hiring process: resume (ATS) score, AI voice screening, and each assessment round. Pick a job to see every shortlisted student,
           their result in each round, and open a student for the full review.
         </p>
       </div>
 
       {jobs.length === 0 ? (
         <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No approved jobs yet</p>
-          <Link href="/jobs" className="text-sm font-medium text-accent hover:underline">
-            Go to jobs →
+          <p className="font-medium">No assessments yet</p>
+          <p className="text-sm text-muted">A job shows up here once you create its assessment rounds on the Publish page.</p>
+          <Link href="/publish" className="text-sm font-medium text-accent hover:underline">
+            Open the Publish page →
           </Link>
         </Card>
       ) : (
@@ -87,7 +90,7 @@ export function AssessmentsBoard() {
             <select className={inputClass} value={jobId ?? ''} onChange={(e) => go({ job: e.target.value })}>
               {jobs.map((j) => (
                 <option key={j.jobId} value={j.jobId}>
-                  {j.title} — {j.roundCount ? `${j.roundCount} round${j.roundCount === 1 ? '' : 's'}, ${j.students} student${j.students === 1 ? '' : 's'}` : 'no rounds yet'}
+                  {j.title} — {j.roundCount} round{j.roundCount === 1 ? '' : 's'}, {j.students} student{j.students === 1 ? '' : 's'}
                 </option>
               ))}
             </select>
@@ -171,7 +174,7 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
 
       {tab === 'rounds' ? (
         <RoundsTab data={data} jobId={jobId} />
-      ) : data.rounds.length === 0 ? null : (
+      ) : data.rounds.length === 0 && data.students.length === 0 ? null : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {data.rounds.map((r) => (
@@ -180,6 +183,11 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                   {r.position}. {r.name}
                 </p>
                 <p className="text-xs text-muted">Pass: {r.passRuleText ?? '—'}</p>
+                {r.type === 'GROUP_DISCUSSION' && (
+                  <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="text-xs font-medium text-accent hover:underline">
+                    Manage groups →
+                  </Link>
+                )}
                 <p className="mt-2 flex flex-wrap gap-2 text-xs">
                   <span className={`${pill} ${OUTCOME_STYLE.PASSED}`}>{r.counts.passed} passed</span>
                   <span className={`${pill} ${OUTCOME_STYLE.FAILED}`}>{r.counts.failed} failed</span>
@@ -224,7 +232,10 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                       Student
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
-                      ATS
+                      Resume (ATS)
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      AI screening
                     </th>
                     {data.rounds.map((r) => (
                       <th key={r.id} scope="col" className="px-3 py-2 font-medium">
@@ -248,6 +259,9 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                         </p>
                       </td>
                       <td className="px-3 py-2">{s.atsScore ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        <AiScreeningCell value={s.aiScreening} />
+                      </td>
                       {s.rounds.map((c) => (
                         <td key={c.roundId} className="px-3 py-2">
                           <Cell cell={c} />
@@ -276,7 +290,52 @@ function Cell({ cell }: { cell: RoundCell }) {
         {cell.overridden && ' (HR)'}
       </span>
       {cell.score !== null && <span className="text-xs text-muted">{scoreText(cell.score, cell.maxScore)}</span>}
+      {cell.progress && <span className="text-xs text-muted">{cell.progress}</span>}
     </div>
+  );
+}
+
+const AI_SCREENING: Record<AiScreeningProgress['status'], { text: string; style: string }> = {
+  INVITED: { text: 'Link sent', style: OUTCOME_STYLE.NOT_ATTEMPTED },
+  NOT_STARTED: { text: 'Opened, not started', style: OUTCOME_STYLE.NOT_ATTEMPTED },
+  IN_PROGRESS: { text: 'In progress', style: STAGE_STYLE.IN_PROGRESS },
+  COMPLETED: { text: 'Completed', style: OUTCOME_STYLE.PASSED },
+  ENDED_EARLY: { text: 'Ended early', style: OUTCOME_STYLE.FAILED },
+};
+const AI_REVIEW: Record<NonNullable<AiScreeningProgress['review']>, string> = {
+  PENDING: 'HR review pending',
+  REVIEWED: 'Reviewed by HR',
+  NEEDS_FOLLOW_UP: 'Needs follow-up',
+};
+
+function AiScreeningCell({ value }: { value: AiScreeningProgress | null }) {
+  if (!value) return <span className={`${pill} ${OUTCOME_STYLE.NOT_ATTEMPTED}`}>Not invited</span>;
+  const s = AI_SCREENING[value.status];
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <span className={`${pill} ${s.style}`}>{s.text}</span>
+      {value.review && (value.status === 'COMPLETED' || value.status === 'ENDED_EARLY') && <span className="text-xs text-muted">{AI_REVIEW[value.review]}</span>}
+    </div>
+  );
+}
+
+/** Who runs a round: the online test, a round module (GD, DSA, SQL, AI interview) once it is connected, or HR. */
+function RunBy({ round: r }: { round: AssessmentRoundSummary }) {
+  const text =
+    r.runBy === 'ONLINE_TEST'
+      ? 'Online test, graded automatically. Students get the link by email.'
+      : r.runBy === 'HR'
+        ? 'Run by HR (for example an interview). Students who pass the round before get an email that HR will contact them.'
+        : r.moduleConnected
+          ? `Run by the ${ROUND_MODULE_LABEL[r.module!]}. Students who pass the round before are sent to it, and its results and answers are saved here.`
+          : `Will be run by the ${ROUND_MODULE_LABEL[r.module!]}, which is not connected yet. Until then HR runs this round; its results and answers appear here as soon as the module records them.`;
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+      {r.runBy === 'MODULE' && (
+        <span className={`${pill} ${r.moduleConnected ? OUTCOME_STYLE.PASSED : OUTCOME_STYLE.NOT_ATTEMPTED}`}>{r.moduleConnected ? 'Connected' : 'Not connected yet'}</span>
+      )}
+      {text}
+    </p>
   );
 }
 
@@ -292,7 +351,13 @@ function RoundsTab({ data, jobId }: { data: JobAssessments; jobId: string }) {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">{r.position}</span>
               <span className="font-medium">{r.name}</span>
               <span className={`${pill} border-border text-muted`}>{ROUND_TYPES[r.type].label}</span>
+              {r.type === 'GROUP_DISCUSSION' && (
+                <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="ml-auto text-sm font-medium text-accent hover:underline">
+                  Manage groups, topic and live room →
+                </Link>
+              )}
             </div>
+            <RunBy round={r} />
             {r.description && <p className="mt-2 text-sm text-muted">{r.description}</p>}
             <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
               <div>
@@ -316,6 +381,12 @@ function RoundsTab({ data, jobId }: { data: JobAssessments; jobId: string }) {
                 </dd>
               </div>
             </dl>
+            {r.type === 'GROUP_DISCUSSION' && (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Session recordings</p>
+                <GdRecordings roundId={r.id} />
+              </div>
+            )}
           </li>
         ))}
       </ol>
