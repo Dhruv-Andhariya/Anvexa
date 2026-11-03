@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { SQL_SANDBOX, SqlSandbox } from '../sql/engine/sql-sandbox';
 import { dsaError, parseCodeRequest, type CodeRequestDto } from './dsa.dto';
 import { Evaluator, type CaseResult, type Evaluation, type Verdict } from './evaluation/evaluator';
 import { CODE_RUNNER, CodeRunnerBusyError, CodeRunnerUnavailableError, type CodeRunner } from './execution/code-runner';
@@ -7,7 +8,7 @@ import { parseProctorEvents, parseProctorStart } from './proctoring/proctoring.d
 import { ProctoringService, inviteRefFor, type RecordResult } from './proctoring/proctoring.service';
 import type { CandidateProctorState, ClientProctoringConfig } from './proctoring/proctoring.types';
 import { DSA_QUESTION_REPOSITORY, type QuestionRepository } from './questions/question.repository';
-import { LANGUAGES, toPublicQuestion, type DsaQuestion, type Language, type PublicQuestion } from './questions/question.types';
+import { LANGUAGES, languagesOf, toPublicQuestion, type DsaQuestion, type Language, type PublicQuestion } from './questions/question.types';
 import {
   DSA_INVITATION_RESOLVER,
   type DsaInvitation,
@@ -22,6 +23,15 @@ import {
 } from './session/session.store';
 
 export { DSA_CLOCK };
+
+const LANGUAGE_NAMES: Record<Language, string> = { python: 'Python', java: 'Java', cpp: 'C++', sql: 'SQL' };
+
+/** The page title: a round of SQL problems is a SQL assessment, a round of programs a DSA one. */
+export function assessmentTitle(questions: readonly Pick<DsaQuestion, 'harness'>[]): string {
+  const sql = questions.filter((q) => q.harness === 'sql').length;
+  if (sql > 0 && sql === questions.length) return 'SQL Assessment';
+  return sql > 0 ? 'Coding Assessment' : 'DSA Coding Assessment';
+}
 
 export interface QuestionResult {
   questionId: string;
@@ -105,8 +115,10 @@ export class DsaService {
     @Inject(CODE_RUNNER) runner: CodeRunner,
     @Optional() @Inject(DSA_CLOCK) private readonly now: () => number = Date.now,
     @Optional() @Inject(ProctoringService) private readonly proctoring: ProctoringService = new ProctoringService(),
+    /** Runs the queries of SQL problems (sql module). */
+    @Optional() @Inject(SQL_SANDBOX) sqlSandbox: SqlSandbox = new SqlSandbox(),
   ) {
-    this.evaluator = new Evaluator(runner);
+    this.evaluator = new Evaluator(runner, sqlSandbox);
   }
 
   // ---------------------------------------------------------------- public API
@@ -315,6 +327,10 @@ export class DsaService {
     if (!(LANGUAGES as readonly string[]).includes(dto.language)) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Unsupported language.');
     }
+    // a SQL problem takes a query, a programming problem a program
+    if (!languagesOf(question).includes(dto.language)) {
+      throw dsaError(HttpStatus.BAD_REQUEST, 'WRONG_LANGUAGE', `This question is answered in ${languagesOf(question).map((l) => LANGUAGE_NAMES[l]).join(', ')}.`);
+    }
     if (this.running.has(session.token)) {
       throw dsaError(HttpStatus.TOO_MANY_REQUESTS, 'BUSY', 'Your previous run is still in progress. Please wait for it to finish.');
     }
@@ -369,10 +385,11 @@ export class DsaService {
     const state: AssessmentState = {
       status: session.status,
       candidateName: session.candidateName,
-      title: 'DSA Coding Assessment',
+      title: assessmentTitle(questions),
       durationMinutes: Math.round(session.durationSec / 60),
       totalMarks: questions.reduce((sum, q) => sum + q.marks, 0),
-      languages: LANGUAGES,
+      // every language some question accepts (each question lists its own: SQL problems take SQL only)
+      languages: LANGUAGES.filter((l) => questions.some((q) => languagesOf(q).includes(l))),
       overview: questions.map((q) => ({ id: q.id, title: q.title, difficulty: q.difficulty, marks: q.marks })),
       serverTime: new Date(this.now()).toISOString(),
       startedAt: iso(session.startedAt),

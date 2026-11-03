@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sqlSpecProblems } from './sql-bank';
 
 /**
  * The DSA problem bank, as HR and the round engine see it: id, title, difficulty, suggested marks and a one-line
@@ -100,9 +101,22 @@ export function dsaBankIdOf(topics: readonly string[]): string | null {
 
 export const dsaBankEntry = (id: string): DsaBankEntry | undefined => DSA_BANK.find((p) => p.id === id);
 
-/** A CODING question tied to a problem that exists in the bank, or carrying HR's own complete problem. */
-export function isDsaQuestion(q: { kind: string; topics: readonly string[]; coding?: Pick<DsaProblemSpec, 'tests'> | null }): boolean {
+/** What decides whether a round question is an online coding problem. */
+export interface CodingProblemRef {
+  kind: string;
+  topics: readonly string[];
+  coding?: Pick<DsaProblemSpec, 'tests'> | null;
+  sql?: { tests: readonly { hidden: boolean }[] } | null;
+}
+
+/**
+ * A CODING question tied to a problem that exists in the bank, carrying HR's own complete problem, or carrying a SQL
+ * problem from the SQL question bank.
+ */
+export function isDsaQuestion(q: CodingProblemRef): boolean {
   if (q.kind !== 'CODING') return false;
+  // a SQL problem (sql-bank.ts) runs on the same coding page: one read-only query per question instead of a program
+  if (q.sql) return sqlSpecProblems(q.sql).length === 0;
   if (q.coding) return dsaSpecProblems(q.coding).length === 0;
   const id = dsaBankIdOf(q.topics);
   return id !== null && dsaBankEntry(id) !== undefined;
@@ -114,7 +128,7 @@ export function isDsaQuestion(q: { kind: string; topics: readonly string[]; codi
  */
 export function isDsaRound(round: {
   passRule: { mode: string } | null;
-  questions: readonly { kind: string; topics: readonly string[]; coding?: Pick<DsaProblemSpec, 'tests'> | null }[];
+  questions: readonly CodingProblemRef[];
 }): boolean {
   return !!round.passRule && round.passRule.mode !== 'INTERVIEWER_SCORE' && round.questions.length > 0 && round.questions.every(isDsaQuestion);
 }

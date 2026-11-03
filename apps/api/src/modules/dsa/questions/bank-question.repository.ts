@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { fromHrProblem } from './hr-problem';
+import { fromSqlProblem } from './sql-problem';
 import { MOCK_QUESTIONS } from './mock-questions.data';
 import type { QuestionRepository } from './question.repository';
 import type { DsaQuestion } from './question.types';
@@ -20,6 +21,10 @@ export class BankQuestionRepository implements QuestionRepository {
     if (!invitation?.round) return MOCK_QUESTIONS;
     const out: DsaQuestion[] = [];
     for (const rq of invitation.round.questions) {
+      if (rq.sql) {
+        out.push(fromSqlProblem({ ...rq, sql: rq.sql }));
+        continue;
+      }
       if (rq.custom) {
         out.push(fromHrProblem({ ...rq, custom: rq.custom }));
         continue;

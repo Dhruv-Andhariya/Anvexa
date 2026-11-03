@@ -2,7 +2,20 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
 // These types mirror apps/api/src/modules/dsa (dsa.service.ts, evaluator.ts, question.types.ts).
-export type Language = 'python' | 'java' | 'cpp';
+export type Language = 'python' | 'java' | 'cpp' | 'sql';
+export type SqlCell = string | number | null;
+export interface SqlResult {
+  columns: string[];
+  rows: SqlCell[][];
+}
+
+/** A SQL problem's tables and SAMPLE datasets (hidden datasets never reach the page). */
+export interface PublicSqlProblem {
+  tables: { name: string; columns: { name: string; type: string }[] }[];
+  /** true = the result's rows must come in the order the question asks for. */
+  orderMatters: boolean;
+  samples: { id: string; name: string; data: { name: string; columns: string[]; rows: SqlCell[][] }[]; expected: SqlResult }[];
+}
 export type Difficulty = 'Easy' | 'Medium' | 'Hard';
 export type SessionStatus = 'not_started' | 'in_progress' | 'finished';
 export type CaseStatus = 'passed' | 'wrong_answer' | 'runtime_error' | 'time_limit' | 'compile_error' | 'internal_error';
@@ -18,9 +31,13 @@ export interface PublicQuestion {
   outputFormat: string;
   constraints: string[];
   samples: { input: string; output: string; explanation: string }[];
-  starterCode: Record<Language, string>;
+  starterCode: Partial<Record<Language, string>>;
+  /** The languages this question is answered in (a SQL problem: SQL only). */
+  languages: Language[];
   sampleTests: { id: string; input: string; expectedOutput: string }[];
   hiddenTestCount: number;
+  /** SQL problems only. */
+  sql?: PublicSqlProblem;
 }
 
 export interface QuestionProgress {
@@ -144,6 +161,9 @@ export interface CaseResult {
   actual?: string;
   stdout?: string;
   stderr?: string;
+  /** SQL problems, sample datasets: the query's result and the expected one as tables. */
+  table?: SqlResult;
+  expectedTable?: SqlResult;
 }
 
 export interface RunResponse {
@@ -215,7 +235,11 @@ export const startProctoring = (token: string, input: { consentVersion: string; 
 export const sendProctorEvents = (token: string, events: ProctorEventInput[]) =>
   request<ProctorRecordResponse>('POST', `${base(token)}/proctor/events`, { events });
 
-export const LANGUAGE_LABELS: Record<Language, string> = { python: 'Python', java: 'Java', cpp: 'C++' };
+export const LANGUAGE_LABELS: Record<Language, string> = { python: 'Python', java: 'Java', cpp: 'C++', sql: 'SQL' };
+
+/** The language a question is answered in: the candidate's choice when the question takes it, else its first one. */
+export const languageFor = (q: Pick<PublicQuestion, 'languages'>, chosen: Language): Language =>
+  q.languages.includes(chosen) ? chosen : (q.languages[0] ?? chosen);
 
 export function formatClock(totalSeconds: number): string {
   const s = Math.max(0, totalSeconds);

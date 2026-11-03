@@ -1,5 +1,6 @@
 import type { CaseResult, CaseStatus, RunResponse, SubmitResponse } from '@/lib/dsa-api';
 import { Badge, Spinner } from '@/components/ui';
+import { SqlTable } from './sql-table';
 
 export interface PanelResult {
   kind: 'run' | 'submit';
@@ -41,6 +42,29 @@ function CaseRow({ c }: { c: CaseResult }) {
   if (c.hidden || c.input === undefined) {
     return <li className="rounded-md border border-border bg-surface px-3 py-2">{header}</li>;
   }
+  // a SQL problem: the result tables side by side with what differs
+  if (c.expectedTable) {
+    return (
+      <li className="rounded-md border border-border bg-surface">
+        <details open>
+          <summary className="cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden">{header}</summary>
+          <div className="flex flex-col gap-2 border-t border-border px-3 py-3">
+            {c.stderr ? <Detail title={passed ? 'Note' : 'What is wrong'} text={c.stderr} tone="danger" /> : null}
+            <div className="grid gap-2 xl:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted">Your result</p>
+                {c.table ? <SqlTable caption="Your result" columns={c.table.columns} rows={c.table.rows} /> : <pre className={pre}>(no result)</pre>}
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted">Expected output</p>
+                <SqlTable caption="Expected output" columns={c.expectedTable.columns} rows={c.expectedTable.rows} />
+              </div>
+            </div>
+          </div>
+        </details>
+      </li>
+    );
+  }
   return (
     <li className="rounded-md border border-border bg-surface">
       <details open>
@@ -61,18 +85,23 @@ export function ResultsPanel({
   result,
   busy,
   error,
+  sql = false,
 }: {
   result: PanelResult | undefined;
   busy: 'run' | 'submit' | null;
   error: string;
+  /** A SQL problem: "query" and "datasets" instead of "code" and "tests". */
+  sql?: boolean;
 }) {
+  const what = sql ? 'query' : 'code';
+  const tests = sql ? 'datasets' : 'tests';
   return (
     <section aria-live="polite" aria-label="Test results" className="flex flex-col gap-3 p-4 sm:p-5">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Test results</h3>
 
       {busy && (
         <p className="flex items-center gap-2 text-sm text-muted">
-          <Spinner /> {busy === 'run' ? 'Running your code against the sample tests…' : 'Judging your submission against all tests…'}
+          <Spinner /> {busy === 'run' ? `Running your ${what} against the sample ${tests}…` : `Judging your submission against all ${tests}…`}
         </p>
       )}
 
@@ -83,28 +112,33 @@ export function ResultsPanel({
       )}
 
       {!busy && !error && !result && (
-        <p className="text-sm text-muted">Run your code to see results here. Nothing is saved until you submit.</p>
+        <p className="text-sm text-muted">Run your {what} to see results here. Nothing is saved until you submit.</p>
       )}
 
-      {!busy && result && <ResultBody result={result} />}
+      {!busy && result && <ResultBody result={result} sql={sql} />}
     </section>
   );
 }
 
-function ResultBody({ result }: { result: PanelResult }) {
+function ResultBody({ result, sql }: { result: PanelResult; sql: boolean }) {
   const { data, kind } = result;
   const submit = kind === 'submit' ? (data as SubmitResponse) : null;
   const tone = data.verdict === 'passed' ? 'success' : 'danger';
+  const tests = sql ? 'datasets' : 'tests';
   const headline =
     data.verdict === 'compile_error'
-      ? 'Compilation failed'
+      ? sql
+        ? 'The query cannot run'
+        : 'Compilation failed'
       : data.verdict === 'internal_error'
-        ? 'The code runner failed'
+        ? sql
+          ? 'The SQL runner failed'
+          : 'The code runner failed'
         : data.verdict === 'passed'
           ? kind === 'submit'
-            ? 'All tests passed'
-            : 'Sample tests passed'
-          : `${data.passed} of ${data.total} tests passed`;
+            ? `All ${tests} passed`
+            : `Sample ${tests} passed`
+          : `${data.passed} of ${data.total} ${tests} passed`;
 
   return (
     <div className="flex flex-col gap-3">
@@ -125,7 +159,7 @@ function ResultBody({ result }: { result: PanelResult }) {
           {submit.progress.attempts === 1 ? 'submission' : 'submissions'}
         </p>
       )}
-      {data.compileOutput && <Detail title="Compiler output" text={data.compileOutput} tone="danger" />}
+      {data.compileOutput && <Detail title={sql ? 'SQL error' : 'Compiler output'} text={data.compileOutput} tone="danger" />}
       {data.verdict !== 'compile_error' && (
         <ul className="flex flex-col gap-2">
           {data.cases.map((c) => (

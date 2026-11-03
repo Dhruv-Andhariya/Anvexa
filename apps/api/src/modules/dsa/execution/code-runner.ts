@@ -1,4 +1,4 @@
-import type { Language } from '../questions/question.types';
+import type { CodeLanguage } from '../questions/question.types';
 
 /**
  * The seam between the assessment logic and whatever executes candidate code.
@@ -8,7 +8,7 @@ import type { Language } from '../questions/question.types';
 export const CODE_RUNNER = Symbol('CODE_RUNNER');
 
 export interface RunnerJob {
-  language: Language;
+  language: CodeLanguage;
   /** The complete program (candidate code plus the harness that reads stdin and prints the result). */
   source: string;
   stdin: string;

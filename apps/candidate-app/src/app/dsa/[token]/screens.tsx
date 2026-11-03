@@ -88,10 +88,21 @@ export function IntroScreen({
               The {state.durationMinutes}-minute timer starts when you press Start and cannot be paused. It runs on our server, so
               refreshing or closing this page does not reset it.
             </li>
-            <li>Solve in {state.languages.map((l) => LANGUAGE_LABELS[l]).join(', ')}. Switch between questions freely; your code is kept.</li>
-            <li>Run checks your code against the visible sample tests. Nothing is scored.</li>
-            <li>Submit judges your code against the sample tests and hidden tests, and scores it. You may submit again; your best score per question counts.</li>
-            <li>Partial credit is given for the share of tests passed.</li>
+            {state.languages.length === 1 && state.languages[0] === 'sql' ? (
+              <>
+                <li>Answer each question with one SQL query (SELECT, SQLite). Each question shows its tables, sample data and the expected output. Switch between questions freely; your queries are kept.</li>
+                <li>Run query checks your query against the sample datasets. Nothing is scored.</li>
+                <li>Submit answer judges your query against the sample datasets and hidden datasets, and scores it. You may submit again; your best score per question counts.</li>
+                <li>Partial credit is given for the share of datasets passed.</li>
+              </>
+            ) : (
+              <>
+                <li>Solve in {state.languages.map((l) => LANGUAGE_LABELS[l]).join(', ')}. Switch between questions freely; your code is kept.</li>
+                <li>Run checks your code against the visible sample tests. Nothing is scored.</li>
+                <li>Submit judges your code against the sample tests and hidden tests, and scores it. You may submit again; your best score per question counts.</li>
+                <li>Partial credit is given for the share of tests passed.</li>
+              </>
+            )}
             <li>When time runs out, the assessment ends automatically and your best scores are recorded.</li>
           </ul>
         </section>

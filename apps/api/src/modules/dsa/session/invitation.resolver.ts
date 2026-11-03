@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Difficulty, DsaProblemSpec } from '@hireflow/contracts';
+import type { Difficulty, DsaProblemSpec, SqlProblemSpec } from '@hireflow/contracts';
 
 export const DSA_INVITATION_RESOLVER = Symbol('DSA_INVITATION_RESOLVER');
 
@@ -12,6 +12,8 @@ export interface DsaRoundQuestion {
   bankId: string;
   marks: number;
   custom?: { statement: string; difficulty: Difficulty | null; spec: DsaProblemSpec };
+  /** A SQL problem (the round's copy of a SQL bank question): the question text is the statement. */
+  sql?: { statement: string; difficulty: Difficulty | null; spec: SqlProblemSpec };
 }
 
 export interface DsaInvitation {

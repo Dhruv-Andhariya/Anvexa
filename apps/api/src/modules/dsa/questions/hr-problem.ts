@@ -1,8 +1,8 @@
 import type { DsaRoundQuestion } from '../session/invitation.resolver';
-import type { Difficulty, DsaQuestion, Language } from './question.types';
+import type { CodeLanguage, Difficulty, DsaQuestion } from './question.types';
 
 /** HR's own problems: the candidate writes the whole program, reading the input from stdin and printing the answer. */
-export const STDIO_STARTER_CODE: Record<Language, string> = {
+export const STDIO_STARTER_CODE: Record<CodeLanguage, string> = {
   python: `import sys
 
 

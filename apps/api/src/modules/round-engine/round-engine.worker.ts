@@ -3,7 +3,7 @@ import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
 import { buildRoundClearedEmail, buildRoundInviteEmail, buildRoundRejectionEmail } from './emails';
-import { codingMinutes, codingRoundsEnabled } from './coding-round';
+import { codingKindOf, codingMinutes, codingRoundsEnabled } from './coding-round';
 import { DEFAULT_LINK_DAYS, assessmentBaseUrlFromEnv, assessmentLink, dsaBaseUrlFromEnv, isPublicLink, newAssessmentToken } from './link';
 import { DEADLINE_GRACE_MS, roundKind } from './online-test';
 import { ROUND_ENGINE_CLOCK, ROUND_ENGINE_CONFIG, RoundEngineService, type RoundEngineConfig } from './round-engine.service';
@@ -197,6 +197,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
         linkExpiresAt: expiresAt,
         cameraRequired: coding ? false : this.engineConfig.cameraRequired,
         coding,
+        ...(coding ? { codingKind: codingKindOf(round) } : {}),
       });
       await this.mailer.send(ctx.email, message);
       delivered = true;

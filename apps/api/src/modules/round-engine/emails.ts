@@ -27,7 +27,16 @@ export interface InviteEmailInput extends CandidateEmailBase {
   cameraRequired: boolean;
   /** A DSA coding round (candidate-app page) instead of a multiple-choice test: the wording changes, nothing else. */
   coding?: boolean;
+  /** Coding rounds: which kind of problems ('sql' = SQL queries only, 'code' = programs only, 'mixed' = both). */
+  codingKind?: 'code' | 'sql' | 'mixed';
 }
+
+/** What a coding round's candidate writes, for the invitation. */
+const CODING_ANSWERS: Record<'code' | 'sql' | 'mixed', string> = {
+  code: 'You may write each solution in Python, Java or C++. Nothing needs to be installed because your code runs on our servers.',
+  sql: 'Each problem is answered with one SQL query (SELECT, SQLite dialect); the page shows the tables and sample data. Nothing needs to be installed because your queries run on our servers.',
+  mixed: 'Programming problems may be solved in Python, Java or C++, and SQL problems with one SQL query. Nothing needs to be installed because your answers run on our servers.',
+};
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -48,13 +57,13 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
     `Dear ${v.name},`,
     `Thank you for completing the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}. We are pleased to invite you to the next stage of our recruitment process: the ${round}.`,
     i.coding
-      ? `Assessment: ${round} · ${i.questionCount} coding problem${i.questionCount === 1 ? '' : 's'} · ${duration}.`
+      ? `Assessment: ${round} · ${i.questionCount} ${i.codingKind === 'sql' ? 'SQL' : 'coding'} problem${i.questionCount === 1 ? '' : 's'} · ${duration}.`
       : `Assessment: ${round} · ${i.questionCount} question${i.questionCount === 1 ? '' : 's'} · ${duration}.`,
     ...(instructions ? [`Instructions from the hiring team: ${instructions}`] : []),
     `Please take the assessment using this personal link: ${i.link}`,
     `The link works until ${dateText(i.linkExpiresAt)}. Once you start, the timer keeps running even if you close the page, so please begin when you can finish in one sitting.`,
     i.coding
-      ? 'This is a proctored coding test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. You may write each solution in Python, Java or C++. Nothing needs to be installed because your code runs on our servers. No camera, microphone or screen recording is used.'
+      ? `This is a proctored ${i.codingKind === 'sql' ? 'SQL' : 'coding'} test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. ${CODING_ANSWERS[i.codingKind ?? 'code']} No camera, microphone or screen recording is used.`
       : i.cameraRequired
       ? 'The assessment is monitored: you will need a laptop or phone with a working webcam, and the page records events such as leaving the test tab or the camera turning off for the hiring team to review. No video is recorded.'
       : 'The assessment page records events such as leaving the test tab for the hiring team to review.',

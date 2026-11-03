@@ -3,7 +3,7 @@ import type { CodeRunner } from '../../src/modules/dsa/execution/code-runner';
 import { DsaService } from '../../src/modules/dsa/dsa.service';
 import { BankQuestionRepository } from '../../src/modules/dsa/questions/bank-question.repository';
 import { MockQuestionRepository } from '../../src/modules/dsa/questions/mock-question.repository';
-import { LANGUAGES } from '../../src/modules/dsa/questions/question.types';
+import { CODE_LANGUAGES } from '../../src/modules/dsa/questions/question.types';
 import { DemoInvitationResolver, type DsaInvitation, type InvitationResolver } from '../../src/modules/dsa/session/invitation.resolver';
 import { InMemorySessionStore } from '../../src/modules/dsa/session/session.store';
 import { BROKEN, CORRECT, HR_CORRECT, HR_PROBLEM, HR_WRONG, WRONG } from '../dsa-fixtures';
@@ -58,7 +58,7 @@ export function defineExecutionSuite(label: string, makeRunner: () => CodeRunner
 
   describe.skipIf(!!skipReason)(label, () => {
     for (const questionId of QUESTION_IDS) {
-      for (const language of LANGUAGES) {
+      for (const language of CODE_LANGUAGES) {
         it(`${questionId} ${language}: correct solution passes every sample + hidden test`, async () => {
           const service = await started();
           const res = await service.submit(TOKEN, { questionId, language, code: CORRECT[questionId][language] });
@@ -90,7 +90,7 @@ export function defineExecutionSuite(label: string, makeRunner: () => CodeRunner
       }
     }
 
-    for (const language of LANGUAGES) {
+    for (const language of CODE_LANGUAGES) {
       it(`${language}: compilation / syntax error is reported, never passed`, async () => {
         const service = await started();
         const res = await service.run(TOKEN, { questionId: 'dsa-001', language, code: BROKEN.compile[language] });
@@ -116,7 +116,7 @@ export function defineExecutionSuite(label: string, makeRunner: () => CodeRunner
     }
 
     // HR's own problem from the rounds editor: the candidate's whole program runs with each test on stdin
-    for (const language of LANGUAGES) {
+    for (const language of CODE_LANGUAGES) {
       it(`HR's own problem ${language}: Run uses the sample only; Submit grades every test; the score counts`, async () => {
         const service = new DsaService(hrRound, new BankQuestionRepository(), new InMemorySessionStore(), makeRunner());
         await service.start(HR_TOKEN);

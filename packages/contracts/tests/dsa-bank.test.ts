@@ -85,6 +85,17 @@ describe('rounds editor rules for DSA problems', () => {
     if (!bad.success) expect(bad.error.issues.map((i) => i.message)).toContain('Enter the expected output of every test');
   });
 
+  it('a SQL problem (copy of a SQL bank question) makes a coding question an online problem; one problem per question', () => {
+    const sql = { tests: [{ hidden: false }, { hidden: true }] };
+    expect(isDsaQuestion({ kind: 'CODING', topics: [], sql })).toBe(true);
+    expect(isDsaQuestion({ kind: 'CODING', topics: [], sql: { tests: [{ hidden: true }] } })).toBe(false);
+    expect(isDsaRound({ passRule: { mode: 'MARKS' }, questions: [{ kind: 'CODING', topics: [], sql }, { kind: 'CODING', topics: ['dsa:dsa-001'] }] })).toBe(true);
+    expect(questionProblems({ ...coding([]), sql } as never)).toEqual([]);
+    expect(questionProblems({ ...coding([]), kind: 'MCQ', options: ['a', 'b'], correct: [0], sql } as never)).toContain('A SQL problem can only be attached to a coding question.');
+    expect(questionProblems({ ...coding(['dsa:dsa-001']), sql } as never)).toEqual(['A question can have one problem only: a SQL problem, a DSA bank problem or your own.']);
+    expect(questionProblems({ ...coding([]), sql: { tests: [{ hidden: true }] } } as never)).toEqual(['Add at least one sample dataset (shown to candidates and used by Run).']);
+  });
+
   it('the save request rejects an unknown problem with the same message as the editor shows', () => {
     const round = { type: 'CODING', name: 'DSA', passRule: { mode: 'MARKS', value: 5 }, questions: [coding(['dsa:dsa-999'])] };
     const parsed = saveRoundsRequestSchema.safeParse({ rounds: [round], complete: false });

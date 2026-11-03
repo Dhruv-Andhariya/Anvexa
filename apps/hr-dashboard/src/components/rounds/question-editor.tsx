@@ -1,13 +1,30 @@
 'use client';
 
-import { DSA_BANK, DSA_SPEC_LIMITS, DSA_TOPIC_PREFIX, QUESTION_KINDS, ROUNDS_LIMITS, dsaBankEntry, dsaBankIdOf, dsaTopicFor, type Difficulty } from '@hireflow/contracts';
+import {
+  DSA_BANK,
+  DSA_SPEC_LIMITS,
+  DSA_TOPIC_PREFIX,
+  QUESTION_KINDS,
+  ROUNDS_LIMITS,
+  dsaBankEntry,
+  dsaBankIdOf,
+  dsaTopicFor,
+  type Difficulty,
+  type SqlBankListItem,
+} from '@hireflow/contracts';
+import { useEffect, useState } from 'react';
+import { ApiError } from '@/lib/api';
 import { messagesUnder, newCodingDraft, newTestDraft, type CodingDraft, type QuestionDraft, type Validation } from '@/lib/rounds';
+import { activeSqlQuestions, getSqlQuestion } from '@/lib/sql-bank-api';
 import { Button, inputClass } from '../ui';
 
 const DIFFICULTIES: Difficulty[] = ['EASY', 'MEDIUM', 'HARD'];
 const small = 'rounded-md border border-border bg-surface px-2 py-1 text-sm';
 /** The "DSA problem" choice for HR's own problem (bank problems use their id). */
 const OWN = '__own__';
+/** The "DSA problem" choices for SQL bank questions: `sql:<id>`; the round's copy keeps working without the bank one. */
+const SQL_PREFIX = 'sql:';
+const SQL_CURRENT = 'sql:current';
 
 /** One question of a round: text, options / correct answer or expected answer, marks. */
 export function QuestionEditor({
@@ -43,15 +60,54 @@ export function QuestionEditor({
   };
   // A coding question tied to a bank problem is run online (invitation email, timed coding page, automatic result).
   const bankId = q.kind === 'CODING' ? dsaBankIdOf(q.topics) : null;
+  // SQL problems come from the company's SQL question bank (SQL questions page); only active ones can be picked
+  const [sqlBank, setSqlBank] = useState<SqlBankListItem[] | null>(null);
+  const [sqlError, setSqlError] = useState('');
+  const [sqlLoading, setSqlLoading] = useState(false);
+  useEffect(() => {
+    if (q.kind !== 'CODING') return;
+    let live = true;
+    activeSqlQuestions().then(
+      (list) => live && setSqlBank(list),
+      () => live && setSqlBank([]), // the picker still offers DSA problems; the SQL bank is optional
+    );
+    return () => {
+      live = false;
+    };
+  }, [q.kind]);
+  const pickSql = async (bankQuestionId: string) => {
+    setSqlLoading(true);
+    setSqlError('');
+    try {
+      const b = await getSqlQuestion(bankQuestionId);
+      // a copy of the bank question: its description is what candidates read, its marks and difficulty are suggestions
+      set({
+        coding: null,
+        sql: b.problem,
+        topics: b.topics.filter((t) => !t.startsWith(DSA_TOPIC_PREFIX)).slice(0, ROUNDS_LIMITS.topicsMax),
+        text: b.description,
+        marks: String(b.marks),
+        difficulty: b.difficulty,
+        language: 'SQL',
+      });
+    } catch (err) {
+      setSqlError(err instanceof ApiError ? err.message : 'Could not load that SQL question. Please try again.');
+    } finally {
+      setSqlLoading(false);
+    }
+  };
   const pickProblem = (id: string) => {
     const others = q.topics.filter((t) => !t.startsWith(DSA_TOPIC_PREFIX));
+    if (id === SQL_CURRENT) return;
+    if (id.startsWith(SQL_PREFIX)) return void pickSql(id.slice(SQL_PREFIX.length));
     // HR's own problem: kept while HR switches away and back, so nothing typed is lost by a wrong click
-    if (id === OWN) return set({ topics: others, coding: q.coding ?? newCodingDraft() });
+    if (id === OWN) return set({ topics: others, sql: null, coding: q.coding ?? newCodingDraft() });
     const entry = dsaBankEntry(id);
-    if (!entry) return set({ topics: others, coding: null });
+    if (!entry) return set({ topics: others, coding: null, sql: null });
     const previous = bankId ? dsaBankEntry(bankId) : undefined;
     set({
       coding: null,
+      sql: null,
       topics: [dsaTopicFor(entry.id), ...others],
       difficulty: entry.difficulty,
       // HR's own wording and marks are kept; only an empty text, the default marks or the previous problem's are replaced
@@ -148,13 +204,13 @@ ${entry.summary}`,
       {q.kind === 'CODING' && (
         <div className="flex flex-col gap-1">
           <label htmlFor={`${id}-bank`} className="text-xs text-muted">
-            DSA problem (optional): candidates solve it online in Python, Java or C++ and it is graded automatically
+            DSA or SQL problem (optional): candidates solve it online (Python, Java or C++ / one SQL query) and it is graded automatically
           </label>
           <select
             id={`${id}-bank`}
             className={`${small} max-w-md`}
-            value={q.coding ? OWN : (bankId ?? '')}
-            disabled={disabled}
+            value={q.sql ? (q.sql.bankId && sqlBank?.some((b) => b.id === q.sql!.bankId) ? `${SQL_PREFIX}${q.sql.bankId}` : SQL_CURRENT) : q.coding ? OWN : (bankId ?? '')}
+            disabled={disabled || sqlLoading}
             onChange={(e) => pickProblem(e.target.value)}
           >
             <option value="">None — HR runs this question</option>
@@ -167,8 +223,30 @@ ${entry.summary}`,
                 </option>
               ))}
             </optgroup>
+            <optgroup label="SQL question bank">
+              {q.sql && !(q.sql.bankId && sqlBank?.some((b) => b.id === q.sql!.bankId)) && <option value={SQL_CURRENT}>{q.sql.title} (this round&apos;s copy)</option>}
+              {sqlBank?.map((b) => (
+                <option key={b.id} value={`${SQL_PREFIX}${b.id}`}>
+                  {b.title} ({b.difficulty[0]}
+                  {b.difficulty.slice(1).toLowerCase()}, {b.marks} marks)
+                </option>
+              ))}
+              {sqlBank && !sqlBank.length && !q.sql && (
+                <option value="" disabled>
+                  No active SQL questions yet (SQL questions page)
+                </option>
+              )}
+            </optgroup>
           </select>
           {bankId && <p className="text-xs text-muted">Candidates see the problem statement from the bank; the text above is only for you. A round is run online when every question has a DSA problem.</p>}
+          {sqlError && <p className="text-xs font-medium text-danger">{sqlError}</p>}
+          {q.sql && (
+            <p className="text-xs text-muted">
+              SQL problem &ldquo;{q.sql.title}&rdquo;: {q.sql.tables.map((t) => t.name).join(', ')} · {q.sql.tests.filter((t) => !t.hidden).length} sample /{' '}
+              {q.sql.tests.filter((t) => t.hidden).length} hidden datasets. Candidates answer with one SQL query; the text above is the problem they read. This
+              round keeps its own copy: after editing the question on the SQL questions page, pick it here again to use the new version.
+            </p>
+          )}
         </div>
       )}
 
