@@ -134,7 +134,7 @@ export class RoundsConfigService {
       });
       if (!checked.success) continue;
       seen.add(normal(q.text));
-      const { id: _id, coding: _coding, ...question } = checked.data;
+      const { id: _id, coding: _coding, sql: _sql, ...question } = checked.data;
       questions.push({ ...question, source: 'AI' });
       if (questions.length === req.count) break;
     }
@@ -242,6 +242,7 @@ function toStored(rounds: RoundConfig[], current: StoredConfig | null): StoredRo
       topics: q.topics,
       source: q.source,
       coding: q.kind === 'CODING' ? q.coding : null,
+      sql: q.kind === 'CODING' ? q.sql : null,
     })),
   }));
 }

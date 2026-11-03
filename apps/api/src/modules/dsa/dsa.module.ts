@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ApplicationsModule } from '../applications';
 import { RoundEngineModule } from '../round-engine';
+import { SqlModule } from '../sql';
 import { TenantsModule } from '../tenants';
 import { DsaHrController } from './dsa-hr.controller';
 import { DsaController } from './dsa.controller';
@@ -28,7 +29,8 @@ import { DSA_SESSION_STORE, InMemorySessionStore } from './session/session.store
 const demoMode = () => ['on', 'true', '1'].includes((process.env.DSA_DEMO_MODE ?? '').trim().toLowerCase());
 
 @Module({
-  imports: [ApplicationsModule, RoundEngineModule, TenantsModule],
+  // SqlModule: the SQL sandbox that runs the queries of SQL problems (SQL rounds use this same coding page)
+  imports: [ApplicationsModule, RoundEngineModule, TenantsModule, SqlModule],
   controllers: [DsaController, ProctoringController, ProctoringAdminController, DsaHrController],
   providers: [
     DsaService,

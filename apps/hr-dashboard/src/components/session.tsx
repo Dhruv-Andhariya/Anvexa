@@ -155,6 +155,8 @@ function AppHeader({ session, onChanged }: { session: Session; onChanged: () => 
           { href: '/shortlisted', label: 'Shortlisted Students' },
           // the Group Discussion page is opened from a GD round on Assessments ("Manage groups")
           { href: '/assessments', label: 'Assessments' },
+          // the company's SQL question bank; questions are picked for a round in the job's rounds editor
+          { href: '/sql-questions', label: 'SQL questions' },
           { href: '/company', label: 'Company profile' },
         ]
       : []),

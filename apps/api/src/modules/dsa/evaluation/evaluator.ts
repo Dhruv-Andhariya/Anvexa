@@ -1,7 +1,10 @@
 import { Logger } from '@nestjs/common';
+import type { SqlResult } from '@hireflow/contracts';
+import { SqlSandbox } from '../../sql/engine/sql-sandbox';
 import type { CodeRunner, RunnerResult } from '../execution/code-runner';
-import type { Comparator, DsaQuestion, Language, TestCase } from '../questions/question.types';
+import { isCodeLanguage, type CodeLanguage, type Comparator, type DsaQuestion, type Language, type TestCase } from '../questions/question.types';
 import { buildProgram, cleanDiagnostics, splitStdout } from './harness';
+import { SqlEvaluator } from './sql-evaluator';
 
 export type CaseStatus =
   | 'passed'
@@ -24,6 +27,9 @@ export interface CaseResult {
   actual?: string;
   stdout?: string;
   stderr?: string;
+  /** SQL problems, sample datasets only: the query's result and the expected one, as tables. */
+  table?: SqlResult;
+  expectedTable?: SqlResult;
 }
 
 export type Verdict = 'passed' | 'failed' | 'compile_error' | 'internal_error';
@@ -65,10 +71,24 @@ function caseLabels(cases: TestCase[]): string[] {
 }
 
 export class Evaluator {
-  constructor(private readonly runner: CodeRunner) {}
+  private readonly sql: SqlEvaluator;
+
+  constructor(
+    private readonly runner: CodeRunner,
+    sqlSandbox: SqlSandbox = new SqlSandbox(),
+  ) {
+    this.sql = new SqlEvaluator(sqlSandbox);
+  }
 
   /** Executes `code` against `cases` through the runner and compares real output. Nothing is assumed to pass. */
   async evaluate(question: DsaQuestion, language: Language, code: string, cases: TestCase[]): Promise<Evaluation> {
+    // a SQL problem: the "code" is one query, run in the SQL sandbox (never by the code runner)
+    if (question.harness === 'sql') return this.sql.evaluate(question, code, cases);
+    if (!isCodeLanguage(language)) throw new Error(`${language} is not a programming language`);
+    return this.evaluateProgram(question, language, code, cases);
+  }
+
+  private async evaluateProgram(question: DsaQuestion, language: CodeLanguage, code: string, cases: TestCase[]): Promise<Evaluation> {
     const program = buildProgram(language, question.harness, code);
     const labels = caseLabels(cases);
     const jobs = cases.map((c) => ({ language, source: program.source, stdin: c.stdin }));

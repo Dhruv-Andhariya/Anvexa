@@ -103,4 +103,10 @@ export function codingRoundsEnabled(env: NodeJS.ProcessEnv = process.env): boole
 /** Minutes the candidate gets: HR's time limit, or the default. */
 export const codingMinutes = (round: Pick<SavedRound, 'timeLimitMinutes'>) => round.timeLimitMinutes ?? DEFAULT_CODING_MINUTES;
 
+/** What a coding round's problems are: SQL queries only, programs only, or both (for the invitation's wording). */
+export function codingKindOf(round: Pick<SavedRound, 'questions'>): 'code' | 'sql' | 'mixed' {
+  const sql = round.questions.filter((q) => q.sql).length;
+  return sql === 0 ? 'code' : sql === round.questions.length ? 'sql' : 'mixed';
+}
+
 export { isDsaRound };

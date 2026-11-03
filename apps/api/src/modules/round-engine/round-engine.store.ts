@@ -319,7 +319,7 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
            NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id AND q.kind NOT IN ('MCQ', 'TRUE_FALSE'))
            OR (${codingRounds}::boolean AND NOT EXISTS (
                  SELECT 1 FROM round_questions q WHERE q.round_id = r.id
-                    AND NOT (q.kind = 'CODING' AND (q.topics && ${bankTopics}::text[] OR q.coding_spec IS NOT NULL))))
+                    AND NOT (q.kind = 'CODING' AND (q.topics && ${bankTopics}::text[] OR q.coding_spec IS NOT NULL OR q.sql_spec IS NOT NULL))))
          )
          AND NOT EXISTS (SELECT 1 FROM round_invites i WHERE i.application_id = a.id AND i.round_id = r.id)
          AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = a.id AND rr.round_id = r.id)
