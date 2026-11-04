@@ -12,6 +12,7 @@ import {
   type RoundType,
   type SaveRoundsRequest,
   type SavedRound,
+  type SqlProblemSpec,
 } from '@hireflow/contracts';
 
 /**
@@ -33,6 +34,11 @@ export interface QuestionDraft {
   source: 'HR' | 'AI';
   /** Coding questions: HR's own DSA problem (null = none; a bank problem or a question HR runs). */
   coding: CodingDraft | null;
+  /**
+   * Coding questions: a copy of a SQL bank question (null = none). Picked, never edited here (HR edits the bank), so
+   * it is kept exactly as the server computed it.
+   */
+  sql: SqlProblemSpec | null;
 }
 
 /** HR's own DSA problem while it is edited. The question text is the statement. */
@@ -82,6 +88,7 @@ export function newQuestion(kind: QuestionKind): QuestionDraft {
     topics: [],
     source: 'HR',
     coding: null,
+    sql: null,
   };
 }
 
@@ -149,6 +156,7 @@ export function fromSaved(rounds: SavedRound[]): RoundDraft[] {
       topics: q.topics,
       source: q.source,
       coding: codingFromSaved(q.coding),
+      sql: q.sql,
     })),
   }));
 }
@@ -167,6 +175,7 @@ export function fromGenerated(q: GeneratedQuestion): QuestionDraft {
     topics: q.topics,
     source: 'AI',
     coding: null,
+    sql: null,
   };
 }
 
@@ -228,6 +237,7 @@ export function toRequest(drafts: RoundDraft[], complete: boolean): SaveRoundsRe
                 tests: q.coding.tests.map(({ input, output, hidden }) => ({ input, output, hidden })),
               }
             : null,
+        sql: q.kind === 'CODING' ? q.sql : null,
       })),
     })),
   };

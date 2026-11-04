@@ -1,0 +1,33 @@
+// =====================================================================================
+// SQL question bank. Code: apps/api/src/modules/sql (HR routes /sql-hr/questions, contracts sql-bank.ts).
+// One company's SQL questions: HR writes the schema, the datasets and the reference query; the API runs them in the
+// SQL sandbox (never in this database) and keeps what it computed in `problem`. A round uses a COPY of a question
+// (round_questions.sql_spec), so editing or deleting a bank question never changes a round that is running.
+// tenant_id on every row; every query filters by it. Never served by a public API.
+// =====================================================================================
+
+model SqlQuestion {
+  id          String                  @id @db.Uuid
+  tenantId    String                  @map("tenant_id") @db.Uuid
+  title       String
+  /// What the query must return (shown to candidates).
+  description String
+  difficulty  RoundQuestionDifficulty
+  marks       Int
+  topics      String[]                @default([])
+  /// Inactive questions stay in the bank but cannot be picked for new rounds.
+  active      Boolean                 @default(true)
+  /// The problem as it runs (contracts sqlProblemSpecSchema): schema SQL, starter and reference query, order rule,
+  /// time limit, the tables, and every dataset with its sample rows (sample datasets only) and expected result.
+  problem     Json
+  /// Starter questions shipped with HireFlow ("starter:<n>"), so adding them twice does nothing. null = HR's own.
+  seedKey     String?                 @map("seed_key")
+  createdById String?                 @map("created_by_id") @db.Uuid
+  updatedById String?                 @map("updated_by_id") @db.Uuid
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  @@unique([tenantId, seedKey])
+  @@index([tenantId, active])
+  @@map("sql_questions")
+}

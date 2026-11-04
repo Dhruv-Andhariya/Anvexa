@@ -29,6 +29,7 @@ export function toInvitation(token: string, ctx: CodingRoundContext, showResult:
           bankId: dsaBankIdOf(q.topics) ?? '',
           marks: q.marks,
           ...(q.coding ? { custom: { statement: q.text, difficulty: q.difficulty, spec: q.coding } } : {}),
+          ...(q.sql ? { sql: { statement: q.text, difficulty: q.difficulty, spec: q.sql } } : {}),
         })),
     },
     showResult,

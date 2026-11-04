@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Language } from '../questions/question.types';
+import type { CodeLanguage } from '../questions/question.types';
 import {
   CodeRunnerUnavailableError,
   type CodeRunner,
@@ -35,7 +35,7 @@ export interface PistonOptions {
   queueTimeoutMs: number;
   maxQueue: number;
   requestTimeoutMs: number;
-  limits: Record<Language, LanguageLimits>;
+  limits: Record<CodeLanguage, LanguageLimits>;
   fetch?: typeof fetch;
 }
 
@@ -79,7 +79,7 @@ export const pistonOptionsFromEnv = (env: NodeJS.ProcessEnv = process.env): Pist
   };
 };
 
-const SPEC: Record<Language, { language: string; file: string }> = {
+const SPEC: Record<CodeLanguage, { language: string; file: string }> = {
   python: { language: 'python', file: 'main.py' },
   java: { language: 'java', file: 'Main.java' },
   cpp: { language: 'c++', file: 'main.cpp' },
@@ -121,7 +121,7 @@ const stripNoise = (s: string) =>
     .join('\n');
 
 /** Turns Piston's answer into a RunnerResult. Pure, so it is unit-tested without a Piston instance. */
-export function mapPistonResponse(language: Language, r: PistonResponse, limits: LanguageLimits): RunnerResult {
+export function mapPistonResponse(language: CodeLanguage, r: PistonResponse, limits: LanguageLimits): RunnerResult {
   const compile = r.compile;
   const run = r.run;
   if (compile && compile.code !== 0 && compile.code !== undefined && compile.status !== 'TO') {

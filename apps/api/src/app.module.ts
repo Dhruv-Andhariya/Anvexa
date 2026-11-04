@@ -14,6 +14,7 @@ import { PublisherModule } from './modules/publisher';
 import { RoundEngineModule } from './modules/round-engine';
 import { RoundsConfigModule } from './modules/rounds-config';
 import { ScreeningModule } from './modules/screening';
+import { SqlModule } from './modules/sql';
 import { TenantsModule } from './modules/tenants';
 
 // Each intern registers THEIR module here with one import line (one-line conflicts are easy to fix).

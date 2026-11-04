@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { dsaBankEntry, dsaBankIdOf, dsaProblemSpecSchema, dsaSpecProblems, type DsaProblemSpec } from './dsa-bank';
 import { SELECTION_PROCESS_LIMITS } from './publisher';
+import { sqlProblemSpecSchema, sqlSpecProblems } from './sql-bank';
 
 /**
  * M05 Round configurator contracts. Owner: rounds-config module (apps/api/src/modules/rounds-config).
@@ -130,6 +131,8 @@ export const roundQuestionInputSchema = z
     source: z.enum(['HR', 'AI']).default('HR'),
     /** Coding questions only: HR's own DSA problem (format, constraints, test cases), graded on the DSA page. */
     coding: dsaProblemSpecSchema.nullable().default(null),
+    /** Coding questions only: a SQL problem copied from the SQL question bank, graded on the same coding page. */
+    sql: sqlProblemSpecSchema.nullable().default(null),
   })
   .superRefine((q, ctx) => {
     for (const msg of questionProblems(q)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg });
@@ -139,7 +142,11 @@ export type RoundQuestion = z.output<typeof roundQuestionInputSchema>;
 
 /** What is wrong with one question (empty = fine). Same text in the editor and in the API. */
 export function questionProblems(
-  q: Pick<RoundQuestion, 'kind' | 'options' | 'correct'> & { topics?: readonly string[]; coding?: Pick<DsaProblemSpec, 'tests'> | null },
+  q: Pick<RoundQuestion, 'kind' | 'options' | 'correct'> & {
+    topics?: readonly string[];
+    coding?: Pick<DsaProblemSpec, 'tests'> | null;
+    sql?: { tests: readonly { hidden: boolean }[] } | null;
+  },
 ): string[] {
   const problems: string[] = [];
   // a DSA problem marker (dsa:<id>) only makes sense on a coding question and must name a problem of the bank
@@ -152,6 +159,11 @@ export function questionProblems(
     if (q.kind !== 'CODING') problems.push('A DSA problem can only be attached to a coding question.');
     else if (bankId !== null) problems.push('Choose a bank problem or write your own, not both.');
     else problems.push(...dsaSpecProblems(q.coding));
+  }
+  if (q.sql) {
+    if (q.kind !== 'CODING') problems.push('A SQL problem can only be attached to a coding question.');
+    else if (bankId !== null || q.coding) problems.push('A question can have one problem only: a SQL problem, a DSA bank problem or your own.');
+    else problems.push(...sqlSpecProblems(q.sql));
   }
   if (q.kind === 'MCQ') {
     const filled = q.options.filter((o) => o.trim()).length;
@@ -324,6 +336,8 @@ export const savedRoundSchema = z.object({
       source: z.enum(['HR', 'AI']),
       /** HR's own DSA problem (coding questions only), hidden tests included: HR and the API only. */
       coding: dsaProblemSpecSchema.nullable(),
+      /** SQL problem copied from the SQL bank (coding questions only), hidden datasets included: HR and the API only. */
+      sql: sqlProblemSpecSchema.nullable(),
     }),
   ),
   totals: z.object({ questions: z.number().int(), marks: z.number().int() }),

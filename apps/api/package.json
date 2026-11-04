@@ -16,6 +16,7 @@
     "admin:create": "nest build && node dist/cli/create-platform-admin.js",
     "company:assign-admin": "nest build && node dist/cli/assign-company-admin.js",
     "resumes:to-storage": "nest build && node dist/cli/move-resumes-to-storage.js",
+    "sql:seed": "nest build && node dist/cli/seed-sql-questions.js",
     "test:db": "vitest run tests/multi-company.e2e.test.ts"
   },
   "dependencies": {

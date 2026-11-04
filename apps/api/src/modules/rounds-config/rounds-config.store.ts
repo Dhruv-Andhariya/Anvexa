@@ -1,5 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { dsaProblemSpecSchema, type Difficulty, type DsaProblemSpec, type PassMode, type QuestionKind, type RoundType, type RoundsStatus } from '@hireflow/contracts';
+import {
+  dsaProblemSpecSchema,
+  sqlProblemSpecSchema,
+  type Difficulty,
+  type DsaProblemSpec,
+  type PassMode,
+  type QuestionKind,
+  type RoundType,
+  type RoundsStatus,
+  type SqlProblemSpec,
+} from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
@@ -18,12 +28,20 @@ export interface StoredQuestion {
   source: 'HR' | 'AI';
   /** HR's own DSA problem (coding questions only), round_questions.coding_spec. */
   coding: DsaProblemSpec | null;
+  /** A SQL problem copied from the SQL bank (coding questions only), round_questions.sql_spec. */
+  sql: SqlProblemSpec | null;
 }
 
 /** The stored problem as the contract describes it; anything unreadable counts as no problem (the round is then run by HR). */
 const parseCodingSpec = (raw: Prisma.JsonValue | null): DsaProblemSpec | null => {
   if (raw === null) return null;
   const parsed = dsaProblemSpecSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
+
+const parseSqlSpec = (raw: Prisma.JsonValue | null): SqlProblemSpec | null => {
+  if (raw === null) return null;
+  const parsed = sqlProblemSpecSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 };
 
@@ -150,9 +168,10 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
           })),
         });
         const questions = rounds.flatMap((r) =>
-          r.questions.map(({ coding, ...q }) => ({
+          r.questions.map(({ coding, sql, ...q }) => ({
             ...q,
             codingSpec: coding ? (coding as unknown as Prisma.InputJsonObject) : Prisma.DbNull,
+            sqlSpec: sql ? (sql as unknown as Prisma.InputJsonObject) : Prisma.DbNull,
             roundId: r.id,
             tenantId,
           })),
@@ -201,6 +220,7 @@ function toConfig(row: ConfigRow): StoredConfig {
         topics: q.topics,
         source: q.source,
         coding: parseCodingSpec(q.codingSpec),
+        sql: parseSqlSpec(q.sqlSpec),
       })),
     })),
   };

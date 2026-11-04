@@ -1,7 +1,7 @@
-import type { HarnessKind, Language } from '../questions/question.types';
+import type { CodeLanguage, HarnessKind } from '../questions/question.types';
 
-/** The problem shapes that wrap the candidate's function in a harness (everything but `stdio`). */
-type WrappedKind = Exclude<HarnessKind, 'stdio'>;
+/** The problem shapes that wrap the candidate's function in a harness (not `stdio` programs, not `sql` queries). */
+type WrappedKind = Exclude<HarnessKind, 'stdio' | 'sql'>;
 
 /** Marks the line carrying the function's return value so candidate debug prints cannot corrupt it. */
 export const RESULT_MARKER = '__HF_RESULT__:';
@@ -15,7 +15,7 @@ export interface BuiltProgram {
   mapLine: (combinedLine: number) => number | null;
 }
 
-const PRELUDE: Record<Language, string> = {
+const PRELUDE: Record<CodeLanguage, string> = {
   python: 'from typing import *\n',
   java: '',
   cpp: '#include <bits/stdc++.h>\nusing namespace std;\n',
@@ -165,18 +165,19 @@ const CPP: Record<WrappedKind, string> = {
 `,
 };
 
-const HARNESSES: Record<Language, Record<WrappedKind, string>> = { python: PYTHON, java: JAVA, cpp: CPP };
+const HARNESSES: Record<CodeLanguage, Record<WrappedKind, string>> = { python: PYTHON, java: JAVA, cpp: CPP };
 
 const countLines = (s: string) => (s === '' ? 0 : s.split('\n').length - (s.endsWith('\n') ? 1 : 0));
 
 /** `import java.util.*;`, `import static java.lang.Math.*;` ... must precede every class in the file. */
 const JAVA_IMPORT = /^\s*import\s+(static\s+)?[\w.]+(\.\*)?\s*;\s*$/;
 
-export function buildProgram(language: Language, kind: HarnessKind, candidateCode: string): BuiltProgram {
+export function buildProgram(language: CodeLanguage, kind: HarnessKind, candidateCode: string): BuiltProgram {
   const body = candidateCode.endsWith('\n') ? candidateCode : `${candidateCode}\n`;
 
   // HR's own problems: the candidate's program is run as written (Java: its first class is launched).
   if (kind === 'stdio') return { source: body, mapLine: (n) => n };
+  if (kind === 'sql') throw new Error('A SQL query is not a program (the SQL sandbox runs it)');
 
   if (language === 'java') {
     // Java runs in single-file source mode, which launches the FIRST class in the file. So the harness `Main` goes

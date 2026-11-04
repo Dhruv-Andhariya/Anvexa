@@ -8,6 +8,7 @@ import {
   finishAssessment,
   formatClock,
   getAssessment,
+  languageFor,
   runCode,
   startAssessment,
   startProctoring,
@@ -220,8 +221,12 @@ export function Assessment({ token }: { token: string }) {
 
   if (!question) return <LoadingScreen />;
 
-  const code = drafts[draftKey(question.id, language)] ?? question.starterCode[language];
-  const setCode = (next: string) => setDrafts((d) => ({ ...d, [draftKey(question.id, language)]: next }));
+  // each question takes its own languages (a SQL problem: SQL only); the choice made for programs is kept for them
+  const qLanguage = languageFor(question, language);
+  const sql = qLanguage === 'sql';
+  const starter = question.starterCode[qLanguage] ?? '';
+  const code = drafts[draftKey(question.id, qLanguage)] ?? starter;
+  const setCode = (next: string) => setDrafts((d) => ({ ...d, [draftKey(question.id, qLanguage)]: next }));
   const lowTime = remaining !== null && remaining <= 300;
   const strikesAllowed = state.proctoring.maxStrikes;
   const strikesUsed = Math.max(proctor.strikesUsed, state.proctoring.strikesUsed);
@@ -237,7 +242,7 @@ export function Assessment({ token }: { token: string }) {
     setBusy(kind);
     setActionError('');
     try {
-      const payload = { questionId: question.id, language, code };
+      const payload = { questionId: question.id, language: qLanguage, code };
       if (kind === 'run') {
         const data = await runCode(token, payload);
         setResults((r) => ({ ...r, [question.id]: { kind, data } }));
@@ -343,10 +348,11 @@ export function Assessment({ token }: { token: string }) {
               <select
                 id="language"
                 className={`${inputClass} !w-auto`}
-                value={language}
+                value={qLanguage}
+                disabled={question.languages.length < 2}
                 onChange={(e) => setLanguage(e.target.value as Language)}
               >
-                {state.languages.map((l) => (
+                {question.languages.map((l) => (
                   <option key={l} value={l}>
                     {LANGUAGE_LABELS[l]}
                   </option>
@@ -356,33 +362,34 @@ export function Assessment({ token }: { token: string }) {
                 variant="ghost"
                 className="ml-auto"
                 onClick={() => {
-                  if (window.confirm('Reset this question to the starter code for the selected language?')) setCode(question.starterCode[language]);
+                  if (window.confirm(sql ? 'Reset this question to the starter query?' : 'Reset this question to the starter code for the selected language?')) setCode(starter);
                 }}
               >
-                Reset code
+                {sql ? 'Reset query' : 'Reset code'}
               </Button>
             </div>
 
             <CodeEditor
-              label={`${LANGUAGE_LABELS[language]} solution for ${question.title}`}
+              label={sql ? `SQL query for ${question.title}` : `${LANGUAGE_LABELS[qLanguage]} solution for ${question.title}`}
               value={code}
               onChange={setCode}
               disabled={busy !== null}
+              highlight={sql ? 'sql' : undefined}
             />
 
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={() => void execute('run')} disabled={busy !== null}>
-                {busy === 'run' && <Spinner />} Run code
+                {busy === 'run' && <Spinner />} {sql ? 'Run query' : 'Run code'}
               </Button>
               <Button variant="primary" onClick={() => void execute('submit')} disabled={busy !== null}>
-                {busy === 'submit' && <Spinner />} Submit
+                {busy === 'submit' && <Spinner />} {sql ? 'Submit answer' : 'Submit'}
               </Button>
               <span className="text-xs text-muted">Submit scores this question. You can submit again.</span>
             </div>
           </Card>
 
           <Card>
-            <ResultsPanel result={results[question.id]} busy={busy} error={actionError} />
+            <ResultsPanel result={results[question.id]} busy={busy} error={actionError} sql={sql} />
           </Card>
         </div>
       </div>
