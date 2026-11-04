@@ -20,6 +20,9 @@
 # production
 /build
 
+# face detector runtime, copied from node_modules before dev / build (scripts/copy-face-detector.mjs)
+/public/mediapipe/
+
 # misc
 .DS_Store
 *.pem

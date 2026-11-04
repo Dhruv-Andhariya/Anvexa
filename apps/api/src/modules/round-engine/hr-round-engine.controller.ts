@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import type { ApplicationRoundEngine } from '@hireflow/contracts';
 import { featureFlag } from '../../common/feature-flags';
 import { RequirePermission } from '../auth';
@@ -19,6 +19,22 @@ export class HrRoundEngineController {
   @Get('applications/:applicationId')
   async forApplication(@Param('applicationId', ParseUUIDPipe) applicationId: string): Promise<ApplicationRoundEngine> {
     return this.engine.forApplication(await this.tenant.currentTenantId(), applicationId);
+  }
+
+  /**
+   * POST /api/v1/round-engine/applications/:applicationId/rounds/:roundId/integrity-decision - body { decision, reason }.
+   * A test ended by the warning limit waits for this; then the usual next step (invite / outcome email) follows once.
+   */
+  @RequirePermission('jobs.write')
+  @Post('applications/:applicationId/rounds/:roundId/integrity-decision')
+  @HttpCode(200)
+  async integrityDecision(
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+    @Param('roundId', ParseUUIDPipe) roundId: string,
+    @Body() body: unknown,
+  ): Promise<ApplicationRoundEngine> {
+    const [tenantId, actor] = await Promise.all([this.tenant.currentTenantId(), this.tenant.currentActor()]);
+    return this.engine.integrityDecision(tenantId, applicationId, roundId, body, actor);
   }
 
   /** POST /api/v1/round-engine/applications/:applicationId/rounds/:roundId/revoke - the link stops working at once. */

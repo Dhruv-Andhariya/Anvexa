@@ -2,12 +2,19 @@ import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from 
 import {
   ASSESSMENT_CONSENT_VERSION,
   ASSESSMENT_LIMITS,
+  AI_INTERVIEW_PROTECTION_LIMITS,
+  assessmentIntegrityDecisionRequestSchema,
+  assessmentViolationAckRequestSchema,
+  assessmentViolationRequestSchema,
+  countProtectionIncident,
   proctorEventsRequestSchema,
   saveAssessmentAnswersRequestSchema,
   ROUND_MODULE_OF,
   startAssessmentRequestSchema,
   type ApplicationRoundEngine,
+  type AssessmentProtectionSettings,
   type AssessmentPublicView,
+  type AssessmentViolationResult,
   type RoundModule,
   type RoundType,
   type SaveAssessmentAnswersResult,
@@ -27,6 +34,14 @@ import {
   type CodingFinishReason,
   type CodingState,
 } from './coding-round';
+import {
+  acceptedInAssessment,
+  assessmentProtectionFromEnv,
+  assessmentProtectionState,
+  assessmentTerminationReason,
+  parseAssessmentProtection,
+  qualifiesInAssessment,
+} from './assessment-protection';
 import { TOKEN_SHAPE, hashAssessmentToken } from './link';
 import {
   DEADLINE_GRACE_MS,
@@ -50,15 +65,24 @@ export const ROUND_ENGINE_CLOCK = Symbol('ROUND_ENGINE_CLOCK');
 export interface RoundEngineConfig {
   /** The webcam must be on during a test (ASSESSMENT_REQUIRE_CAMERA, default on). Shown to candidates; recorded as events. */
   cameraRequired: boolean;
+  /**
+   * Protection of the online tests (warnings, termination after the limit, HR review). null / missing = off.
+   * ASSESSMENT_PROTECTION, ASSESSMENT_MAX_WARNINGS, ASSESSMENT_TAB_MONITORING, ASSESSMENT_FULLSCREEN_REQUIRED, ASSESSMENT_FACE_POLICY.
+   */
+  protection?: AssessmentProtectionSettings | null;
 }
 
-export const roundEngineConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): RoundEngineConfig => ({
-  cameraRequired: !['off', 'false', '0'].includes((env.ASSESSMENT_REQUIRE_CAMERA ?? '').trim().toLowerCase()),
-});
+export const roundEngineConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): RoundEngineConfig => {
+  const cameraRequired = !['off', 'false', '0'].includes((env.ASSESSMENT_REQUIRE_CAMERA ?? '').trim().toLowerCase());
+  return { cameraRequired, protection: assessmentProtectionFromEnv(env, cameraRequired) };
+};
 
 /** Same error body shape as the other modules: { statusCode, code, message, ...extra }. Never a token. */
 export const engineError = (status: number, code: string, message: string, extra: Record<string, unknown> = {}) =>
   new HttpException({ statusCode: status, code, message, ...extra }, status);
+
+const terminatedError = () =>
+  engineError(HttpStatus.CONFLICT, 'ASSESSMENT_TERMINATED', 'Your assessment was ended because the maximum number of warnings was exceeded. Your answers so far are saved for the hiring team.');
 
 const invalidLink = () => engineError(HttpStatus.NOT_FOUND, 'ASSESSMENT_LINK_INVALID', 'This assessment link is not valid. Please use the link from your latest email.');
 
@@ -113,7 +137,7 @@ export class RoundEngineService {
       await this.finish(o.attempt, 'TIMED_OUT');
       o = { ...o, attempt: await this.store.getAttempt(o.attempt.id) };
     }
-    return this.publicView(o);
+    return await this.publicView(o);
   }
 
   /** POST /public/assessment/start - consent given; starts the clock (or continues the attempt that already runs). */
@@ -138,6 +162,8 @@ export class RoundEngineService {
       consentVersion: ASSESSMENT_CONSENT_VERSION,
       startedAt: now,
       deadlineAt,
+      // the rules shown on the landing page are copied onto the attempt: later env changes never change a running test
+      protection: this.config.protection ?? null,
     });
     if (attempt.startedAt.getTime() === now.getTime()) {
       await this.store.addEvents(o.ctx.tenantId, attempt.id, [{ type: 'ASSESSMENT_STARTED', severity: SEVERITY.ASSESSMENT_STARTED, occurredAt: now, detail: {} }]);
@@ -150,7 +176,7 @@ export class RoundEngineService {
         metadata: { roundId: o.round.id },
       });
     }
-    return this.publicView({ ...o, attempt });
+    return await this.publicView({ ...o, attempt });
   }
 
   /** PUT /public/assessment/answers - autosave of ALL answers so far. A late (older) save never overwrites a newer one. */
@@ -181,7 +207,7 @@ export class RoundEngineService {
         await this.finish(attempt, 'SUBMITTED', { revision: req.revision, answers: this.clean(o.round, req.answers) });
       }
     }
-    return this.publicView({ ...o, attempt: await this.store.getAttempt(attempt.id) });
+    return await this.publicView({ ...o, attempt: await this.store.getAttempt(attempt.id) });
   }
 
   /** POST /public/assessment/events - what the browser noticed (camera, tab, full screen, connection). */
@@ -205,6 +231,96 @@ export class RoundEngineService {
     });
     await this.store.addEvents(o.ctx.tenantId, attempt.id, events);
     return { accepted: events.length };
+  }
+
+  // ---------------------------------------------------------------- protection (one warning counter per attempt)
+
+  /**
+   * POST /public/assessment/violation - one incident the page saw (tab hidden, focus lost, full screen left, more than
+   * one face). Decided under the attempt's row lock with the rules shared with the AI interview; the page never sends a
+   * count. Going over the limit ends the test with the saved answers and holds the result for HR's review.
+   */
+  async violation(token: string | undefined, body: unknown): Promise<AssessmentViolationResult> {
+    const req = this.parse(assessmentViolationRequestSchema, body);
+    const o = await this.open(token, { allowFinished: true });
+    const attempt = o.attempt;
+    const settings = parseAssessmentProtection(attempt?.protection ?? null);
+    if (!attempt || !settings) {
+      return { outcome: 'IGNORED', warningNumber: null, warningCount: attempt?.warningCount ?? 0, maxWarnings: settings?.maxWarnings ?? 0, status: attempt?.status ?? 'NOT_STARTED' };
+    }
+    const now = this.now();
+    const result = await this.store.recordIncident(
+      attempt.id,
+      { incidentId: req.incidentId, type: req.type, detail: req.detail?.slice(0, 200) ?? null, now, maxRows: AI_INTERVIEW_PROTECTION_LIMITS.maxEventsPerSession },
+      (locked, prior) => {
+        const s = parseAssessmentProtection(locked.protection);
+        if (!s || !acceptedInAssessment(locked.status, req.type, s) || this.overdue(locked)) return null;
+        const d = countProtectionIncident({ qualifies: qualifiesInAssessment(req.type, s), warningCount: locked.warningCount, maxWarnings: s.maxWarnings, prior, now });
+        return { ...d, terminationReason: d.terminate ? assessmentTerminationReason(req.type, s.maxWarnings) : null };
+      },
+    );
+    const a = result.attempt;
+    const base = { warningCount: a.warningCount, maxWarnings: settings.maxWarnings, status: a.status };
+    if (result.kind === 'replay') return { ...base, outcome: result.row.outcome, warningNumber: result.row.warningNumber };
+    if (result.kind === 'ignored') return { ...base, outcome: 'IGNORED', warningNumber: null };
+    const d = result.decision;
+    const audit = { tenantId: a.tenantId, actorUserId: null, subjectType: 'application', subjectId: a.applicationId } as const;
+    if (d.outcome === 'WARNING') {
+      await this.audit.record({ ...audit, action: 'assessment.protection_warning', metadata: { roundId: a.roundId, type: req.type, warningNumber: d.warningNumber, maxWarnings: settings.maxWarnings } });
+    }
+    if (d.terminate) {
+      await this.audit.record({ ...audit, action: 'assessment.terminated', metadata: { roundId: a.roundId, type: req.type, warnings: settings.maxWarnings, integrityStatus: 'INTEGRITY_VIOLATION_REVIEW' } });
+      // graded now so HR sees the score; progress() holds the next step until HR decided
+      void this.progress(a.id).catch(() => undefined);
+    }
+    return { ...base, outcome: d.outcome, warningNumber: d.warningNumber };
+  }
+
+  /** POST /public/assessment/violation/ack - the candidate read warning N (not shown again after a reload). */
+  async acknowledge(token: string | undefined, body: unknown): Promise<{ acknowledged: boolean }> {
+    const req = this.parse(assessmentViolationAckRequestSchema, body);
+    const o = await this.open(token, { allowFinished: true });
+    if (!o.attempt) return { acknowledged: false };
+    return { acknowledged: await this.store.acknowledgeIncident(o.attempt.id, req.warningNumber, this.now()) };
+  }
+
+  /**
+   * POST /round-engine/applications/:applicationId/rounds/:roundId/integrity-decision - HR reviewed a test that the
+   * warning limit ended. ADVANCE / REJECT with a reason (stored as HR's override when it differs from the score), then
+   * the usual next step follows once (next invite or outcome email). Never automatic.
+   */
+  async integrityDecision(tenantId: string, applicationId: string, roundId: string, body: unknown, actor: Actor | null): Promise<ApplicationRoundEngine> {
+    const parsed = assessmentIntegrityDecisionRequestSchema.safeParse(body);
+    if (!parsed.success) throw engineError(HttpStatus.BAD_REQUEST, 'REASON_REQUIRED', parsed.error.issues[0]?.message ?? 'Invalid decision.');
+    const data = await this.store.forApplication(tenantId, applicationId);
+    let attempt = data?.attempts.find((a) => a.roundId === roundId);
+    if (!attempt) throw engineError(HttpStatus.NOT_FOUND, 'ATTEMPT_NOT_FOUND', 'This student has no attempt in that round.');
+    if (attempt.status !== 'TERMINATED' || attempt.integrityStatus !== 'INTEGRITY_VIOLATION_REVIEW') {
+      throw engineError(HttpStatus.CONFLICT, 'NOT_IN_REVIEW', 'This test is not waiting for an integrity review.');
+    }
+    if (attempt.systemPassed === null) {
+      // grading after the termination did not run yet: do it now (it holds, it does not progress)
+      await this.progress(attempt.id);
+      attempt = (await this.store.getAttempt(attempt.id))!;
+      if (attempt.systemPassed === null) throw engineError(HttpStatus.SERVICE_UNAVAILABLE, 'RESULT_NOT_READY', 'The result is still being calculated. Please try again in a minute.');
+    }
+    const { decision, reason } = parsed.data;
+    if (!(await this.store.decideIntegrity(tenantId, attempt.id, { decision, reason, by: actor?.name ?? null }, this.now()))) {
+      throw engineError(HttpStatus.CONFLICT, 'ALREADY_DECIDED', 'A decision was already made for this test.');
+    }
+    const passed = decision === 'ADVANCE';
+    // HR's decision goes on the result as an override when it differs from the score (reason + audit, like the Assessments page)
+    if (passed !== attempt.systemPassed) await this.assessments.override(tenantId, applicationId, roundId, { passed, reason }, actor);
+    await this.audit.record({
+      tenantId,
+      actorUserId: actor?.id ?? null,
+      action: 'assessment.integrity_decided',
+      subjectType: 'application',
+      subjectId: applicationId,
+      metadata: { roundId, decision, systemPassed: attempt.systemPassed },
+    });
+    await this.progress(attempt.id);
+    return this.forApplication(tenantId, applicationId);
   }
 
   // ---------------------------------------------------------------- grading + next step
@@ -250,6 +366,8 @@ export class RoundEngineService {
         submittedAt: (attempt.submittedAt ?? this.now()).toISOString(),
       });
       await this.store.setSystemPassed(attempt.id, recorded.systemPassed);
+      // ended by the warning limit: graded (HR sees the score), but nothing moves on until HR decided
+      if (attempt.integrityStatus === 'INTEGRITY_VIOLATION_REVIEW') return;
       if (!(await this.store.claimProgress(attempt.id, this.now()))) return; // another process did it
       // the outcome HR sees (an HR override made before this point included)
       // a GD round next: no email here - the group-discussion module adds the student to its pool and invites them
@@ -302,8 +420,10 @@ export class RoundEngineService {
    * A round module records a student's result and answers (same shape as assessments.record()). It shows on the HR
    * Assessments page, and the student moves on exactly as after an online test (next invitation or email). Sending the
    * same result again is safe: the result is replaced and the next step is queued once.
+   * `hrDecision` (AI interview): HR decided pass / fail after reading the result. When it differs from the score-based
+   * result it is saved as HR's override (reason + audit, like on the Assessments page), and the next step follows it.
    */
-  async recordModuleResult(tenantId: string, module: RoundModule, input: unknown) {
+  async recordModuleResult(tenantId: string, module: RoundModule, input: unknown, hrDecision?: { passed: boolean; reason: string; actor: Actor | null }) {
     const ids = input as { applicationId?: unknown; roundId?: unknown } | null;
     const applicationId = typeof ids?.applicationId === 'string' ? ids.applicationId : '';
     const roundId = typeof ids?.roundId === 'string' ? ids.roundId : '';
@@ -314,7 +434,11 @@ export class RoundEngineService {
     if (ROUND_MODULE_OF[round.type] !== module || module === 'DSA' || roundKind(round)) {
       throw engineError(HttpStatus.CONFLICT, 'ROUND_NOT_FOR_MODULE', `This round is not run by the ${module} module.`);
     }
-    const recorded = await this.assessments.record(tenantId, input);
+    let recorded = await this.assessments.record(tenantId, input);
+    if (hrDecision && hrDecision.passed !== (recorded.outcome === 'PASSED')) {
+      await this.assessments.override(tenantId, applicationId, round.id, { passed: hrDecision.passed, reason: hrDecision.reason }, hrDecision.actor);
+      recorded = { ...recorded, outcome: hrDecision.passed ? 'PASSED' : 'FAILED' };
+    }
     const step = this.next(config.rounds, round, recorded.outcome === 'PASSED');
     if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, ctx.jobId, step.round.id);
     else if (step.kind === 'EMAIL') await this.store.queueOutcomeEmail(tenantId, applicationId, round.id, step.email, step.nextRoundName);
@@ -433,6 +557,8 @@ export class RoundEngineService {
           const invite = data.invites.find((i) => i.roundId === r.id);
           const attempt = data.attempts.find((a) => a.roundId === r.id);
           const events = attempt ? data.events.filter((e) => e.attemptId === attempt.id) : [];
+          const incidents = attempt ? data.incidents.filter((i) => i.attemptId === attempt.id) : [];
+          const settings = attempt ? parseAssessmentProtection(attempt.protection) : null;
           const email = data.outcomeEmails.find((e) => e.roundId === r.id);
           return {
             roundId: r.id,
@@ -460,6 +586,28 @@ export class RoundEngineService {
                 }
               : null,
             events: events.map((e) => ({ type: e.type, severity: e.severity, occurredAt: e.occurredAt.toISOString(), detail: e.detail })),
+            integrity:
+              attempt && settings
+                ? {
+                    status: attempt.integrityStatus,
+                    settings,
+                    warningCount: attempt.warningCount,
+                    terminatedAt: attempt.terminatedAt?.toISOString() ?? null,
+                    terminationReason: attempt.terminationReason,
+                    decision:
+                      attempt.integrityDecision && attempt.integrityDecidedAt
+                        ? { decision: attempt.integrityDecision, reason: attempt.integrityReason ?? '', by: attempt.integrityDecidedBy, at: attempt.integrityDecidedAt.toISOString() }
+                        : null,
+                    incidents: incidents.map((i) => ({
+                      type: i.type,
+                      outcome: i.outcome,
+                      warningNumber: i.warningNumber,
+                      at: i.occurredAt.toISOString(),
+                      detail: i.detail,
+                      acknowledgedAt: i.acknowledgedAt?.toISOString() ?? null,
+                    })),
+                  }
+                : null,
             outcomeEmail: email ? { kind: email.kind, status: email.status, sentAt: email.sentAt?.toISOString() ?? null } : null,
           };
         }),
@@ -504,6 +652,7 @@ export class RoundEngineService {
     const attempt = await this.store.attemptByInvite(invite.id);
     const finished = !!attempt && attempt.status !== 'IN_PROGRESS';
     if (finished && !opts.allowFinished) {
+      if (attempt.status === 'TERMINATED') throw terminatedError();
       throw engineError(HttpStatus.CONFLICT, 'ASSESSMENT_SUBMITTED', 'This assessment has already been submitted.');
     }
     // the link must be valid to start; a started attempt runs to its own deadline
@@ -537,8 +686,12 @@ export class RoundEngineService {
     }
   }
 
-  private publicView(o: Opened): AssessmentPublicView {
+  private async publicView(o: Opened): Promise<AssessmentPublicView> {
     const a = o.attempt;
+    // before the start: the rules that will apply (shown in the notice); afterwards: the attempt's own copy and count
+    const protection = a
+      ? assessmentProtectionState(parseAssessmentProtection(a.protection), a.warningCount, await this.store.incidents(a.id))
+      : assessmentProtectionState(this.config.protection ?? null, 0, []);
     const running = a?.status === 'IN_PROGRESS';
     const questions = publicQuestions(o.round);
     return {
@@ -565,6 +718,7 @@ export class RoundEngineService {
             answers: running ? Object.entries(a.answers).map(([questionId, v]) => ({ questionId, selected: v.selected, marked: v.marked })) : [],
           }
         : null,
+      protection,
     };
   }
 }

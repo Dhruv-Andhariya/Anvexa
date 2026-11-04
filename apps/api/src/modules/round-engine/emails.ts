@@ -27,6 +27,8 @@ export interface InviteEmailInput extends CandidateEmailBase {
   cameraRequired: boolean;
   /** A DSA coding round (candidate-app page) instead of a multiple-choice test: the wording changes, nothing else. */
   coding?: boolean;
+  /** Online test protection: warnings allowed before the test ends (null / missing = protection off). */
+  maxWarnings?: number | null;
 }
 
 const escapeHtml = (s: string) =>
@@ -58,6 +60,11 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
       : i.cameraRequired
       ? 'The assessment is monitored: you will need a laptop or phone with a working webcam, and the page records events such as leaving the test tab or the camera turning off for the hiring team to review. No video is recorded.'
       : 'The assessment page records events such as leaving the test tab for the hiring team to review.',
+    ...(!i.coding && i.maxWarnings
+      ? [
+          `Please stay on the test page: leaving the test tab or full screen, switching to another app${i.cameraRequired ? ', or more than one person in your camera' : ''} gives a warning. After ${i.maxWarnings} warning${i.maxWarnings === 1 ? '' : 's'}, the next one ends the test automatically; the hiring team then reviews what happened.`,
+        ]
+      : []),
     i.coding
       ? 'Use a recent version of Chrome, Edge or Firefox and a stable internet connection. The best submission for each problem counts, so you may submit as often as you like before the time is over.'
       : 'Use a recent version of Chrome, Edge, Firefox or Safari and a stable internet connection. Your answers are saved as you go.',

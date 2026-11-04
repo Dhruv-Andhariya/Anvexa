@@ -570,6 +570,18 @@ describe('round modules (DSA, SQL, AI interview)', () => {
     expect(audit.entries.at(-1)!.metadata).toMatchObject({ next: { module: 'AI_INTERVIEW', round: job[2]!.id } });
   });
 
+  it("HR's decision after an AI interview wins over the score: stored as an audited override, the next step follows it", async () => {
+    modules.connect('AI_INTERVIEW');
+    const input = { applicationId: APP, roundId: job[2]!.id, interviewerScore: 4, notes: 'AI score 40 / 100' };
+    const res = await engine.recordModuleResult(TENANT, 'AI_INTERVIEW', input, { passed: true, reason: 'Good answers, poor audio quality.', actor: ACTOR });
+    expect(res.outcome).toBe('PASSED');
+    const review = await assessments.student(TENANT, APP);
+    expect(review.rounds[2]).toMatchObject({ outcome: 'PASSED', systemPassed: false, override: { passed: true, reason: 'Good answers, poor audio quality.' } });
+    // the last round: the "cleared all rounds" email, not a rejection
+    expect(store.outcomeEmails).toEqual([expect.objectContaining({ kind: 'CLEARED_ALL', roundId: job[2]!.id })]);
+    expect(audit.entries.some((e) => e.action === 'assessment.result_overridden')).toBe(true);
+  });
+
   it('a module can only record its own rounds, of its own company', async () => {
     expect(code(await caught(engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[1]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');
     expect(code(await caught(engine.recordModuleResult(TENANT, 'SQL', { applicationId: APP, roundId: job[0]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');

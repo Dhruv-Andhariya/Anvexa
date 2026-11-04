@@ -80,6 +80,13 @@ class Settings:
     screening_speech_budget_seconds: float = 20.0  # one question spoken
     screening_extract_budget_seconds: float = 60.0  # the structured summary after the screening
     round_questions_budget_seconds: float = 75.0  # M05 question suggestions; below the API's 90s timeout
+    # AI technical interview round (voice). Questions are spoken with the screening TTS settings above.
+    interview_plan_budget_seconds: float = 45.0  # the topic plan at the start
+    # one spoken answer: transcript + next question. Under the careers-site proxy's 30 s (Next.js rewrites): when the
+    # model is slow, the decision is dropped (the API asks the next planned topic) instead of the request timing out
+    interview_turn_budget_seconds: float = 24.0
+    interview_thinking_budget: int = 0  # model "thinking" tokens per turn: 0 = off (a live conversation)
+    interview_report_budget_seconds: float = 100.0  # the evaluation after the interview
 
     def __repr__(self) -> str:  # never leak the key through logs / tracebacks
         return (
@@ -116,4 +123,8 @@ def get_settings() -> Settings:
         screening_speech_budget_seconds=_float_env("SCREENING_SPEECH_BUDGET_SECONDS", 20.0),
         screening_extract_budget_seconds=_float_env("SCREENING_EXTRACT_BUDGET_SECONDS", 60.0),
         round_questions_budget_seconds=_float_env("ROUND_QUESTIONS_BUDGET_SECONDS", 75.0),
+        interview_plan_budget_seconds=_float_env("INTERVIEW_PLAN_BUDGET_SECONDS", 45.0),
+        interview_turn_budget_seconds=_float_env("INTERVIEW_TURN_BUDGET_SECONDS", 24.0),
+        interview_thinking_budget=max(0, _int_env("INTERVIEW_THINKING_BUDGET", 0)),
+        interview_report_budget_seconds=_float_env("INTERVIEW_REPORT_BUDGET_SECONDS", 100.0),
     )

@@ -1,11 +1,13 @@
 'use client';
 
-import type { AssessmentPublicView, AssessmentQuestion } from '@hireflow/contracts';
+import type { AssessmentIncidentType, AssessmentProtectionState, AssessmentPublicView, AssessmentQuestion, AssessmentViolationResult } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@/components/ui';
 import {
   AssessmentApiError,
+  acknowledgeIncident,
   getAssessment,
+  reportIncident,
   saveAnswers,
   sendEvents,
   startAssessment,
@@ -31,6 +33,27 @@ import {
   type PaletteState,
 } from '@/lib/assessment-ui';
 import { CAMERA_MESSAGES, cameraProblemOf, cameraSupport, fullscreenSupported, startCamera, watchCameraPermission, type CameraProblem } from '@/lib/camera';
+import { loadFaceCounter, type FaceCounter } from '@/lib/face-counter';
+import {
+  ASSESSMENT_INCIDENT_TEXT,
+  FaceEpisodeTracker,
+  ProtectionMonitor,
+  newIncidentId,
+  warningText,
+  warningTexts,
+  type Incident,
+  type ProtectionSignal,
+} from '@/lib/interview-protection';
+
+/** An incident not delivered yet (offline): sent again with the same id, so it is counted once. */
+type OutgoingIncident = { id: string; type: AssessmentIncidentType; detail?: string };
+/** A warning from the server, shown until acknowledged. */
+interface ShownWarning {
+  warningNumber: number;
+  maxWarnings: number;
+  final: boolean;
+  type: AssessmentIncidentType;
+}
 
 type Phase =
   | { name: 'loading' }
@@ -38,7 +61,9 @@ type Phase =
   | { name: 'landing' }
   | { name: 'check' }
   | { name: 'exam' }
-  | { name: 'done' };
+  | { name: 'done' }
+  /** Ended by the server: more warnings than allowed. The saved answers are kept; HR reviews. */
+  | { name: 'terminated' };
 
 type SaveState = 'saved' | 'saving' | 'offline' | 'error';
 
@@ -69,6 +94,11 @@ export function ExamRoom({ token }: { token: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [online, setOnline] = useState(true);
+  /** Protection, always as the server last said (the page never counts warnings itself). */
+  const [protection, setProtection] = useState<AssessmentProtectionState | null>(null);
+  const [warning, setWarning] = useState<ShownWarning | null>(null);
+  const [fullscreenOn, setFullscreenOn] = useState(true);
+  const [faceCheck, setFaceCheck] = useState<'off' | 'loading' | 'on' | 'unavailable'>('off');
 
   const stream = useRef<MediaStream | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
@@ -84,6 +114,11 @@ export function ExamRoom({ token }: { token: string }) {
   const finishing = useRef(false);
   const wasFullscreen = useRef(false);
   const mounted = useRef(true);
+  const monitor = useRef<ProtectionMonitor | null>(null);
+  const outbox = useRef<OutgoingIncident[]>([]);
+  const faceCounter = useRef<FaceCounter | null>(null);
+  const faceLoading = useRef(false);
+  const faces = useRef(new FaceEpisodeTracker(newIncidentId));
 
   // ---------------------------------------------------------------- helpers
 
@@ -113,6 +148,10 @@ export function ExamRoom({ token }: { token: string }) {
 
   const fail = useCallback(
     (err: unknown) => {
+      if (err instanceof AssessmentApiError && err.code === 'ASSESSMENT_TERMINATED') {
+        terminateRef.current();
+        return;
+      }
       const d = describeError(err);
       if (d.fatal) {
         stopCamera();
@@ -125,6 +164,11 @@ export function ExamRoom({ token }: { token: string }) {
   /** The test is over (submitted here, timed out, or submitted in another tab): show the final page. */
   const finished = useCallback(
     (v: AssessmentPublicView | null) => {
+      if (v?.status === 'TERMINATED') {
+        setView(v);
+        terminateRef.current();
+        return;
+      }
       if (v) setView(v);
       if (draft.current) writeDraft(draft.current, null);
       stopCamera();
@@ -133,6 +177,58 @@ export function ExamRoom({ token }: { token: string }) {
     },
     [stopCamera],
   );
+
+  /**
+   * The server ended the test (warning limit): stop the camera, the timer and saving at once, leave full screen, and
+   * show the termination. The answers saved so far are on the server; HR reviews before any result is sent.
+   */
+  const terminate = useCallback(() => {
+    finishing.current = true;
+    monitor.current?.setActive(false, Date.now(), { hidden: false, focused: true, fullscreen: false });
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    outbox.current = [];
+    if (draft.current) writeDraft(draft.current, null);
+    stopCamera();
+    setWarning(null);
+    setConfirmSubmit(false);
+    setPhase({ name: 'terminated' });
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  }, [stopCamera]);
+  const terminateRef = useRef(terminate);
+  terminateRef.current = terminate;
+
+  /** The server's answer to an incident: its count is the only count. */
+  const onProtectionResult = useCallback((r: AssessmentViolationResult, type: AssessmentIncidentType) => {
+    setProtection((p) => (p ? { ...p, warningCount: r.warningCount } : p));
+    if (r.outcome === 'TERMINATED' || r.status === 'TERMINATED') {
+      terminateRef.current();
+      return;
+    }
+    if (r.outcome === 'WARNING' && r.warningNumber) setWarning({ warningNumber: r.warningNumber, maxWarnings: r.maxWarnings, final: r.warningNumber >= r.maxWarnings, type });
+  }, []);
+
+  const sendIncident = useCallback(
+    async (incident: OutgoingIncident) => {
+      if (!outbox.current.some((i) => i.id === incident.id)) outbox.current.push(incident);
+      try {
+        const r = await reportIncident(token, incident);
+        outbox.current = outbox.current.filter((i) => i.id !== incident.id);
+        if (mounted.current) onProtectionResult(r, incident.type);
+      } catch (err) {
+        if (!(err instanceof AssessmentApiError && (err.retryable || err.status === 0))) outbox.current = outbox.current.filter((i) => i.id !== incident.id);
+      }
+    },
+    [onProtectionResult, token],
+  );
+  const sendIncidentRef = useRef(sendIncident);
+  sendIncidentRef.current = sendIncident;
+
+  /** The server's view: protection state + a warning not acknowledged before a reload. */
+  const applyProtection = useCallback((v: AssessmentPublicView) => {
+    setProtection(v.protection);
+    const w = v.protection.pendingWarning;
+    if (w && v.status === 'IN_PROGRESS') setWarning({ warningNumber: w.warningNumber, maxWarnings: v.protection.maxWarnings, final: w.final, type: w.type });
+  }, []);
 
   const enterExam = useCallback(
     async (v: AssessmentPublicView, loadedAt: number) => {
@@ -168,13 +264,19 @@ export function ExamRoom({ token }: { token: string }) {
       .then((v) => {
         if (!mounted.current) return;
         setView(v);
-        if (v.status === 'SUBMITTED' || v.status === 'TIMED_OUT') setPhase({ name: 'done' });
+        applyProtection(v);
+        if (v.status === 'TERMINATED') setPhase({ name: 'terminated' });
+        else if (v.status === 'SUBMITTED' || v.status === 'TIMED_OUT') setPhase({ name: 'done' });
         else if (v.status === 'IN_PROGRESS') setPhase({ name: 'check' });
         else setPhase({ name: 'landing' });
         offset.current = Date.parse(v.serverNow) - loadedAt;
       })
       .catch(fail);
-    const on = () => setOnline(true);
+    const on = () => {
+      setOnline(true);
+      // incidents that could not be sent while offline go now (same ids: counted once)
+      for (const i of [...outbox.current]) void sendIncidentRef.current(i);
+    };
     const off = () => setOnline(false);
     setOnline(navigator.onLine);
     window.addEventListener('online', on);
@@ -186,7 +288,7 @@ export function ExamRoom({ token }: { token: string }) {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       stream.current?.getTracks().forEach((t) => t.stop());
     };
-  }, [token, fail]);
+  }, [token, fail, applyProtection]);
 
   // ---------------------------------------------------------------- camera
 
@@ -246,6 +348,11 @@ export function ExamRoom({ token }: { token: string }) {
       deadline.current = res.deadlineAt;
       setSaveState(revision.current > savedRevision.current ? 'saving' : 'saved');
     } catch (err) {
+      if (err instanceof AssessmentApiError && err.code === 'ASSESSMENT_TERMINATED') {
+        saving.current = false;
+        terminateRef.current();
+        return;
+      }
       if (err instanceof AssessmentApiError && (err.code === 'TIME_UP' || err.code === 'ASSESSMENT_SUBMITTED')) {
         saving.current = false;
         finished(await getAssessment(token).catch(() => null));
@@ -295,6 +402,10 @@ export function ExamRoom({ token }: { token: string }) {
         const v = await submitAssessment(token, rev, toAnswerList(answersRef.current));
         finished(v);
       } catch (err) {
+        if (err instanceof AssessmentApiError && err.code === 'ASSESSMENT_TERMINATED') {
+          terminateRef.current();
+          return;
+        }
         finishing.current = false;
         if (err instanceof AssessmentApiError && err.code === 'ASSESSMENT_SUBMITTED') {
           finished(await getAssessment(token).catch(() => null));
@@ -342,7 +453,7 @@ export function ExamRoom({ token }: { token: string }) {
       if (document.visibilityState === 'hidden') {
         record('TAB_SWITCH');
         void flushEvents();
-      } else {
+      } else if (!monitor.current) {
         setNotice('You left the test page. This is recorded for the hiring team to review - please stay on this page until you submit.');
       }
     };
@@ -352,7 +463,7 @@ export function ExamRoom({ token }: { token: string }) {
       } else if (wasFullscreen.current && !finishing.current) {
         wasFullscreen.current = false;
         record('FULLSCREEN_EXIT');
-        setNotice('You left full screen. This is recorded for the hiring team to review.');
+        if (!monitor.current) setNotice('You left full screen. This is recorded for the hiring team to review.');
       }
     };
     const onOffline = () => {
@@ -381,6 +492,108 @@ export function ExamRoom({ token }: { token: string }) {
     };
   }, [phase.name, record, flushEvents]);
 
+  // ---------------------------------------------------------------- protection (tab / window / full screen / faces)
+
+  const monitorOn = !!protection?.enabled;
+  const fullscreenWanted = monitorOn && !!protection?.fullscreenRequired && fullscreenSupported();
+  useEffect(() => {
+    monitor.current = monitorOn ? new ProtectionMonitor({ tabSwitch: !!protection?.tabSwitchMonitoring, fullscreen: fullscreenWanted, newId: newIncidentId }) : null;
+  }, [monitorOn, protection?.tabSwitchMonitoring, fullscreenWanted]);
+
+  // only while the test runs (not on the landing / check / end pages)
+  useEffect(() => {
+    monitor.current?.setActive(phase.name === 'exam', Date.now(), {
+      hidden: document.visibilityState === 'hidden',
+      focused: document.hasFocus(),
+      fullscreen: !!document.fullscreenElement,
+    });
+  }, [phase.name, monitorOn, protection?.tabSwitchMonitoring, fullscreenWanted]);
+
+  useEffect(() => {
+    const feed = (signal: ProtectionSignal) => {
+      const incident: Incident | null | undefined = monitor.current?.signal(signal, Date.now());
+      if (incident) void sendIncidentRef.current(incident as OutgoingIncident);
+    };
+    const visibility = () => feed(document.visibilityState === 'hidden' ? 'hidden' : 'visible');
+    const blur = () => feed('blur');
+    const focus = () => feed('focus');
+    const fs = () => {
+      setFullscreenOn(!!document.fullscreenElement);
+      feed(document.fullscreenElement ? 'fullscreen-enter' : 'fullscreen-exit');
+    };
+    // a reload / close hides the page too: not leaving the test (the timer keeps running on the server)
+    const unloading = () => feed('unloading');
+    const shown = (e: PageTransitionEvent) => e.persisted && feed('restored');
+    // focus lost longer than the grace = one incident; undelivered incidents are retried
+    const tick = window.setInterval(() => {
+      const i = monitor.current?.tick(Date.now());
+      if (i) void sendIncidentRef.current(i as OutgoingIncident);
+    }, 250);
+    const retry = window.setInterval(() => outbox.current.forEach((i) => void sendIncidentRef.current(i)), 10_000);
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('blur', blur);
+    window.addEventListener('focus', focus);
+    document.addEventListener('fullscreenchange', fs);
+    window.addEventListener('beforeunload', unloading);
+    window.addEventListener('pagehide', unloading);
+    window.addEventListener('pageshow', shown);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(retry);
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('blur', blur);
+      window.removeEventListener('focus', focus);
+      document.removeEventListener('fullscreenchange', fs);
+      window.removeEventListener('beforeunload', unloading);
+      window.removeEventListener('pagehide', unloading);
+      window.removeEventListener('pageshow', shown);
+    };
+  }, []);
+
+  // more than one face: counted on this device about once a second while the test runs (only the number is used)
+  const facesOn = monitorOn && !!protection && protection.multipleFacesPolicy !== 'OFF';
+  const facesRunning = facesOn && phase.name === 'exam' && cameraOn;
+  useEffect(() => {
+    if (!facesRunning) {
+      faces.current.reset();
+      return;
+    }
+    if (faceCounter.current) setFaceCheck('on');
+    else if (!faceLoading.current) {
+      faceLoading.current = true;
+      setFaceCheck('loading');
+      loadFaceCounter()
+        .then((c) => {
+          if (!mounted.current) return c.close();
+          faceCounter.current = c;
+          setFaceCheck('on');
+        })
+        .catch(() => mounted.current && setFaceCheck('unavailable'))
+        .finally(() => (faceLoading.current = false));
+    }
+    const id = window.setInterval(() => {
+      const counter = faceCounter.current;
+      if (!counter || !video.current || document.visibilityState === 'hidden') return;
+      const incident = faces.current.sample(counter.count(video.current), Date.now());
+      if (incident) void sendIncidentRef.current(incident as OutgoingIncident);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [facesRunning]);
+  useEffect(
+    () => () => {
+      faceCounter.current?.close();
+      faceCounter.current = null;
+    },
+    [],
+  );
+
+  const acknowledge = () => {
+    if (!warning) return;
+    if (fullscreenWanted && !document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => undefined);
+    void acknowledgeIncident(token, warning.warningNumber);
+    setWarning(null);
+  };
+
   // ---------------------------------------------------------------- actions
 
   const goFullscreen = async () => {
@@ -400,6 +613,7 @@ export function ExamRoom({ token }: { token: string }) {
       const v = view.status === 'IN_PROGRESS' ? await getAssessment(token) : await startAssessment(token);
       if (!mounted.current) return;
       setView(v);
+      applyProtection(v);
       if (v.status !== 'IN_PROGRESS' || !v.attempt) {
         finished(v);
       } else {
@@ -438,6 +652,23 @@ export function ExamRoom({ token }: { token: string }) {
         <h1 className="text-lg font-semibold">{phase.title}</h1>
         <p className="text-sm text-muted">{phase.message}</p>
       </Card>
+    );
+  }
+
+  if (phase.name === 'terminated') {
+    const t = warningTexts('assessment').terminated;
+    return (
+      <>
+        {header}
+        <section role="alert" className="flex flex-col gap-3 rounded-lg border border-danger/50 bg-danger-soft p-5 shadow-sm sm:p-6">
+          <h2 className="text-lg font-semibold text-danger">{t.title}</h2>
+          <p className="text-sm">{t.message}</p>
+          <p className="text-sm text-muted">
+            The answers you saved before this point are kept. The {view?.companyName ?? ''} hiring team reviews what happened and makes the decision - you will
+            hear from them by email. This assessment cannot be restarted. You can close this page.
+          </p>
+        </section>
+      </>
     );
   }
 
@@ -491,9 +722,13 @@ export function ExamRoom({ token }: { token: string }) {
               does not decide your result.
             </p>
           </div>
+          {view.protection.enabled && <ProtectionRules p={view.protection} />}
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-1 h-4 w-4" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>I have read the instructions and I agree to the monitoring described above for this job application.</span>
+            <span>
+              I have read the instructions and I agree to the monitoring described above for this job application.
+              {view.protection.enabled && ' I understand that exceeding the warnings ends my assessment.'}
+            </span>
           </label>
           <Button variant="primary" className="self-start" disabled={!consent} onClick={() => setPhase({ name: 'check' })}>
             Continue to system check
@@ -609,10 +844,31 @@ export function ExamRoom({ token }: { token: string }) {
             </p>
             <SaveBadge state={online ? saveState : 'offline'} />
           </div>
+          {protection?.enabled && (
+            <div className="flex flex-col gap-1 text-sm">
+              <p
+                className={`rounded-md border px-2.5 py-1 font-semibold tabular-nums ${protection.warningCount > 0 ? 'border-danger/40 bg-danger-soft text-danger' : 'border-border'}`}
+                aria-label={`Warnings ${protection.warningCount} of ${protection.maxWarnings}`}
+              >
+                Warnings: {protection.warningCount}/{protection.maxWarnings}
+              </p>
+              {faceCheck !== 'off' && facesOn && (
+                <p className="text-xs text-muted">{faceCheck === 'on' ? 'Face check on (this device)' : faceCheck === 'loading' ? 'Face check starting…' : 'Face check unavailable'}</p>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
       <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      {fullscreenWanted && !fullscreenOn && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
+          <span className="flex-1">This assessment must be taken in full screen. Please return to full screen.</span>
+          <Button variant="primary" onClick={() => void goFullscreen()}>
+            Return to full screen
+          </Button>
+        </div>
+      )}
       {notice && (
         <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
           <span className="flex-1">{notice}</span>
@@ -767,6 +1023,8 @@ export function ExamRoom({ token }: { token: string }) {
         </div>
       )}
 
+      {warning && <WarningDialog warning={warning} onAcknowledge={acknowledge} />}
+
       {cameraLost && view.cameraRequired && (
         <div className="fixed inset-0 z-30 grid place-items-center bg-black/70 p-4" role="alertdialog" aria-modal="true" aria-labelledby="camera-title">
           <div className="flex w-full max-w-md flex-col gap-3 rounded-lg border border-border bg-surface p-6 shadow-lg">
@@ -906,4 +1164,56 @@ function Check({ ok, label, pending, optional }: { ok: boolean; label: string; p
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** The rules, shown before the candidate agrees. */
+function ProtectionRules({ p }: { p: AssessmentProtectionState }) {
+  const max = p.maxWarnings;
+  return (
+    <div role="note" className="rounded-md border border-danger/30 bg-danger-soft/40 p-3 text-sm">
+      <p className="font-medium">Warnings during this assessment</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+        {p.tabSwitchMonitoring && <li>leaving this tab, minimising the browser, or switching to another window or app (for more than about 2 seconds)</li>}
+        {p.fullscreenRequired && fullscreenSupported() && <li>leaving full screen</li>}
+        {p.multipleFacesPolicy !== 'OFF' && (
+          <li>
+            more than one person visible in your camera for about 5 seconds{p.multipleFacesPolicy === 'WARN' ? '' : ' (noted for the hiring team only, not a warning)'} - counted on
+            your device; no image is stored or sent and nobody is identified
+          </li>
+        )}
+      </ul>
+      <p className="mt-2 text-xs">
+        Each incident is one warning, whatever its kind. You may receive {max} warning{max === 1 ? '' : 's'} (the last one is the final warning); the next incident
+        ends your assessment automatically. The answers you saved are kept and the hiring team reviews what happened - a person makes the decision. Reloading
+        the page or losing the connection is not a warning.
+      </p>
+    </div>
+  );
+}
+
+/** Warning N / final warning: must be acknowledged. Issued by the server; the page only shows it. */
+function WarningDialog({ warning, onAcknowledge }: { warning: ShownWarning; onAcknowledge: () => void }) {
+  const text = warningText(warning.warningNumber, warning.maxWarnings, warning.final, 'assessment');
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4" role="presentation">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="warning-title"
+        aria-describedby="warning-text"
+        className={`flex w-full max-w-md flex-col gap-3 rounded-lg border-2 bg-surface p-6 shadow-lg ${warning.final ? 'border-danger' : 'border-accent'}`}
+      >
+        <h2 id="warning-title" className={`text-lg font-semibold ${warning.final ? 'text-danger' : ''}`}>
+          {text.title}
+        </h2>
+        <p className="text-sm font-medium">{ASSESSMENT_INCIDENT_TEXT[warning.type]}</p>
+        <p id="warning-text" className="text-sm">
+          {text.message}
+        </p>
+        <Button autoFocus variant="primary" className="self-start" onClick={onAcknowledge}>
+          I understand
+        </Button>
+      </div>
+    </div>
+  );
 }

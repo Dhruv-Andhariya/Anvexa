@@ -1,4 +1,4 @@
-import { applicationRoundEngineSchema, type ApplicationRoundEngine, type DsaProctoringReview } from '@hireflow/contracts';
+import { applicationRoundEngineSchema, type ApplicationRoundEngine, type AssessmentIntegrityDecisionRequest, type DsaProctoringReview } from '@hireflow/contracts';
 import { call, type Options } from './publisher-api';
 
 /**
@@ -14,6 +14,10 @@ export const getRoundEngine = (applicationId: string, opts: Options = {}): Promi
 /** The candidate's link stops working at once. */
 export const revokeRoundInvite = (applicationId: string, roundId: string, opts: Options = {}): Promise<ApplicationRoundEngine> =>
   call('POST', `${app(applicationId)}/rounds/${encodeURIComponent(roundId)}/revoke`, undefined, parse, opts);
+
+/** A test ended by the warning limit: HR's reviewed decision (then the usual next step follows, once). */
+export const decideRoundIntegrity = (applicationId: string, roundId: string, req: AssessmentIntegrityDecisionRequest, opts: Options = {}): Promise<ApplicationRoundEngine> =>
+  call('POST', `${app(applicationId)}/rounds/${encodeURIComponent(roundId)}/integrity-decision`, req, parse, opts);
 
 /** Only after the invitation email FAILED: a new link is emailed. */
 export const resendRoundInvite = (applicationId: string, roundId: string, opts: Options = {}): Promise<ApplicationRoundEngine> =>

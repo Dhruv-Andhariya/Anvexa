@@ -1,7 +1,10 @@
 import {
   assessmentPublicViewSchema,
+  assessmentViolationResultSchema,
   saveAssessmentAnswersResultSchema,
   type AssessmentAnswer,
+  type AssessmentIncidentType,
+  type AssessmentViolationResult,
   type AssessmentPublicView,
   type ClientProctorEventType,
   type SaveAssessmentAnswersResult,
@@ -76,4 +79,15 @@ export interface ProctorEventInput {
 
 export async function sendEvents(token: string, events: ProctorEventInput[]): Promise<void> {
   await call(token, '/events', { method: 'POST', body: JSON.stringify({ events }) });
+}
+
+/** One protection incident (keepalive: usually sent while the page is being hidden). The answer is the SERVER's count. */
+export async function reportIncident(token: string, incident: { id: string; type: AssessmentIncidentType; detail?: string }): Promise<AssessmentViolationResult> {
+  const res = await call(token, '/violation', { method: 'POST', body: JSON.stringify({ incidentId: incident.id, type: incident.type, ...(incident.detail ? { detail: incident.detail } : {}) }) });
+  return assessmentViolationResultSchema.parse(await res.json());
+}
+
+/** The candidate read warning N (not shown again after a reload). Best effort. */
+export async function acknowledgeIncident(token: string, warningNumber: number): Promise<void> {
+  await call(token, '/violation/ack', { method: 'POST', body: JSON.stringify({ warningNumber }) }).catch(() => undefined);
 }

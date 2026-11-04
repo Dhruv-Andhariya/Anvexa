@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from './common/prisma.service';
 import { HealthController } from './health.controller';
+import { AiInterviewModule } from './modules/ai-interview';
 import { AuditModule } from './modules/audit';
 import { ApplicationsModule } from './modules/applications';
 import { AssessmentsModule } from './modules/assessments';
@@ -18,5 +19,5 @@ import { TenantsModule } from './modules/tenants';
 // Each intern registers THEIR module here with one import line (one-line conflicts are easy to fix).
 // Pattern:  imports: [JobsModule, ApplicationsModule, AtsModule]
 // AuthModule registers the global AuthGuard: every route must declare its access (see modules/auth/access.ts).
-@Module({ imports: [PrismaModule, AuditModule, AuthModule, TenantsModule, JobsModule, PublisherModule, ApplicationsModule, AtsModule, ScreeningModule, RoundsConfigModule, AssessmentsModule, RoundEngineModule, DsaModule, GroupDiscussionModule], controllers: [HealthController] })
+@Module({ imports: [PrismaModule, AuditModule, AuthModule, TenantsModule, JobsModule, PublisherModule, ApplicationsModule, AtsModule, ScreeningModule, RoundsConfigModule, AssessmentsModule, RoundEngineModule, DsaModule, GroupDiscussionModule, AiInterviewModule], controllers: [HealthController] })
 export class AppModule {}

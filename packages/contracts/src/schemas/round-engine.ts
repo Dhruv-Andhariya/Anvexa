@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { aiInterviewFacePolicySchema } from './ai-interview';
 import { emailDeliveryStatusSchema } from './ats';
 import { isDsaRound } from './dsa-bank';
 import { ROUND_MODULE_OF, type RoundModule, type SavedRound } from './rounds';
@@ -38,7 +39,7 @@ export function roundRunnerOf(round: Pick<SavedRound, 'type' | 'passRule' | 'que
 }
 
 /** Bump when the consent text on the assessment page changes (stored with every attempt). */
-export const ASSESSMENT_CONSENT_VERSION = 'assessment-2026-10';
+export const ASSESSMENT_CONSENT_VERSION = 'assessment-2026-11-protection';
 
 export const ASSESSMENT_LIMITS = {
   questionsMax: 100,
@@ -81,8 +82,83 @@ export const saveAssessmentAnswersRequestSchema = z.object({
 });
 export type SaveAssessmentAnswersRequest = z.input<typeof saveAssessmentAnswersRequestSchema>;
 
-export const assessmentStatusSchema = z.enum(['NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'TIMED_OUT']);
+/** TERMINATED = ended by the server after more warnings than allowed (saved answers kept; HR reviews before any result email). */
+export const assessmentStatusSchema = z.enum(['NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'TIMED_OUT', 'TERMINATED']);
 export type AssessmentStatus = z.infer<typeof assessmentStatusSchema>;
+
+// ---------------------------------------------------------------- protection (one warning counter, like the AI interview)
+
+/**
+ * Incidents the assessment page reports. The SERVER decides whether each is a warning (countProtectionIncident in
+ * protection.ts): warning 1 ... maxWarnings (the final one), the next one ends the test and holds the result for HR.
+ */
+export const assessmentIncidentTypeSchema = z.enum(['TAB_SWITCH', 'WINDOW_BLUR', 'FULLSCREEN_EXIT', 'MULTIPLE_FACES']);
+export type AssessmentIncidentType = z.infer<typeof assessmentIncidentTypeSchema>;
+
+export const ASSESSMENT_INCIDENT_LABEL: Record<AssessmentIncidentType, string> = {
+  TAB_SWITCH: 'Left the test tab (other tab, minimised or locked)',
+  WINDOW_BLUR: 'Switched to another window or app',
+  FULLSCREEN_EXIT: 'Left full screen',
+  MULTIPLE_FACES: 'More than one face in the camera',
+};
+
+/** Server-wide rules (env), copied onto each attempt when it starts: the rules shown are the rules enforced. */
+export const assessmentProtectionSettingsSchema = z.object({
+  maxWarnings: z.number().int().min(1).max(5),
+  tabSwitchMonitoring: z.boolean(),
+  fullscreenRequired: z.boolean(),
+  multipleFacesPolicy: aiInterviewFacePolicySchema,
+});
+export type AssessmentProtectionSettings = z.infer<typeof assessmentProtectionSettingsSchema>;
+
+export const assessmentIncidentOutcomeSchema = z.enum(['WARNING', 'TERMINATED', 'RECORDED', 'GROUPED', 'IGNORED']);
+export type AssessmentIncidentOutcome = z.infer<typeof assessmentIncidentOutcomeSchema>;
+
+export const assessmentIntegrityStatusSchema = z.enum(['NONE', 'INTEGRITY_VIOLATION_REVIEW', 'REVIEWED']);
+export type AssessmentIntegrityStatus = z.infer<typeof assessmentIntegrityStatusSchema>;
+
+/** The protection part of the candidate's page (the count is always the server's). */
+export const assessmentProtectionStateSchema = z.object({
+  /** false = attempt started before protection existed, or switched off: nothing is monitored. */
+  enabled: z.boolean(),
+  maxWarnings: z.number().int().min(0),
+  warningCount: z.number().int().min(0),
+  tabSwitchMonitoring: z.boolean(),
+  fullscreenRequired: z.boolean(),
+  multipleFacesPolicy: aiInterviewFacePolicySchema,
+  /** The latest warning not acknowledged yet: shown again after a reload until confirmed. */
+  pendingWarning: z.object({ warningNumber: z.number().int().positive(), type: assessmentIncidentTypeSchema, final: z.boolean() }).nullable(),
+});
+export type AssessmentProtectionState = z.infer<typeof assessmentProtectionStateSchema>;
+
+/** POST /public/assessment/violation - one incident; the same incidentId again is counted once. */
+export const assessmentViolationRequestSchema = z.object({
+  incidentId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+  type: assessmentIncidentTypeSchema,
+  detail: z.string().max(200).optional(),
+});
+
+export const assessmentViolationResultSchema = z.object({
+  outcome: assessmentIncidentOutcomeSchema,
+  warningNumber: z.number().int().positive().nullable(),
+  warningCount: z.number().int().min(0),
+  maxWarnings: z.number().int().min(0),
+  status: assessmentStatusSchema,
+});
+export type AssessmentViolationResult = z.infer<typeof assessmentViolationResultSchema>;
+
+/** POST /public/assessment/violation/ack - the candidate read warning N. */
+export const assessmentViolationAckRequestSchema = z.object({ warningNumber: z.number().int().positive() });
+
+/**
+ * POST /round-engine/applications/:applicationId/rounds/:roundId/integrity-decision. A terminated test waits for HR:
+ * ADVANCE / REJECT with a written reason; then the usual next step follows (next invite or outcome email), once.
+ */
+export const assessmentIntegrityDecisionRequestSchema = z.object({
+  decision: z.enum(['ADVANCE', 'REJECT']),
+  reason: z.string().trim().min(5, 'Write what you concluded from the recorded incidents (at least 5 characters).').max(500),
+});
+export type AssessmentIntegrityDecisionRequest = z.input<typeof assessmentIntegrityDecisionRequestSchema>;
 
 /** GET /public/assessment/session (and the answer of start / submit). */
 export const assessmentPublicViewSchema = z.object({
@@ -114,6 +190,8 @@ export const assessmentPublicViewSchema = z.object({
       answers: z.array(assessmentAnswerSchema),
     })
     .nullable(),
+  /** Protection rules + the server's warning count (before the start: the rules that will apply). */
+  protection: assessmentProtectionStateSchema,
 });
 export type AssessmentPublicView = z.infer<typeof assessmentPublicViewSchema>;
 
@@ -222,6 +300,28 @@ export const roundEngineRoundSchema = z.object({
     })
     .nullable(),
   events: z.array(proctorEventViewSchema),
+  /** Protection: warnings, incidents, termination and HR's integrity decision (null = no attempt / not monitored). */
+  integrity: z
+    .object({
+      status: assessmentIntegrityStatusSchema,
+      settings: assessmentProtectionSettingsSchema,
+      warningCount: z.number().int().min(0),
+      terminatedAt: z.string().nullable(),
+      terminationReason: z.string().nullable(),
+      decision: z.object({ decision: z.enum(['ADVANCE', 'REJECT']), reason: z.string(), by: z.string().nullable(), at: z.string() }).nullable(),
+      incidents: z.array(
+        z.object({
+          type: assessmentIncidentTypeSchema,
+          outcome: assessmentIncidentOutcomeSchema,
+          warningNumber: z.number().int().positive().nullable(),
+          at: z.string(),
+          detail: z.string().nullable(),
+          acknowledgedAt: z.string().nullable(),
+        }),
+      ),
+    })
+    .nullable()
+    .default(null),
   outcomeEmail: z.object({ kind: roundOutcomeEmailKindSchema, status: emailDeliveryStatusSchema, sentAt: z.string().nullable() }).nullable(),
 });
 export type RoundEngineRound = z.infer<typeof roundEngineRoundSchema>;

@@ -71,6 +71,9 @@ model Application {
   dsaProctorSessions DsaProctorSession[]
   /// M18 AI group discussion (group_discussion.prisma).
   gdParticipants     GdParticipant[]
+  /// AI technical interview rounds (ai_interview.prisma).
+  aiInterviewInvites  AiInterviewInvite[]
+  aiInterviewSessions AiInterviewSession[]
 
   @@unique([tenantId, jobId, candidateId])
   @@unique([tenantId, jobId, email])

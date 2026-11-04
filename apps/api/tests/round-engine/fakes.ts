@@ -9,7 +9,10 @@ import {
   type CandidateContext,
   type EventRow,
   type EventWrite,
+  type IncidentRow,
+  type IncidentVerdict,
   type InviteRow,
+  type RecordIncidentResult,
   type OutcomeEmailRow,
   type SendFailure,
 } from '../../src/modules/round-engine/round-engine.store';
@@ -24,6 +27,7 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
   attempts: AttemptRow[] = [];
   events: EventRow[] = [];
   outcomeEmails: OutcomeEmailRow[] = [];
+  incidentRows: IncidentRow[] = [];
   /** What screeningsToInvite() returns (the SQL lives in the Prisma store). */
   completedScreenings: { tenantId: string; applicationId: string; jobId: string; roundId: string }[] = [];
   /** What moduleCandidates() returns, per round type (the SQL lives in the Prisma store). */
@@ -62,6 +66,15 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
       revision: 0,
       systemPassed: null,
       progressedAt: null,
+      protection: data.protection ? structuredClone(data.protection) : null,
+      warningCount: 0,
+      integrityStatus: 'NONE',
+      terminatedAt: null,
+      terminationReason: null,
+      integrityDecision: null,
+      integrityReason: null,
+      integrityDecidedBy: null,
+      integrityDecidedAt: null,
     };
     this.attempts.push(row);
     return structuredClone(row);
@@ -78,7 +91,7 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     if (a.status === 'IN_PROGRESS' && a.revision < revision) Object.assign(a, { revision, answers: structuredClone(answers) });
     return a.revision;
   }
-  async finishAttempt(attemptId: string, status: 'SUBMITTED' | 'TIMED_OUT', at: Date, final?: { revision: number; answers: StoredAnswers }) {
+  async finishAttempt(attemptId: string, status: 'SUBMITTED' | 'TIMED_OUT' | 'TERMINATED', at: Date, final?: { revision: number; answers: StoredAnswers }) {
     const a = this.attempts.find((x) => x.id === attemptId);
     if (!a || a.status !== 'IN_PROGRESS') return false;
     if (final && a.revision <= final.revision) Object.assign(a, { revision: final.revision, answers: structuredClone(final.answers) });
@@ -103,6 +116,45 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
   async addEvents(_tenantId: string, attemptId: string, events: EventWrite[]) {
     this.events.push(...events.map((e) => ({ ...e, attemptId })));
   }
+  // ---- protection: no await between reading and writing, like the Prisma row lock
+  async recordIncident(
+    attemptId: string,
+    input: { incidentId: string; type: IncidentRow['type']; detail: string | null; now: Date; maxRows: number },
+    decide: (attempt: AttemptRow, prior: IncidentRow[]) => IncidentVerdict,
+  ): Promise<RecordIncidentResult> {
+    const a = this.attempts.find((x) => x.id === attemptId)!;
+    const prior = this.incidentRows.filter((i) => i.attemptId === attemptId);
+    const existing = prior.find((i) => i.incidentId === input.incidentId);
+    if (existing) return { kind: 'replay', row: { ...existing }, attempt: structuredClone(a) };
+    const verdict = decide(structuredClone(a), prior.map((i) => ({ ...i })));
+    if (!verdict) return { kind: 'ignored', attempt: structuredClone(a) };
+    const { terminationReason, ...decision } = verdict;
+    const counted = decision.outcome === 'WARNING' || decision.outcome === 'TERMINATED';
+    if (counted && prior.some((i) => (i.outcome === 'WARNING' || i.outcome === 'TERMINATED') && i.warningNumber === decision.warningNumber)) throw new Error('unique violation');
+    const stored = counted || prior.length < input.maxRows;
+    if (stored) this.incidentRows.push({ attemptId, type: input.type, outcome: decision.outcome, warningNumber: decision.warningNumber, incidentId: input.incidentId, occurredAt: input.now, detail: input.detail, acknowledgedAt: null });
+    if (counted) {
+      a.warningCount = decision.warningCount;
+      if (decision.terminate) Object.assign(a, { status: 'TERMINATED', submittedAt: input.now, terminatedAt: input.now, terminationReason, integrityStatus: 'INTEGRITY_VIOLATION_REVIEW' });
+    }
+    return { kind: 'saved', decision, stored, attempt: structuredClone(a) };
+  }
+  async incidents(attemptId: string) {
+    return this.incidentRows.filter((i) => i.attemptId === attemptId).map((i) => ({ ...i }));
+  }
+  async acknowledgeIncident(attemptId: string, warningNumber: number, at: Date) {
+    const i = this.incidentRows.find((x) => x.attemptId === attemptId && x.warningNumber === warningNumber && x.outcome === 'WARNING' && !x.acknowledgedAt);
+    if (!i) return false;
+    i.acknowledgedAt = at;
+    return true;
+  }
+  async decideIntegrity(tenantId: string, attemptId: string, d: { decision: 'ADVANCE' | 'REJECT'; reason: string; by: string | null }, at: Date) {
+    const a = this.attempts.find((x) => x.id === attemptId && x.tenantId === tenantId);
+    if (!a || a.status !== 'TERMINATED' || a.integrityStatus !== 'INTEGRITY_VIOLATION_REVIEW' || a.integrityDecision) return false;
+    Object.assign(a, { integrityStatus: 'REVIEWED', integrityDecision: d.decision, integrityReason: d.reason, integrityDecidedBy: d.by, integrityDecidedAt: at });
+    return true;
+  }
+
   async queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string) {
     if (this.invites.some((i) => i.applicationId === applicationId && i.roundId === roundId)) return false;
     this.invites.push({
@@ -163,7 +215,10 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     return this.attempts.filter((a) => a.status === 'IN_PROGRESS' && a.deadlineAt && a.deadlineAt < before).map((a) => structuredClone(a));
   }
   async unprogressedAttempts(finishedBefore: Date) {
-    return this.attempts.filter((a) => a.status !== 'IN_PROGRESS' && !a.progressedAt && a.submittedAt && a.submittedAt < finishedBefore).map((a) => structuredClone(a));
+    return this.attempts
+      .filter((a) => a.status !== 'IN_PROGRESS' && !a.progressedAt && a.submittedAt && a.submittedAt < finishedBefore)
+      .filter((a) => !(a.integrityStatus === 'INTEGRITY_VIOLATION_REVIEW' && a.systemPassed !== null))
+      .map((a) => structuredClone(a));
   }
   async forApplication(tenantId: string, applicationId: string) {
     const ctx = this.contexts.get(applicationId);
@@ -174,6 +229,7 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
       attempts,
       events: this.events.filter((e) => attempts.some((a) => a.id === e.attemptId)),
       outcomeEmails: this.outcomeEmails.filter((e) => e.tenantId === tenantId && e.applicationId === applicationId),
+      incidents: this.incidentRows.filter((i) => attempts.some((a) => a.id === i.attemptId)),
     };
   }
   async revokeInvite(tenantId: string, applicationId: string, roundId: string, _byId: string | null, at: Date) {

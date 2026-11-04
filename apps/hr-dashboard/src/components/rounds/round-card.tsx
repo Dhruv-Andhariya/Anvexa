@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { PASS_MODES, messagesUnder, move, newQuestion, passMarkHint, type RoundDraft, type Validation } from '@/lib/rounds';
 import { Button, inputClass } from '../ui';
 import { AiGeneratePanel } from './ai-generate-panel';
+import { InterviewProtectionSettings } from './interview-protection-settings';
 import { QuestionEditor } from './question-editor';
 
 const ROUND_TYPE_KEYS = Object.keys(ROUND_TYPES) as RoundType[];
@@ -178,6 +179,8 @@ export function RoundCard({
               </div>
             )}
           </div>
+
+          {round.type === 'AI_INTERVIEW' && <InterviewProtectionSettings jobId={jobId} roundId={round.id} readOnly={disabled} />}
 
           <section aria-label="Questions" className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">

@@ -28,6 +28,10 @@ export const PUBLIC_LIMITS = {
   // per student every 5 s). A whole college lab on one IP must still get through.
   gd: { max: 30000, windowMs: 60 * 60_000 },
   'gd-audio': { max: 40000, windowMs: 60 * 60_000 },
+  // AI technical interview (ai-interview module): page loads, spoken questions, device events, pause / resume; and the
+  // uploaded answers. One 30-minute interview is ~150 calls and ~40 answers; a college lab on one IP must still get through.
+  interview: { max: 20000, windowMs: 60 * 60_000 },
+  'interview-answer': { max: 2000, windowMs: 60 * 60_000 },
 } satisfies Record<string, Limit>;
 
 export type LimitName = keyof typeof PUBLIC_LIMITS;

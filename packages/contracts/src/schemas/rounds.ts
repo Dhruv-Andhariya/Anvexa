@@ -71,7 +71,7 @@ export const ROUND_TYPES: Record<RoundType, { label: string; interview: boolean;
   TECHNICAL_INTERVIEW: { label: 'Technical Interview', interview: true, kinds: ['INTERVIEW'] },
   HR_INTERVIEW: { label: 'HR Interview', interview: true, kinds: ['INTERVIEW'] },
   CUSTOM: { label: 'Custom round', interview: false, kinds: ['MCQ', 'SHORT_ANSWER', 'DESCRIPTIVE'] },
-  AI_INTERVIEW: { label: 'AI Interview', interview: true, kinds: ['INTERVIEW'] },
+  AI_INTERVIEW: { label: 'AI Technical Interview', interview: true, kinds: ['INTERVIEW'] },
 };
 
 /**
@@ -93,7 +93,7 @@ export const ROUND_MODULE_LABEL: Record<RoundModule, string> = {
   GROUP_DISCUSSION: 'AI group discussion',
   DSA: 'DSA coding round',
   SQL: 'SQL round',
-  AI_INTERVIEW: 'AI interview',
+  AI_INTERVIEW: 'AI technical interview',
 };
 
 export const QUESTION_KINDS: Record<QuestionKind, { label: string; autoGraded: boolean }> = {
@@ -254,6 +254,27 @@ export function roundsCompletionProblems(rounds: Pick<RoundConfig, 'name' | 'pas
   return problems;
 }
 
+/** Interview length of an AI technical interview round (minutes): HR's time limit, or the default. */
+export const AI_INTERVIEW_MINUTES = { min: 10, default: 20, max: 30 } as const;
+
+/**
+ * Extra rules of an AI technical interview round (the ai-interview module runs it): the time limit, when set, is the
+ * interview length (10-30 minutes), and the AI's overall score is given as an interviewer score, so that is the only
+ * pass rule it can use. Checked at every save, like the pass mark limits.
+ */
+export function aiInterviewRoundProblems(round: Pick<RoundConfig, 'type' | 'timeLimitMinutes' | 'passRule'>): { field: 'timeLimitMinutes' | 'passRule'; message: string }[] {
+  if (round.type !== 'AI_INTERVIEW') return [];
+  const problems: { field: 'timeLimitMinutes' | 'passRule'; message: string }[] = [];
+  const t = round.timeLimitMinutes;
+  if (t !== null && (t < AI_INTERVIEW_MINUTES.min || t > AI_INTERVIEW_MINUTES.max)) {
+    problems.push({ field: 'timeLimitMinutes', message: `An AI technical interview lasts ${AI_INTERVIEW_MINUTES.min} to ${AI_INTERVIEW_MINUTES.max} minutes.` });
+  }
+  if (round.passRule && round.passRule.mode !== 'INTERVIEWER_SCORE') {
+    problems.push({ field: 'passRule', message: 'An AI technical interview is passed by its interviewer score (the AI scores out of your maximum).' });
+  }
+  return problems;
+}
+
 /** PUT /api/v1/rounds/jobs/:jobId. complete = false saves a draft; true also requires roundsCompletionProblems() = []. */
 export const saveRoundsRequestSchema = z
   .object({
@@ -267,6 +288,7 @@ export const saveRoundsRequestSchema = z
       if (names.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rounds', i, 'name'], message: `Two rounds are called "${r.name}".` });
       names.add(key);
       for (const msg of passRuleProblems(r)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rounds', i, 'passRule', 'value'], message: msg });
+      for (const p of aiInterviewRoundProblems(r)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rounds', i, p.field], message: p.message });
     });
     if (req.complete) {
       for (const msg of roundsCompletionProblems(req.rounds)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rounds'], message: msg });
