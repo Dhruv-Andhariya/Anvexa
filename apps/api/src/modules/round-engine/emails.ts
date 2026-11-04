@@ -27,6 +27,8 @@ export interface InviteEmailInput extends CandidateEmailBase {
   cameraRequired: boolean;
   /** A DSA coding round (candidate-app page) instead of a multiple-choice test: the wording changes, nothing else. */
   coding?: boolean;
+  /** Coding rounds: which kind of problems ('sql' = SQL queries only, 'code' = programs only, 'mixed' = both). */
+  codingKind?: 'code' | 'sql' | 'mixed';
   /** Online test protection: warnings allowed before the test ends (null / missing = protection off). */
   maxWarnings?: number | null;
 }
@@ -63,7 +65,11 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
     `Please take the assessment using this personal link: ${i.link}`,
     `The link works until ${dateText(i.linkExpiresAt)}. Once you start, the timer keeps running even if you close the page, so please begin when you can finish in one sitting.`,
     i.coding
-      ? `This is a proctored ${i.codingKind === 'sql' ? 'SQL' : 'coding'} test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. ${CODING_ANSWERS[i.codingKind ?? 'code']} No camera, microphone or screen recording is used.`
+      ? `This is a proctored ${i.codingKind === 'sql' ? 'SQL' : 'coding'} test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. ${CODING_ANSWERS[i.codingKind ?? 'code']} ${
+          i.cameraRequired
+            ? 'You will need a working webcam: it must stay on for the whole test, and the page checks that you, and only you, are in front of it. The video stays on your device and is not recorded or uploaded. No microphone or screen recording is used.'
+            : 'No camera, microphone or screen recording is used.'
+        }`
       : i.cameraRequired
       ? 'The assessment is monitored: you will need a laptop or phone with a working webcam, and the page records events such as leaving the test tab or the camera turning off for the hiring team to review. No video is recorded.'
       : 'The assessment page records events such as leaving the test tab for the hiring team to review.',

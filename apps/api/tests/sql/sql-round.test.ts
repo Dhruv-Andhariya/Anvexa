@@ -82,12 +82,12 @@ beforeEach(async () => {
   const t = newAssessmentToken();
   store.invites.push({ id: '0192f3a1-dddd-7000-8000-000000000001', tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: saved[1]!.id, tokenHash: t.tokenHash, expiresAt: new Date(T0 + 7 * 86_400_000), revokedAt: null, emailStatus: 'SENT', attempts: 1, sentAt: new Date(T0), lastError: null });
   token = t.token;
-  const proctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true }, () => now);
+  const proctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true, maxStrikes: 2 }, () => now);
   service = new DsaService(new RoundInvitationResolver(engine), new BankQuestionRepository(), new EngineSessionStore(engine), noPrograms, () => now, proctoring, sandbox);
 });
 
 const begin = async () => {
-  await service.proctorStart(token, { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true });
+  await service.proctorStart(token, { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true, camera: true });
   return service.start(token);
 };
 const qid = (i: number) => saved[1]!.questions[i]!.id;

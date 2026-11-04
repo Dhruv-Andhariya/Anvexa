@@ -6,7 +6,9 @@ Browser-based integrity monitoring for the DSA coding assessment: full-screen mo
 
 > **What this is, and is not.** It is *browser-level detection and deterrence*. A normal web page cannot lock down a computer. It cannot see other applications, block operating-system shortcuts (Alt+Tab, the Windows key, Ctrl+T/W), stop a second device, or know why the browser reported an event. Every record is an **observation for a human reviewer, never proof of cheating**, and nothing here changes a candidate's score. See [Security limitations](#7-security-limitations).
 >
-> **Allowed warnings (default 2).** The first 2 suspicious events (any violation below: a screenshot key, a tab switch, leaving full screen, a copy attempt, and so on, one per real action) are tolerated and shown to the candidate as warnings. **The next one ends the assessment immediately**, including leaving full screen, and the work submitted so far is kept. See [Allowed warnings](#allowed-warnings-the-two-strike-rule). Set `DSA_PROCTOR_MAX_STRIKES=0` for no limit.
+> **Webcam (2026-11-04, `DSA_PROCTOR_CAMERA`, default on).** The webcam must be on to start and for the whole attempt. A face detector (MediaPipe BlazeFace, running in the candidate's browser, one frame a second) reports `NO_FACE` (no face for 8 s), `MULTIPLE_FACES` (more than one face for 3 s, high severity) and `CAMERA_OFF` (the camera stopped or its permission was withdrawn; the page is blocked until it is back on). Each is one warning, at most once per episode. The video never leaves the device; only these events reach the server. Code: `apps/candidate-app/src/app/dsa/[token]/webcam.tsx`. The detector is served by the candidate app itself (runtime copied to `public/mediapipe/wasm` before dev / build by `scripts/copy-face-detector.mjs`, model committed in `public/models`), overridable with `NEXT_PUBLIC_FACE_WASM_URL` / `NEXT_PUBLIC_FACE_MODEL_URL`; if it cannot load, only the camera-on check runs. Consent version `dsa-proctoring-v2`.
+>
+> **Allowed warnings (default 3).** The first 3 suspicious events (any violation below: a screenshot key, a tab switch, leaving full screen, a copy attempt, the webcam turning off, no face or a second face in view, and so on, one per real action) are tolerated and shown to the candidate as warnings. **The next one ends the assessment immediately**, including leaving full screen, and the work submitted so far is kept. See [Allowed warnings](#allowed-warnings-the-two-strike-rule). Set `DSA_PROCTOR_MAX_STRIKES=0` for no limit.
 
 Related: [dsa-integration-notes.md](dsa-integration-notes.md) (the assessment module this extends).
 
@@ -91,6 +93,8 @@ Never blocked or recorded (checked in a real browser): typing, Tab (indentation)
 | `WINDOW_BLUR` | episode | medium |
 | `DEVTOOLS_SHORTCUT` | instant | medium |
 | `SCREENSHOT_ATTEMPT` | instant | medium |
+| `CAMERA_OFF`, `NO_FACE` | instant | medium |
+| `MULTIPLE_FACES` | instant | **high** |
 | `COPY`, `CUT`, `PASTE`, `SELECT_ALL`, `CONTEXT_MENU`, `VIEW_SOURCE`, `SAVE_SHORTCUT`, `PRINT_SHORTCUT` | instant | low |
 | `SESSION_RESUMED` | info | not a violation, not scored |
 
@@ -119,7 +123,7 @@ The server never trusts the page's clock. A client timestamp is accepted only in
 
 ### Allowed warnings (the two-strike rule)
 
-`DSA_PROCTOR_MAX_STRIKES` (default **2**, `0` = no limit). A *strike* is one stored violation record, so one real action counts once (a tab switch with Chrome's own full-screen exit and window blur is a single strike; a key press plus its clipboard event is a single strike; `SESSION_RESUMED` is not a strike).
+`DSA_PROCTOR_MAX_STRIKES` (default **3**, `0` = no limit; the table below shows the rule with 2). A *strike* is one stored violation record, so one real action counts once (a tab switch with Chrome's own full-screen exit and window blur is a single strike; a key press plus its clipboard event is a single strike; `SESSION_RESUMED` is not a strike).
 
 | Strikes used | What the candidate sees | What happens |
 |---|---|---|
@@ -150,7 +154,8 @@ Score = low×1 + medium×3 + high×5. The score-based statuses below are in addi
 | `DSA_PROCTOR_DISQUALIFY_SCORE` | `0` | Disqualification threshold (0 = off) |
 | `DSA_PROCTOR_REVIEW_FULLSCREEN_EXITS` | `3` | Exits that flag for review (0 = off) |
 | `DSA_PROCTOR_REVIEW_OUTSIDE_SECONDS` | `60` | Merged seconds away that flag for review (0 = off) |
-| `DSA_PROCTOR_MAX_STRIKES` | `2` | Allowed warnings; the next suspicious event ends the assessment (0 = no limit) |
+| `DSA_PROCTOR_MAX_STRIKES` | `3` | Allowed warnings; the next suspicious event ends the assessment (0 = no limit) |
+| `DSA_PROCTOR_CAMERA` | `on` | Webcam required: `CAMERA_OFF`, `NO_FACE`, `MULTIPLE_FACES` are reported (`off` = no camera) |
 | `DSA_PROCTOR_AUTO_END` | `off` | End the attempt when the *score* reaches the disqualification threshold |
 | `DSA_PROCTOR_FULLSCREEN_HIGH_AFTER` | `3` | From this exit on, each exit is *high* |
 | `DSA_PROCTOR_MAX_EVENTS` | `500` | Cap per attempt |

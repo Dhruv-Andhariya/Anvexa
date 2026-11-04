@@ -60,7 +60,7 @@ The first student who starts locks the questions and the pass rule for the whole
 
 - **Email**: "Next Step: DSA Coding Round for <job> at <company>": number of problems, minutes, instructions from HR, the
   personal link (valid 7 days from sending, configurable), the rules (laptop or desktop, full screen, Python / Java /
-  C++, nothing to install, no camera or screen recording). It never contains marks or the pass mark.
+  C++, nothing to install, a working webcam that stays on (checked on the student's device, never recorded), no microphone or screen recording). It never contains marks or the pass mark.
 - **Page** (`/dsa/<token>`): start screen with the list of problems (titles, difficulty, marks, no statements); consent
   to the monitoring notice; full screen; then the problems, a code editor, Run (sample tests only, nothing scored) and
   Submit (sample and hidden tests, scored; best score per problem counts). The countdown is the server's.

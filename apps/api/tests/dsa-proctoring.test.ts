@@ -32,7 +32,7 @@ function setup(overrides: Partial<ProctorPolicy> = {}) {
   const service = new DsaService(
     new DemoInvitationResolver(), new MockQuestionRepository(), new InMemorySessionStore(), perfectRunner, () => clock.t, proctoring,
   );
-  const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true };
+  const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true, camera: true };
   const begin = async (token = A) => {
     await service.proctorStart(token, consent);
     return service.start(token);
@@ -83,7 +83,7 @@ describe('consent and start gating', () => {
 describe('recording events', () => {
   it('refuses events before the assessment starts and after it ends', async () => {
     const { service, begin, send } = setup();
-    await service.proctorStart(A, { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true });
+    await service.proctorStart(A, { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true, camera: true });
     await rejects(send(A, { type: 'COPY' }), 'NOT_STARTED', 409);
     await begin();
     await send(A, { type: 'COPY' });
@@ -326,7 +326,7 @@ describe('allowed warnings: two tolerated, the next one ends the assessment', ()
     ctx.send(A, { type, at: ctx.at(10 + n * 3) });
 
   it('defaults to 2 allowed warnings', () => {
-    expect(policyFromEnv({}).maxStrikes).toBe(2);
+    expect(policyFromEnv({}).maxStrikes).toBe(3);
     expect(policyFromEnv({ DSA_PROCTOR_MAX_STRIKES: '5' }).maxStrikes).toBe(5);
     expect(policyFromEnv({ DSA_PROCTOR_MAX_STRIKES: '0' }).maxStrikes).toBe(0);
   });

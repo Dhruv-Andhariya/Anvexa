@@ -8,6 +8,7 @@ import {
   type ProctoringSummary,
   type PublicPolicy,
   type Severity,
+  CAMERA_MONITORED_DESCRIPTIONS,
   CONSENT_VERSION,
   MONITORED_DESCRIPTIONS,
 } from './proctoring.types';
@@ -18,6 +19,8 @@ export const DSA_PROCTOR_POLICY = Symbol('DSA_PROCTOR_POLICY');
 export interface ProctorPolicy {
   enabled: boolean;
   requireFullscreen: boolean;
+  /** The webcam must stay on; the page reports CAMERA_OFF, NO_FACE and MULTIPLE_FACES. Default on. */
+  requireCamera: boolean;
   /** `block`: the page is unusable until full screen is re-entered. `warn`: a banner only. */
   fullscreenReentry: 'block' | 'warn';
   /** Weighted score (low 1, medium 3, high 5) at which the candidate gets a warning. */
@@ -34,7 +37,7 @@ export interface ProctorPolicy {
   autoEnd: boolean;
   /**
    * Allowed warnings: this many suspicious events (any violation, one per real action) are tolerated; the NEXT one
-   * ends the assessment immediately and keeps the work done so far. 0 = no limit. Default 2.
+   * ends the assessment immediately and keeps the work done so far. 0 = no limit. Default 3.
    */
   maxStrikes: number;
   /** From this many full-screen exits on, each exit is recorded as high severity. */
@@ -58,6 +61,7 @@ export function policyFromEnv(env: NodeJS.ProcessEnv = process.env): ProctorPoli
   return {
     enabled: flag(env.DSA_PROCTORING, true),
     requireFullscreen: flag(env.DSA_PROCTOR_REQUIRE_FULLSCREEN, true),
+    requireCamera: flag(env.DSA_PROCTOR_CAMERA, true),
     fullscreenReentry: env.DSA_PROCTOR_FULLSCREEN_REENTRY === 'warn' ? 'warn' : 'block',
     warnScore: num(env.DSA_PROCTOR_WARN_SCORE, 5),
     reviewScore: num(env.DSA_PROCTOR_REVIEW_SCORE, 12),
@@ -65,7 +69,7 @@ export function policyFromEnv(env: NodeJS.ProcessEnv = process.env): ProctorPoli
     reviewFullscreenExits: num(env.DSA_PROCTOR_REVIEW_FULLSCREEN_EXITS, 3),
     reviewOutsideSeconds: num(env.DSA_PROCTOR_REVIEW_OUTSIDE_SECONDS, 60),
     autoEnd: flag(env.DSA_PROCTOR_AUTO_END, false),
-    maxStrikes: Math.floor(num(env.DSA_PROCTOR_MAX_STRIKES, 2)),
+    maxStrikes: Math.floor(num(env.DSA_PROCTOR_MAX_STRIKES, 3)),
     fullscreenHighAfter: Math.max(1, num(env.DSA_PROCTOR_FULLSCREEN_HIGH_AFTER, 3)),
     maxEventsPerAttempt: Math.max(10, num(env.DSA_PROCTOR_MAX_EVENTS, 500)),
     dedupeMs: num(env.DSA_PROCTOR_DEDUPE_MS, 400),
@@ -80,11 +84,12 @@ export function clientConfig(policy: ProctorPolicy): ClientProctoringConfig {
   return {
     enabled: policy.enabled,
     requireFullscreen: policy.enabled && policy.requireFullscreen,
+    requireCamera: policy.enabled && policy.requireCamera,
     fullscreenReentry: policy.fullscreenReentry,
     autoEnd: policy.enabled && ((policy.autoEnd && policy.disqualifyScore > 0) || policy.maxStrikes > 0),
     maxStrikes: policy.enabled ? policy.maxStrikes : 0,
     consentVersion: CONSENT_VERSION,
-    monitored: MONITORED_DESCRIPTIONS,
+    monitored: policy.enabled && policy.requireCamera ? [...MONITORED_DESCRIPTIONS, ...CAMERA_MONITORED_DESCRIPTIONS] : MONITORED_DESCRIPTIONS,
   };
 }
 
@@ -111,7 +116,11 @@ export function severityOf(type: ProctorEventType, priorFullscreenExits: number,
     case 'WINDOW_BLUR':
     case 'DEVTOOLS_SHORTCUT':
     case 'SCREENSHOT_ATTEMPT':
+    case 'CAMERA_OFF':
+    case 'NO_FACE':
       return 'medium';
+    case 'MULTIPLE_FACES':
+      return 'high';
     default:
       return 'low';
   }
@@ -205,12 +214,15 @@ export function summarize(session: ProctorSession, policy: ProctorPolicy, nowMs:
     devToolsAttempts: count('DEVTOOLS_SHORTCUT'),
     otherRestrictedActions: count('SELECT_ALL', 'VIEW_SOURCE', 'SAVE_SHORTCUT', 'PRINT_SHORTCUT'),
     screenshotAttempts: count('SCREENSHOT_ATTEMPT'),
+    cameraOffCount: count('CAMERA_OFF'),
+    noFaceCount: count('NO_FACE'),
+    multipleFacesCount: count('MULTIPLE_FACES'),
     strikesAllowed: policy.maxStrikes,
     strikesUsed: violations.length,
     totalTimeOutsideMs: outside,
     sessionResumes: events.filter((e) => e.type === 'SESSION_RESUMED').length,
     droppedEvents: session.dropped,
-    consent: { version: session.consentVersion, at: iso(session.consentAt), fullscreenAtStart: session.fullscreenAtStart },
+    consent: { version: session.consentVersion, at: iso(session.consentAt), fullscreenAtStart: session.fullscreenAtStart, cameraAtStart: session.cameraAtStart ?? false },
     startedAt: iso(session.startedAt),
     endedAt: iso(session.endedAt),
     policy: publicPolicy(policy),

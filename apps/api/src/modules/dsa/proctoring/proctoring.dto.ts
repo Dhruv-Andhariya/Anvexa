@@ -9,6 +9,8 @@ export interface ProctorStartDto {
   consent: true;
   consentVersion: string;
   fullscreen: boolean;
+  /** The webcam was on when the candidate pressed Start (required when the policy requires the camera). */
+  camera?: boolean;
 }
 
 export interface ProctorEventInput {
@@ -38,7 +40,7 @@ function rejectUnknownKeys(obj: Record<string, unknown>, allowed: string[], wher
 
 export function parseProctorStart(body: unknown): ProctorStartDto {
   if (!isRecord(body)) throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Send a JSON body.');
-  rejectUnknownKeys(body, ['consent', 'consentVersion', 'fullscreen'], 'Request');
+  rejectUnknownKeys(body, ['consent', 'consentVersion', 'fullscreen', 'camera'], 'Request');
   if (body.consent !== true) {
     throw dsaError(HttpStatus.BAD_REQUEST, 'CONSENT_REQUIRED', 'You must read and accept the monitoring notice to start.');
   }
@@ -48,7 +50,10 @@ export function parseProctorStart(body: unknown): ProctorStartDto {
   if (typeof body.fullscreen !== 'boolean') {
     throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'fullscreen must be true or false.');
   }
-  return { consent: true, consentVersion: body.consentVersion, fullscreen: body.fullscreen };
+  if (body.camera !== undefined && typeof body.camera !== 'boolean') {
+    throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'camera must be true or false.');
+  }
+  return { consent: true, consentVersion: body.consentVersion, fullscreen: body.fullscreen, ...(body.camera !== undefined ? { camera: body.camera } : {}) };
 }
 
 export function parseProctorEvents(body: unknown): ProctorEventInput[] {

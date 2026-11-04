@@ -51,16 +51,21 @@ $exists = (docker ps -a --filter "name=^/$Name$" --format '{{.Names}}') -eq $Nam
 if ($exists -and $Recreate) { Say 'removing the old container (the package volume is kept)'; docker rm -f $Name *> $null; $exists = $false }
 if (-not $exists) {
   Say 'creating the Piston container (first run pulls ~1.4 GB) ...'
+  # Docker prints progress ("Unable to find image locally", pull lines) on stderr; under 'Stop' Windows PowerShell 5.1
+  # would treat that as a fatal error, so only the exit code decides here.
+  $ErrorActionPreference = 'Continue'
   docker run -d --name $Name --privileged --restart unless-stopped `
     -p "127.0.0.1:${Port}:2000" -v "${Volume}:/piston" --env-file $EnvFile $Image *> $null
-  if ($LASTEXITCODE -ne 0) { Fail 'docker run failed' }
+  $runExit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($runExit -ne 0) { Fail 'docker run failed' }
 } elseif ((docker inspect -f '{{.State.Running}}' $Name) -ne 'true') {
   Say 'starting the existing container'
   docker start $Name *> $null
 }
 
 # 3. Wait for the API
-Wait-For 'the Piston API' 90 { try { (Invoke-RestMethod "$Url/api/v2/runtimes" -TimeoutSec 5) -ne $null } catch { $false } } | Out-Null
+Wait-For 'the Piston API' 90 { try { Invoke-RestMethod "$Url/api/v2/runtimes" -TimeoutSec 5 | Out-Null; $true } catch { $false } } | Out-Null
 Say "Piston API answers on $Url"
 
 # 4. Safety checks
@@ -72,7 +77,9 @@ Say "published only on localhost ($published); networks: $nets"
 
 # 5. Languages
 # Ask Piston's own package list (the `gcc` package provides the runtimes called `c` and `c++`).
-$offered = @(Invoke-RestMethod "$Url/api/v2/packages" -TimeoutSec 60)
+# Windows PowerShell 5.1 returns a JSON array as ONE object; the pipeline unrolls it into its packages, otherwise the
+# filter below would compare against every package at once and report a missing language as installed.
+$offered = @((Invoke-RestMethod "$Url/api/v2/packages" -TimeoutSec 60) | ForEach-Object { $_ })
 foreach ($p in $Packages) {
   $have = $offered | Where-Object { $_.language -eq $p[0] -and $_.language_version -eq $p[1] -and $_.installed }
   if ($have) { Say "$($p[0]) $($p[1]) already installed"; continue }

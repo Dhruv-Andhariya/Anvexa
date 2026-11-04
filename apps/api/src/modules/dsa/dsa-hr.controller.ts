@@ -44,6 +44,9 @@ export class DsaHrController {
           tabSwitchCount: s.tabSwitchCount,
           copyPasteAttempts: s.copyPasteAttempts,
           devToolsAttempts: s.devToolsAttempts,
+          cameraOffCount: s.cameraOffCount,
+          noFaceCount: s.noFaceCount,
+          multipleFacesCount: s.multipleFacesCount,
           totalTimeOutsideMs: s.totalTimeOutsideMs,
           events: events.map((e) => ({ type: e.type, severity: e.severity, at: e.at, durationMs: e.durationMs, detail: e.detail })),
         };

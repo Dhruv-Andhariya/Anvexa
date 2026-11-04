@@ -3,6 +3,7 @@ import type { AssessmentState, FinalResult } from '@/lib/dsa-api';
 import { LANGUAGE_LABELS } from '@/lib/dsa-api';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { difficultyTone } from './problem-panel';
+import { CameraCheck, type Camera } from './webcam';
 
 export function LoadingScreen() {
   return (
@@ -35,14 +36,18 @@ export function IntroScreen({
   starting,
   error,
   onStart,
+  camera,
 }: {
   state: AssessmentState;
   starting: boolean;
   error: string;
   onStart: (consented: boolean) => void;
+  /** Present when the webcam is required. */
+  camera?: Camera;
 }) {
   const [consented, setConsented] = useState(false);
   const p = state.proctoring;
+  const cameraReady = !camera || camera.status === 'on';
   const needsConsent = p.enabled;
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
@@ -110,13 +115,16 @@ export function IntroScreen({
         {p.enabled && (
           <section aria-labelledby="monitoring-title" className="flex flex-col gap-3 rounded-md border border-border bg-accent-soft px-4 py-3">
             <h2 id="monitoring-title" className="text-sm font-semibold">
-              Monitoring and full-screen mode
+              {camera ? 'Monitoring, webcam and full-screen mode' : 'Monitoring and full-screen mode'}
             </h2>
             <p className="text-sm">
               {p.requireFullscreen
                 ? 'This assessment must be taken in full-screen mode. When you press Start, your browser will ask to go full screen. If you leave full screen, the assessment is blocked until you return, the timer keeps running, and the time away is recorded.'
                 : 'This assessment is monitored for integrity.'}
+              {camera &&
+                ' Your webcam must stay on for the whole assessment, with your face clearly visible and nobody else in view. If the camera turns off, the assessment is blocked until you turn it back on.'}
             </p>
+            {camera && <CameraCheck camera={camera} />}
             <div>
               <p className="text-xs font-medium text-muted">Your browser reports these events to us</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
@@ -128,7 +136,14 @@ export function IntroScreen({
             <div>
               <p className="text-xs font-medium text-muted">What we do not do</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
-                <li>No camera, microphone or screen recording.</li>
+                {camera ? (
+                  <li>
+                    The webcam video stays on your device: it is checked there for a face, and is never recorded or uploaded. No microphone or screen
+                    recording.
+                  </li>
+                ) : (
+                  <li>No camera, microphone or screen recording.</li>
+                )}
                 <li>We do not see other tabs, other applications, passwords or what you type, only the event type, time and how long.</li>
                 <li>Copy, cut and paste are disabled in the editor and the questions. Your own code stays usable.</li>
               </ul>
@@ -140,8 +155,8 @@ export function IntroScreen({
             {p.maxStrikes > 0 && (
               <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
                 <span className="font-semibold">Warnings: </span>
-                you are allowed {p.maxStrikes} suspicious {p.maxStrikes === 1 ? 'action' : 'actions'} (for example a screenshot key, switching tabs, copying, or
-                leaving full screen). Each one is recorded and shown to you as a warning. After that, the next suspicious action, including leaving full screen,
+                you are allowed {p.maxStrikes} suspicious {p.maxStrikes === 1 ? 'action' : 'actions'} (for example a screenshot key, switching tabs, copying,
+                leaving full screen{camera ? ', the webcam turning off, your face not being visible, or another person in view' : ''}). Each one is recorded and shown to you as a warning. After that, the next suspicious action, including leaving full screen,
                 ends your assessment immediately. Your answers submitted so far are kept.
               </p>
             )}
@@ -164,7 +179,7 @@ export function IntroScreen({
         )}
 
         <div>
-          <Button variant="primary" onClick={() => onStart(consented)} disabled={starting || (needsConsent && !consented)}>
+          <Button variant="primary" onClick={() => onStart(consented)} disabled={starting || (needsConsent && !consented) || !cameraReady}>
             {starting && <Spinner />} {p.enabled && p.requireFullscreen ? 'Start in full screen' : 'Start assessment'}
           </Button>
         </div>

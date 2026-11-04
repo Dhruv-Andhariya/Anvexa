@@ -251,7 +251,12 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
 
   const reenter = useCallback(async () => enterFullscreen(), []);
 
-  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled };
+  // Webcam checks (webcam.tsx) report through the same queue, only while monitoring runs.
+  const report = useCallback((type: ProctorInputType, detail?: string) => {
+    if (enabled) emit(type, detail);
+  }, [enabled, emit]);
+
+  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled, report };
 }
 
 // ---------------------------------------------------------------- UI

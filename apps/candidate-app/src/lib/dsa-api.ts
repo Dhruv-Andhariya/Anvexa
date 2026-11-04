@@ -81,6 +81,9 @@ export type ProctorInputType =
   | 'SAVE_SHORTCUT'
   | 'PRINT_SHORTCUT'
   | 'SCREENSHOT_ATTEMPT'
+  | 'CAMERA_OFF'
+  | 'NO_FACE'
+  | 'MULTIPLE_FACES'
   | 'SESSION_RESUMED';
 
 export interface ProctorEventInput {
@@ -93,6 +96,8 @@ export interface ProctorEventInput {
 export interface ProctoringConfig {
   enabled: boolean;
   requireFullscreen: boolean;
+  /** The webcam must stay on; the page checks that one face is in view. Missing from older API versions. */
+  requireCamera?: boolean;
   fullscreenReentry: 'block' | 'warn';
   autoEnd: boolean;
   /** Suspicious events tolerated as warnings; the next one ends the assessment. 0 = no limit. */
@@ -230,7 +235,7 @@ export const submitCode = (token: string, input: { questionId: string; language:
   request<SubmitResponse>('POST', `${base(token)}/submit`, input);
 
 /** Records consent (and that full screen was on). Must succeed before startAssessment when proctoring is enabled. */
-export const startProctoring = (token: string, input: { consentVersion: string; fullscreen: boolean }) =>
+export const startProctoring = (token: string, input: { consentVersion: string; fullscreen: boolean; camera?: boolean }) =>
   request<ProctoringConfig>('POST', `${base(token)}/proctor/start`, { consent: true, ...input });
 export const sendProctorEvents = (token: string, events: ProctorEventInput[]) =>
   request<ProctorRecordResponse>('POST', `${base(token)}/proctor/events`, { events });

@@ -23,6 +23,7 @@ import { ProblemPanel, difficultyTone } from './problem-panel';
 import { ResultsPanel, type PanelResult } from './results-panel';
 import { FullscreenGate, ProctorNotice, enterFullscreen, fullscreenSupported, inFullscreen, leaveFullscreen, useProctoring } from './proctoring';
 import { ErrorScreen, IntroScreen, LoadingScreen, ResultScreen } from './screens';
+import { CameraGate, CameraTile, useCamera, useFaceMonitor } from './webcam';
 
 interface Saved {
   drafts: Record<string, string>;
@@ -131,6 +132,38 @@ export function Assessment({ token }: { token: string }) {
     if (state?.status === 'finished') void leaveFullscreen();
   }, [state?.status]);
 
+  // Webcam (when the company requires it): on from the start screen to the end, checked for one face in view.
+  const camera = useCamera();
+  const cameraRequired = !!state?.proctoring.enabled && !!state?.proctoring.requireCamera;
+  const cameraWatched = proctor.enabled && cameraRequired;
+  const [cameraWasLost, setCameraWasLost] = useState(false);
+  const status = state?.status;
+  const cameraStatus = camera.status;
+  const startCamera = camera.start;
+  const stopCamera = camera.stop;
+  const report = proctor.report;
+  // the start screen shows the preview straight away; a reload in the middle of an attempt turns it back on
+  const cameraAsked = useRef(false);
+  useEffect(() => {
+    if (!cameraRequired || cameraAsked.current || (status !== 'not_started' && status !== 'in_progress')) return;
+    cameraAsked.current = true;
+    void startCamera();
+  }, [cameraRequired, status, startCamera]);
+  // the camera stopping during the attempt is a violation (once each time it stops)
+  const lastCameraStatus = useRef(cameraStatus);
+  useEffect(() => {
+    const before = lastCameraStatus.current;
+    lastCameraStatus.current = cameraStatus;
+    if (cameraStatus === 'lost' && before !== 'lost' && cameraWatched) {
+      setCameraWasLost(true);
+      report('CAMERA_OFF');
+    }
+  }, [cameraStatus, cameraWatched, report]);
+  useEffect(() => {
+    if (status === 'finished') stopCamera();
+  }, [status, stopCamera]);
+  const face = useFaceMonitor({ video: camera.video, active: cameraWatched && cameraStatus === 'on', report });
+
   useEffect(() => {
     if (!inProgress) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -185,9 +218,14 @@ export function Assessment({ token }: { token: string }) {
         state={state}
         starting={starting}
         error={startError}
+        camera={cameraRequired ? camera : undefined}
         onStart={async (consented) => {
           const p = state.proctoring;
           setStartError('');
+          if (cameraRequired && camera.status !== 'on') {
+            setStartError('Turn on your webcam first: this assessment needs it for the whole time.');
+            return;
+          }
           // Full screen must be requested straight from the click, before any await (browsers need the user gesture).
           let fsOn = false;
           if (p.enabled && p.requireFullscreen) {
@@ -205,7 +243,11 @@ export function Assessment({ token }: { token: string }) {
           try {
             if (p.enabled) {
               if (!consented) throw new ApiError(400, 'CONSENT_REQUIRED', 'Please accept the monitoring notice to start.');
-              await startProctoring(token, { consentVersion: p.consentVersion, fullscreen: inFullscreen() });
+              await startProctoring(token, {
+                consentVersion: p.consentVersion,
+                fullscreen: inFullscreen(),
+                ...(cameraRequired ? { camera: camera.status === 'on' } : {}),
+              });
             }
             applyState(await startAssessment(token));
           } catch (err) {
@@ -231,7 +273,9 @@ export function Assessment({ token }: { token: string }) {
   const strikesAllowed = state.proctoring.maxStrikes;
   const strikesUsed = Math.max(proctor.strikesUsed, state.proctoring.strikesUsed);
   const needFullscreen = proctor.enabled && state.proctoring.requireFullscreen && !proctor.fullscreen;
-  const blocked = needFullscreen && state.proctoring.fullscreenReentry === 'block';
+  const fullscreenBlocked = needFullscreen && state.proctoring.fullscreenReentry === 'block';
+  const cameraBlocked = cameraWatched && camera.status !== 'on';
+  const blocked = fullscreenBlocked || cameraBlocked;
   const reenter = async () => {
     const ok = await proctor.reenter();
     setActionError(ok ? '' : 'Your browser did not switch to full screen. Press the button again.');
@@ -274,6 +318,7 @@ export function Assessment({ token }: { token: string }) {
   };
 
   return (
+    <>
     <main className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6" inert={blocked}>
       {needFullscreen && state.proctoring.fullscreenReentry === 'warn' && (
         <FullscreenGate mode="warn" onReenter={() => void reenter()} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} />
@@ -309,6 +354,7 @@ export function Assessment({ token }: { token: string }) {
         </nav>
 
         <div className="flex items-center gap-3">
+          {cameraWatched && <CameraTile camera={camera} face={face} />}
           {proctor.enabled && (
             <span title="Browser integrity events are recorded during this assessment">
               <Badge tone={proctor.level === 'ok' && strikesUsed === 0 ? 'neutral' : 'danger'}>
@@ -394,7 +440,6 @@ export function Assessment({ token }: { token: string }) {
         </div>
       </div>
 
-      {blocked && <FullscreenGate mode="block" onReenter={() => void reenter()} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} />}
       {proctor.enabled && (
         <ProctorNotice
           notice={proctor.notice}
@@ -427,5 +472,9 @@ export function Assessment({ token }: { token: string }) {
         </div>
       )}
     </main>
+    {/* The gates sit outside the inert page so their buttons stay usable. Full screen first, then the camera. */}
+    {fullscreenBlocked && <FullscreenGate mode="block" onReenter={() => void reenter()} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} />}
+    {!fullscreenBlocked && cameraBlocked && <CameraGate camera={camera} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} wasLost={cameraWasLost} />}
+    </>
   );
 }

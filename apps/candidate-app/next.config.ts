@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
   // simultaneous C++ submissions). The backend bounds the wait itself (DSA_RUNNER_QUEUE_TIMEOUT_MS).
   experimental: { proxyTimeout: 240_000 },
   // The page URL holds the candidate's personal token: never sent on as a referrer, never cached or indexed.
-  // No camera or microphone is used; full screen may only be used by this site itself.
+  // The webcam (proctoring; the video is never recorded) and full screen may only be used by this site itself.
   async headers() {
     return [
       {
@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), fullscreen=(self)' },
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), fullscreen=(self)' },
         ],
       },
     ];

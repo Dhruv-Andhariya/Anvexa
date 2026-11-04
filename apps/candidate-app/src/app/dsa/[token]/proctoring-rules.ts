@@ -86,4 +86,7 @@ export const NOTICE_TEXT: Partial<Record<ProctorInputType, string>> = {
   SAVE_SHORTCUT: 'Saving the page is not allowed during the assessment. The attempt was recorded.',
   PRINT_SHORTCUT: 'Printing is not allowed during the assessment. The attempt was recorded.',
   SCREENSHOT_ATTEMPT: 'Screenshots are not allowed during the assessment. The attempt was recorded.',
+  CAMERA_OFF: 'Your webcam turned off. It must stay on for the whole assessment. This was recorded.',
+  NO_FACE: 'Your face was not visible to the webcam. Stay in front of the camera. This was recorded.',
+  MULTIPLE_FACES: 'More than one person was seen by the webcam. Only you may be in front of the camera. This was recorded.',
 };

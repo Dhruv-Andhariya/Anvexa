@@ -70,11 +70,19 @@ export interface RoundEngineConfig {
    * ASSESSMENT_PROTECTION, ASSESSMENT_MAX_WARNINGS, ASSESSMENT_TAB_MONITORING, ASSESSMENT_FULLSCREEN_REQUIRED, ASSESSMENT_FACE_POLICY.
    */
   protection?: AssessmentProtectionSettings | null;
+  /** DSA / SQL coding rounds: the webcam must be on (DSA_PROCTORING and DSA_PROCTOR_CAMERA, both default on). Email wording only. */
+  codingCameraRequired?: boolean;
 }
+
+const isOff = (v: string | undefined) => ['off', 'false', '0', 'no'].includes((v ?? '').trim().toLowerCase());
 
 export const roundEngineConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): RoundEngineConfig => {
   const cameraRequired = !['off', 'false', '0'].includes((env.ASSESSMENT_REQUIRE_CAMERA ?? '').trim().toLowerCase());
-  return { cameraRequired, protection: assessmentProtectionFromEnv(env, cameraRequired) };
+  return {
+    cameraRequired,
+    protection: assessmentProtectionFromEnv(env, cameraRequired),
+    codingCameraRequired: !isOff(env.DSA_PROCTORING) && !isOff(env.DSA_PROCTOR_CAMERA),
+  };
 };
 
 /** Same error body shape as the other modules: { statusCode, code, message, ...extra }. Never a token. */
