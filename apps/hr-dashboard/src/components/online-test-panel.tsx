@@ -204,14 +204,18 @@ function DsaIntegrityLog({ applicationId, roundId }: { applicationId: string; ro
           {mine && (
             <>
               <p className="text-xs text-muted">
-                What the candidate&apos;s browser reported. These are observations for your review, not proof of cheating, and they did not change the score. No
-                camera, microphone or screen recording is used.
+                What the candidate&apos;s browser reported. These are observations for your review, not proof of cheating, and they did not change the score. When
+                the webcam is required, it is only checked on the candidate&apos;s device for a face: no video, microphone or screen recording is kept.
               </p>
               <p>
                 <span className={`${pill} ${mine.flagged ? 'border-danger/40 text-danger' : ''}`}>{STATUS_TEXT[mine.status]}</span>{' '}
                 <span className="text-muted">
                   {mine.strikesAllowed > 0 ? `Warnings used: ${mine.strikesUsed} of ${mine.strikesAllowed} allowed · ` : ''}
-                  Left full screen {mine.fullscreenExitCount}× · tab switches {mine.tabSwitchCount} · copy/paste attempts {mine.copyPasteAttempts} · developer tools {mine.devToolsAttempts} · time away {SECONDS(mine.totalTimeOutsideMs)}
+                  Left full screen {mine.fullscreenExitCount}× · tab switches {mine.tabSwitchCount} · copy/paste attempts {mine.copyPasteAttempts} · developer tools {mine.devToolsAttempts}
+                  {mine.cameraOffCount !== undefined
+                    ? ` · camera off ${mine.cameraOffCount}× · no face ${mine.noFaceCount ?? 0}× · more than one face ${mine.multipleFacesCount ?? 0}×`
+                    : ''}{' '}
+                  · time away {SECONDS(mine.totalTimeOutsideMs)}
                 </span>
               </p>
               {mine.reasons.length > 0 && (

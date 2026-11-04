@@ -124,7 +124,7 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     return { token: token!, mail: mail! };
   }
 
-  const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true };
+  const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true, camera: true };
   const code = (solved: boolean) => `def solve():\n    pass  # ${solved ? SOLVED : 'nope'}\n`;
 
   beforeAll(async () => {

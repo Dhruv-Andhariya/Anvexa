@@ -65,11 +65,15 @@ export class ProctoringService {
     if (this.policy.requireFullscreen && !dto.fullscreen) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'FULLSCREEN_REQUIRED', 'Full-screen mode must be on before the assessment can start.');
     }
+    if (this.policy.requireCamera && dto.camera !== true) {
+      throw dsaError(HttpStatus.BAD_REQUEST, 'CAMERA_REQUIRED', 'Your webcam must be on before the assessment can start. Allow the camera and try again.');
+    }
     const session = await this.getOrCreate(inviteRef, assessmentId);
     if (!session.consentAt) {
       session.consentVersion = dto.consentVersion;
       session.consentAt = this.now();
       session.fullscreenAtStart = dto.fullscreen;
+      session.cameraAtStart = dto.camera === true;
       await this.store.save(session);
     }
     return this.config();

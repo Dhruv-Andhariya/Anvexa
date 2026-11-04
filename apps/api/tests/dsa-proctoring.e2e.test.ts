@@ -32,7 +32,7 @@ const idleRunner: CodeRunner = { runBatch: async () => [] };
     { provide: DSA_INVITATION_RESOLVER, useClass: DemoInvitationResolver },
     { provide: DSA_SESSION_STORE, useClass: InMemorySessionStore },
     { provide: DSA_PROCTOR_STORE, useClass: InMemoryProctorStore },
-    { provide: DSA_PROCTOR_POLICY, useValue: { ...policyFromEnv({}), enabled: true } },
+    { provide: DSA_PROCTOR_POLICY, useValue: { ...policyFromEnv({}), enabled: true, maxStrikes: 2 } },
     { provide: CODE_RUNNER, useValue: idleRunner },
   ],
 })
@@ -51,7 +51,7 @@ const call = async (method: 'GET' | 'POST', path: string, body?: unknown, header
   const text = await res.text();
   return { status: res.status, text, json: (text ? JSON.parse(text) : {}) as Record<string, any> };
 };
-const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true };
+const consent = { consent: true, consentVersion: CONSENT_VERSION, fullscreen: true, camera: true };
 
 describe('proctoring over HTTP', () => {
   beforeAll(async () => {

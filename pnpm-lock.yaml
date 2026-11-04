@@ -78,6 +78,9 @@ importers:
 
   apps/candidate-app:
     dependencies:
+      '@mediapipe/tasks-vision':
+        specifier: 0.10.21
+        version: 0.10.21
       next:
         specifier: 15.5.27
         version: 15.5.27(@types/node@20.19.43)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)

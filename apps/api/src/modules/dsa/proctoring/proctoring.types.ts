@@ -6,7 +6,7 @@
  */
 
 /** Shown to the candidate before monitoring starts; bump when the notice changes. */
-export const CONSENT_VERSION = 'dsa-proctoring-v1';
+export const CONSENT_VERSION = 'dsa-proctoring-v2'; // v2: webcam monitoring (camera on, face in view, one person)
 
 /** Things the page can report as a violation. */
 export const VIOLATION_TYPES = [
@@ -24,6 +24,12 @@ export const VIOLATION_TYPES = [
   'PRINT_SHORTCUT',
   /** The PrintScreen key (or a macOS screenshot shortcut) reached the page. It cannot be blocked, only noticed. */
   'SCREENSHOT_ATTEMPT',
+  /** Webcam (camera required): the camera stopped, was unplugged or its permission was withdrawn. */
+  'CAMERA_OFF',
+  /** Webcam: no face in view for several seconds (the page decides on the device; no video leaves the browser). */
+  'NO_FACE',
+  /** Webcam: more than one face in view for several seconds. */
+  'MULTIPLE_FACES',
 ] as const;
 export type ViolationType = (typeof VIOLATION_TYPES)[number];
 
@@ -73,6 +79,8 @@ export interface ProctorSession {
   consentAt: number | null;
   /** Candidate said full screen was active when consenting (a claim from the page; the server cannot see it). */
   fullscreenAtStart: boolean;
+  /** Candidate said the webcam was on when consenting (a claim from the page). Missing on records made before v2. */
+  cameraAtStart?: boolean;
   startedAt: number | null;
   endedAt: number | null;
   nextId: number;
@@ -101,6 +109,9 @@ export interface ProctoringSummary {
   devToolsAttempts: number;
   otherRestrictedActions: number;
   screenshotAttempts: number;
+  cameraOffCount: number;
+  noFaceCount: number;
+  multipleFacesCount: number;
   /** Allowed warnings (0 = no limit) and how many suspicious events have been used up. */
   strikesAllowed: number;
   strikesUsed: number;
@@ -108,7 +119,7 @@ export interface ProctoringSummary {
   totalTimeOutsideMs: number;
   sessionResumes: number;
   droppedEvents: number;
-  consent: { version: string | null; at: string | null; fullscreenAtStart: boolean };
+  consent: { version: string | null; at: string | null; fullscreenAtStart: boolean; cameraAtStart: boolean };
   startedAt: string | null;
   endedAt: string | null;
   policy: PublicPolicy;
@@ -138,6 +149,8 @@ export interface PublicPolicy {
 export interface ClientProctoringConfig {
   enabled: boolean;
   requireFullscreen: boolean;
+  /** The webcam must be on for the whole attempt; the page checks that a face (and only one) is in view. */
+  requireCamera: boolean;
   fullscreenReentry: 'block' | 'warn';
   autoEnd: boolean;
   /** Suspicious events tolerated as warnings; the next one ends the assessment. 0 = no limit. */
@@ -152,4 +165,11 @@ export const MONITORED_DESCRIPTIONS = [
   'Copy, cut and paste attempts, and select-all outside the code editor',
   'Right-click menu, view-source, save and print shortcuts, and the PrintScreen (screenshot) key',
   'Developer-tools shortcuts such as F12',
+];
+
+/** Added to the list when the webcam is required. */
+export const CAMERA_MONITORED_DESCRIPTIONS = [
+  'Your webcam turning off, or its permission being withdrawn',
+  'No face in front of the camera for several seconds',
+  'More than one person in front of the camera',
 ];

@@ -195,7 +195,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
         instructions: round.description,
         link: assessmentLink(base, token.token),
         linkExpiresAt: expiresAt,
-        cameraRequired: coding ? false : this.engineConfig.cameraRequired,
+        cameraRequired: coding ? this.engineConfig.codingCameraRequired === true : this.engineConfig.cameraRequired,
         maxWarnings: coding ? null : (this.engineConfig.protection?.maxWarnings ?? null),
         coding,
         ...(coding ? { codingKind: codingKindOf(round) } : {}),

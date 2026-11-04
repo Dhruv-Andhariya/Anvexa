@@ -152,6 +152,10 @@ export interface DsaProctoringReview {
     tabSwitchCount: number;
     copyPasteAttempts: number;
     devToolsAttempts: number;
+    /** Webcam (when the company requires it). Missing from records made before webcam proctoring. */
+    cameraOffCount?: number;
+    noFaceCount?: number;
+    multipleFacesCount?: number;
     totalTimeOutsideMs: number;
     events: { type: string; severity: string; at: string; durationMs: number | null; detail: string | null }[];
   }[];
