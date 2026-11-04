@@ -1,0 +1,345 @@
+// =====================================================================================
+// AI technical interview round (voice)  (code: apps/api/src/modules/ai-interview)
+// Runs the job rounds of type AI_INTERVIEW for students who passed every earlier round, whichever rounds HR chose.
+// Only the SHA-256 of a link token is stored. Transcripts are stored; raw audio and video never are.
+// Everything is deleted with the application (ON DELETE CASCADE), and with the round.
+// =====================================================================================
+
+enum AiInterviewStatus {
+  NOT_STARTED // link opened, consent / device check not done yet
+  IN_PROGRESS
+  PAUSED // a device or the connection was lost: the clock stops (within the pause allowance)
+  COMPLETED
+  INCOMPLETE // abandoned: the time ran out while the page was closed (answers so far are kept)
+  TERMINATED // ended by the server: more warnings than the round allows (answers so far are kept; HR reviews)
+
+  @@map("ai_interview_status")
+}
+
+/// Interview protection: what the page reported (the server decides whether it counts).
+enum AiInterviewViolationType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  FULLSCREEN_EXIT
+  CAMERA_LOST
+  MIC_LOST
+  MULTIPLE_FACES // more than one face counted in the camera picture (on the candidate's device; no image stored)
+
+  @@map("ai_interview_violation_type")
+}
+
+/// WARNING / TERMINATED = counted on the session's one warning counter; RECORDED = kept for HR, not a warning;
+/// GROUPED = part of an incident already counted.
+enum AiInterviewViolationOutcome {
+  WARNING
+  TERMINATED
+  RECORDED
+  GROUPED
+
+  @@map("ai_interview_violation_outcome")
+}
+
+enum AiInterviewIntegrityStatus {
+  NONE
+  INTEGRITY_VIOLATION_REVIEW // terminated by the warning limit: HR must review (never an automatic rejection)
+  REVIEWED // HR decided after reviewing
+
+  @@map("ai_interview_integrity_status")
+}
+
+enum AiInterviewDevicePolicy {
+  RECOVER // pause, wait for the device, continue - no warning
+  WARN // the same, plus one warning per incident
+
+  @@map("ai_interview_device_policy")
+}
+
+enum AiInterviewFacePolicy {
+  OFF // faces are not counted
+  RECORD // noted for HR, not a warning
+  WARN // noted, and one warning per episode
+
+  @@map("ai_interview_face_policy")
+}
+
+enum AiInterviewQuestionKind {
+  INTRO
+  MAIN
+  FOLLOW_UP
+  CLARIFY
+  CLOSING
+
+  @@map("ai_interview_question_kind")
+}
+
+enum AiInterviewSource {
+  INTRO
+  RESUME
+  JOB
+  SCENARIO
+  HR
+  FOLLOW_UP
+  CLOSING
+
+  @@map("ai_interview_source")
+}
+
+enum AiInterviewTranscriptQuality {
+  CLEAR
+  PARTLY_UNCLEAR
+  UNCLEAR
+
+  @@map("ai_interview_transcript_quality")
+}
+
+enum AiInterviewReportStatus {
+  PENDING
+  DONE
+  FAILED
+
+  @@map("ai_interview_report_status")
+}
+
+enum AiInterviewDecision {
+  ADVANCE
+  REJECT
+
+  @@map("ai_interview_decision")
+}
+
+/// The invitation of one student to one AI interview round (one per student per round, never two emails).
+model AiInterviewInvite {
+  id            String              @id @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  applicationId String              @map("application_id") @db.Uuid
+  jobId         String              @map("job_id") @db.Uuid
+  roundId       String              @map("round_id") @db.Uuid
+  /// null until the email was sent; a new token for every send attempt.
+  tokenHash     String?             @unique @map("token_hash")
+  expiresAt     DateTime?           @map("expires_at")
+  /// Interview page base URL the emailed link was built from (a tunnel URL changes on restart).
+  linkBase      String?             @map("link_base")
+  emailStatus   EmailDeliveryStatus @default(QUEUED) @map("email_status")
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?           @map("locked_at")
+  /// Safe short text only.
+  lastError     String?             @map("last_error")
+  sentAt        DateTime?           @map("sent_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  application Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound            @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  session     AiInterviewSession?
+
+  @@unique([applicationId, roundId])
+  @@index([emailStatus, nextAttemptAt])
+  @@index([tenantId, jobId])
+  @@map("ai_interview_invites")
+}
+
+/// One interview. The question being waited for is kept on the row (pending_*), so a refresh, a second tab or a
+/// reconnect always continues at the same place. The clock is the server's: deadline = started + minutes + paused.
+model AiInterviewSession {
+  id                String                     @id @db.Uuid
+  tenantId          String                     @map("tenant_id") @db.Uuid
+  applicationId     String                     @map("application_id") @db.Uuid
+  jobId             String                     @map("job_id") @db.Uuid
+  roundId           String                     @map("round_id") @db.Uuid
+  inviteId          String                     @unique @map("invite_id") @db.Uuid
+  status            AiInterviewStatus          @default(NOT_STARTED)
+  /// consents.id of the consent (purpose "ai_technical_interview").
+  consentId         String?                    @map("consent_id") @db.Uuid
+  consentGivenAt    DateTime?                  @map("consent_given_at")
+  /// What this interview runs with (minutes, HR's questions, pass rule, round name), copied at the first visit:
+  /// later edits by HR never change an interview that was already opened.
+  config            Json
+  /// The interview plan made by the AI at the start (topics with their source in the resume / job).
+  plan              Json?
+  pendingSeq        Int                        @default(1) @map("pending_seq")
+  pendingKind       AiInterviewQuestionKind    @default(INTRO) @map("pending_kind")
+  pendingSource     AiInterviewSource          @default(INTRO) @map("pending_source")
+  pendingText       String                     @default("") @map("pending_text")
+  pendingTopicId    String?                    @map("pending_topic_id")
+  pendingTopic      String?                    @map("pending_topic")
+  pendingResumeRef  String?                    @map("pending_resume_ref")
+  pendingAskedAt    DateTime?                  @map("pending_asked_at")
+  pendingRepeats    Int                        @default(0) @map("pending_repeats")
+  /// Follow-up / clarifying questions already asked on the current topic.
+  followUpsOnTopic  Int                        @default(0) @map("follow_ups_on_topic")
+  coveredTopics     String[]                   @default([]) @map("covered_topics")
+  startedAt         DateTime?                  @map("started_at")
+  /// Total paused time so far (device / connection problems), within AI_INTERVIEW_LIMITS.maxPauseSeconds.
+  pausedSeconds     Int                        @default(0) @map("paused_seconds")
+  /// Set while PAUSED: when this pause began.
+  pausedAt          DateTime?                  @map("paused_at")
+  pauseReason       String?                    @map("pause_reason")
+  lastActivityAt    DateTime?                  @map("last_activity_at")
+  completedAt       DateTime?                  @map("completed_at")
+  endedReason       String?                    @map("ended_reason")
+  /// HR's decision: the only thing that moves the student on (the AI's recommendation is advice).
+  decision          AiInterviewDecision?
+  decisionReason    String?                    @map("decision_reason")
+  decidedById       String?                    @map("decided_by_id") @db.Uuid
+  decidedByName     String?                    @map("decided_by_name")
+  decidedAt         DateTime?                  @map("decided_at")
+  /// The result went to the round engine (round_results + next step queued). Set once.
+  recordedAt        DateTime?                  @map("recorded_at")
+  /// Protection rules this interview runs with (AiInterviewProtectionSettings JSON), copied at the first visit with
+  /// the rest of the config: what the candidate was told is what is enforced. null = opened before protection existed.
+  protection        Json?
+  /// The ONE warning counter (all monitored types together). Only ever changed under a row lock by the server.
+  warningCount      Int                        @default(0) @map("warning_count")
+  integrityStatus   AiInterviewIntegrityStatus @default(NONE) @map("integrity_status")
+  terminatedAt      DateTime?                  @map("terminated_at")
+  /// Safe short text, e.g. "3rd qualifying incident (Left fullscreen); maximum 2 warnings".
+  terminationReason String?                    @map("termination_reason")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+
+  application Application            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  invite      AiInterviewInvite      @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  round       JobRound               @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  turns       AiInterviewTurn[]
+  events      AiInterviewEvent[]
+  violations  AiInterviewViolation[]
+  report      AiInterviewReport?
+
+  @@unique([applicationId, roundId])
+  @@index([tenantId, jobId, status])
+  @@index([status, lastActivityAt])
+  @@index([tenantId, integrityStatus])
+  @@map("ai_interview_sessions")
+}
+
+/// One monitored incident of an interview (protection). Metadata only: type, server time, a short detail - never
+/// screen, video or audio. Deleted with the interview (and so with the application).
+model AiInterviewViolation {
+  id             String                      @id @db.Uuid
+  tenantId       String                      @map("tenant_id") @db.Uuid
+  sessionId      String                      @map("session_id") @db.Uuid
+  applicationId  String                      @map("application_id") @db.Uuid
+  candidateId    String                      @map("candidate_id") @db.Uuid
+  type           AiInterviewViolationType
+  outcome        AiInterviewViolationOutcome
+  /// The warning it is (1..max+1 for the terminating one), or the warning it was grouped into. null = not a warning.
+  warningNumber  Int?                        @map("warning_number")
+  /// Made by the page once per incident: the same incident sent again is answered from this row (idempotent).
+  incidentId     String                      @map("incident_id")
+  /// Server time. The page's clock is never trusted.
+  occurredAt     DateTime                    @map("occurred_at")
+  detail         String?
+  acknowledgedAt DateTime?                   @map("acknowledged_at")
+  /// Device incidents: when the interview resumed with the device back.
+  resolvedAt     DateTime?                   @map("resolved_at")
+  createdAt      DateTime                    @default(now()) @map("created_at")
+
+  session AiInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, incidentId])
+  @@index([sessionId, occurredAt])
+  @@index([tenantId, applicationId])
+  @@map("ai_interview_violations")
+}
+
+/// HR's protection rules for one AI interview round (no row = the defaults). Changes apply to interviews opened
+/// afterwards; an interview keeps the rules it was opened with (ai_interview_sessions.protection).
+model AiInterviewProtectionSetting {
+  id                  String                  @id @db.Uuid
+  tenantId            String                  @map("tenant_id") @db.Uuid
+  roundId             String                  @map("round_id") @db.Uuid
+  maxWarnings         Int                     @default(2) @map("max_warnings")
+  tabSwitchMonitoring Boolean                 @default(true) @map("tab_switch_monitoring")
+  fullscreenRequired  Boolean                 @default(true) @map("fullscreen_required")
+  cameraPolicy        AiInterviewDevicePolicy @default(RECOVER) @map("camera_policy")
+  microphonePolicy    AiInterviewDevicePolicy @default(RECOVER) @map("microphone_policy")
+  multipleFacesPolicy AiInterviewFacePolicy   @default(WARN) @map("multiple_faces_policy")
+  updatedById         String?                 @map("updated_by_id") @db.Uuid
+  updatedByName       String?                 @map("updated_by_name")
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+
+  round JobRound @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  /// One row per round; tenant-scoped key (a round id of another company never matches).
+  @@unique([roundId, tenantId])
+  @@map("ai_interview_protection_settings")
+}
+
+/// One answered question: what was asked (and why) and the candidate's own words. Never overwritten.
+model AiInterviewTurn {
+  id                   String                       @id @db.Uuid
+  tenantId             String                       @map("tenant_id") @db.Uuid
+  sessionId            String                       @map("session_id") @db.Uuid
+  seq                  Int
+  kind                 AiInterviewQuestionKind
+  source               AiInterviewSource
+  topicId              String?                      @map("topic_id")
+  topic                String?
+  resumeRef            String?                      @map("resume_ref")
+  question             String
+  /// Word for word, as transcribed from the audio alone. The source of truth.
+  rawTranscript        String                       @map("raw_transcript")
+  /// The same words with technical terms written consistently (rule-based, never an AI rewrite).
+  normalizedTranscript String                       @map("normalized_transcript")
+  transcriptQuality    AiInterviewTranscriptQuality @map("transcript_quality")
+  unclearTerms         String[]                     @default([]) @map("unclear_terms")
+  /// How the interviewer read the answer when choosing the next question (STRONG, VAGUE...).
+  reading              String?
+  askedAt              DateTime                     @map("asked_at")
+  answeredAt           DateTime                     @map("answered_at")
+  answerSeconds        Float?                       @map("answer_seconds")
+  /// Browser-generated id of the upload: the same answer sent twice is saved once.
+  clientTurnId         String                       @map("client_turn_id")
+  model                String?
+  promptVersion        String?                      @map("prompt_version")
+  createdAt            DateTime                     @default(now()) @map("created_at")
+
+  session AiInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@unique([sessionId, clientTurnId])
+  @@map("ai_interview_turns")
+}
+
+/// Camera / microphone / connection events reported by the page. Facts for HR's review only: never scored, never
+/// treated as misconduct on their own.
+model AiInterviewEvent {
+  id         String   @id @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  sessionId  String   @map("session_id") @db.Uuid
+  type       String
+  occurredAt DateTime @map("occurred_at")
+  detail     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  session AiInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, occurredAt])
+  @@map("ai_interview_events")
+}
+
+/// The evidence-based report made after the interview (AiInterviewReport JSON). Advice for HR, never a decision.
+model AiInterviewReport {
+  id             String                  @id @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  sessionId      String                  @unique @map("session_id") @db.Uuid
+  status         AiInterviewReportStatus @default(PENDING)
+  report         Json?
+  overallScore   Int?                    @map("overall_score")
+  recommendation String?
+  /// Safe short text only.
+  lastError      String?                 @map("last_error")
+  attempts       Int                     @default(0)
+  model          String?
+  promptVersion  String?                 @map("prompt_version")
+  generatedAt    DateTime?               @map("generated_at")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  session AiInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+  @@map("ai_interview_reports")
+}

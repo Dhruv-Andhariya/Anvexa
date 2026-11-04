@@ -11,6 +11,21 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .config import get_settings, load_env
+from .interview import PLAN_PROMPT_FILE as INTERVIEW_PLAN_PROMPT_FILE
+from .interview import REPORT_PROMPT_FILE as INTERVIEW_REPORT_PROMPT_FILE
+from .interview import TRANSCRIBE_PROMPT_FILE as INTERVIEW_TRANSCRIBE_PROMPT_FILE
+from .interview import TURN_PROMPT_FILE as INTERVIEW_TURN_PROMPT_FILE
+from .interview import (
+    InterviewPlanRequest,
+    InterviewPlanResult,
+    InterviewReportRequest,
+    InterviewReportResult,
+    InterviewTurnRequest,
+    InterviewTurnResult,
+    plan_interview,
+    process_turn,
+    write_report,
+)
 from .jd import PROMPT_FILE
 from .jd import generate_jd as run_jd_generation
 from .llm_gateway import LLMError, LLMProvider, PromptSpec, build_provider, load_prompt
@@ -105,6 +120,22 @@ def get_screening_extract_prompt() -> PromptSpec:
 
 def get_round_questions_prompt() -> PromptSpec:
     return load_prompt(get_settings().prompts_dir / ROUND_QUESTIONS_PROMPT_FILE)
+
+
+def get_interview_plan_prompt() -> PromptSpec:
+    return load_prompt(get_settings().prompts_dir / INTERVIEW_PLAN_PROMPT_FILE)
+
+
+def get_interview_transcribe_prompt() -> PromptSpec:
+    return load_prompt(get_settings().prompts_dir / INTERVIEW_TRANSCRIBE_PROMPT_FILE)
+
+
+def get_interview_turn_prompt() -> PromptSpec:
+    return load_prompt(get_settings().prompts_dir / INTERVIEW_TURN_PROMPT_FILE)
+
+
+def get_interview_report_prompt() -> PromptSpec:
+    return load_prompt(get_settings().prompts_dir / INTERVIEW_REPORT_PROMPT_FILE)
 
 
 def _audio_error(message: str) -> JSONResponse:
@@ -251,6 +282,62 @@ def screening_extract(  # M12: finished transcript -> structured notes for HR (n
     prompt: Annotated[PromptSpec, Depends(get_screening_extract_prompt)],
 ):
     return run_screening_extract(body, provider_factory(), prompt, budget_seconds=get_settings().screening_extract_budget_seconds)
+
+
+@app.post("/v1/interview/plan", response_model=InterviewPlanResult)
+def interview_plan(  # AI technical interview: resume + job + HR questions -> the topics to cover
+    body: InterviewPlanRequest,
+    provider_factory: Annotated[Callable[[], LLMProvider], Depends(get_llm_provider)],
+    prompt: Annotated[PromptSpec, Depends(get_interview_plan_prompt)],
+):
+    return plan_interview(body, provider_factory(), prompt, budget_seconds=get_settings().interview_plan_budget_seconds)
+
+
+@app.post("/v1/interview/turn", response_model=InterviewTurnResult)
+def interview_turn(  # AI technical interview: one spoken answer -> raw + normalised transcript + the next question
+    body: InterviewTurnRequest,
+    provider_factory: Annotated[Callable[[], LLMProvider], Depends(get_llm_provider)],
+    transcribe_prompt: Annotated[PromptSpec, Depends(get_interview_transcribe_prompt)],
+    prompt: Annotated[PromptSpec, Depends(get_interview_turn_prompt)],
+):
+    try:
+        audio = base64.b64decode(body.audio.contentBase64, validate=True)
+    except (binascii.Error, ValueError):
+        return _audio_error("The recording could not be decoded.")
+    if len(audio) < 200:
+        return _audio_error("The recording is empty.")
+    try:
+        settings = get_settings()
+        return process_turn(
+            body,
+            audio,
+            provider_factory(),
+            transcribe_prompt,
+            prompt,
+            budget_seconds=settings.interview_turn_budget_seconds,
+            thinking_budget=settings.interview_thinking_budget,
+        )
+    except UnsupportedAudioError:
+        return _audio_error("This audio format is not supported.")
+
+
+@app.post("/v1/interview/speak")
+def interview_speak(  # AI technical interview: the interviewer's words -> audio/wav (same TTS as the screening)
+    body: SpeakRequest,
+    speech_factory: Annotated[Callable[[], SpeechProvider], Depends(get_speech_provider)],
+):
+    settings = get_settings()
+    result = speech_factory().synthesize(body.text, deadline=time.monotonic() + settings.screening_speech_budget_seconds)
+    return Response(content=result.data, media_type=result.mime_type, headers={"X-TTS-Model": result.model})
+
+
+@app.post("/v1/interview/report", response_model=InterviewReportResult)
+def interview_report(  # AI technical interview: saved transcript -> evidence-based report for HR (advice only)
+    body: InterviewReportRequest,
+    provider_factory: Annotated[Callable[[], LLMProvider], Depends(get_llm_provider)],
+    prompt: Annotated[PromptSpec, Depends(get_interview_report_prompt)],
+):
+    return write_report(body, provider_factory(), prompt, budget_seconds=get_settings().interview_report_budget_seconds)
 
 
 @app.post("/v1/rounds/questions", response_model=RoundQuestionsResult)

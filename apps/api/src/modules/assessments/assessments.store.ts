@@ -1,5 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { AiScreeningProgress, AtsPart, PassMode, RoundAnswer, ScreeningDecision } from '@hireflow/contracts';
+import {
+  AI_INTERVIEW_RECOMMENDATION_LABEL,
+  type AiInterviewRecommendation,
+  type AiScreeningProgress,
+  type AtsPart,
+  type PassMode,
+  type RoundAnswer,
+  type ScreeningDecision,
+} from '@hireflow/contracts';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
@@ -96,8 +104,10 @@ const STUDENT_SELECT = {
   screeningInvite: { select: { id: true } },
   screeningSession: { select: { id: true, status: true, reviewStatus: true } },
   roundInvites: { select: { roundId: true, revokedAt: true, sentAt: true, emailStatus: true } },
-  roundAttempts: { select: { roundId: true, status: true } },
+  roundAttempts: { select: { roundId: true, status: true, integrityStatus: true } },
   gdParticipants: { select: { roundId: true, attendance: true, evaluation: { select: { status: true, recommendation: true, hrDecision: true } } } },
+  aiInterviewInvites: { select: { roundId: true, sentAt: true, emailStatus: true } },
+  aiInterviewSessions: { select: { roundId: true, status: true, decision: true, report: { select: { status: true, recommendation: true } } } },
 } satisfies Prisma.ApplicationSelect;
 type StudentDbRow = Prisma.ApplicationGetPayload<{ select: typeof STUDENT_SELECT }>;
 
@@ -231,13 +241,28 @@ function roundProgress(r: StudentDbRow): Record<string, string> {
   for (const i of r.roundInvites) {
     out[i.roundId] = i.revokedAt ? 'Link revoked' : i.sentAt ? 'Invited' : i.emailStatus === 'FAILED' ? 'Invite email failed' : 'Invite queued';
   }
-  for (const a of r.roundAttempts) out[a.roundId] = a.status === 'IN_PROGRESS' ? 'Test in progress' : 'Submitted, being graded';
+  for (const a of r.roundAttempts) {
+    // ended by the warning limit: HR reviews before anything is sent (never an automatic rejection)
+    if (a.integrityStatus === 'INTEGRITY_VIOLATION_REVIEW') out[a.roundId] = 'Integrity review: test terminated (warning limit), HR to decide';
+    else out[a.roundId] = a.status === 'IN_PROGRESS' ? 'Test in progress' : 'Submitted, being graded';
+  }
   for (const g of r.gdParticipants) {
     const e = g.evaluation;
     if (!e) out[g.roundId] = GD_ATTENDANCE[g.attendance];
     else if (e.hrDecision) out[g.roundId] = `HR: ${selected(e.hrDecision)}, to confirm`;
     else if (e.status === 'OK' && e.recommendation) out[g.roundId] = `AI: ${selected(e.recommendation)}, HR to confirm`;
     else out[g.roundId] = 'Evaluated, HR to decide';
+  }
+  // AI technical interview (ai-interview module): the result is recorded only when HR decides
+  for (const i of r.aiInterviewInvites) out[i.roundId] = i.sentAt ? 'Interview invite sent' : i.emailStatus === 'FAILED' ? 'Invite email failed' : 'Invite queued';
+  for (const s of r.aiInterviewSessions) {
+    if (s.status === 'NOT_STARTED') out[s.roundId] = 'Interview link opened';
+    else if (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') out[s.roundId] = 'Interview in progress';
+    else if (s.decision) out[s.roundId] = `HR: ${s.decision === 'ADVANCE' ? 'advance' : 'reject'}, being recorded`;
+    // ended by the warning limit: an integrity review by HR, never an automatic rejection
+    else if (s.status === 'TERMINATED') out[s.roundId] = 'Integrity review: interview terminated (warning limit), HR to decide';
+    else if (s.report?.status === 'DONE' && s.report.recommendation) out[s.roundId] = `AI: ${AI_INTERVIEW_RECOMMENDATION_LABEL[s.report.recommendation as AiInterviewRecommendation] ?? s.report.recommendation}, HR to decide`;
+    else out[s.roundId] = s.status === 'INCOMPLETE' ? 'Interview incomplete, HR to decide' : 'Interview done, report being written';
   }
   return out;
 }

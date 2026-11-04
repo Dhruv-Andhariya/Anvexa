@@ -110,6 +110,10 @@ model JobRound {
   /// M18 AI group discussion (group_discussion.prisma).
   gdEvents       GdEvent[]
   gdParticipants GdParticipant[]
+  /// AI technical interview (ai_interview.prisma).
+  aiInterviewInvites  AiInterviewInvite[]
+  aiInterviewSessions AiInterviewSession[]
+  aiInterviewProtection AiInterviewProtectionSetting?
 
   @@unique([jobId, position])
   @@unique([id, tenantId])

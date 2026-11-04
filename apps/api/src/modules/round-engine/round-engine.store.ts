@@ -1,5 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { DSA_BANK, dsaTopicFor, type EmailDeliveryStatus, type ProctorEventType, type ProctorSeverity, type RoundOutcomeEmailKind } from '@hireflow/contracts';
+import {
+  DSA_BANK,
+  dsaTopicFor,
+  type AssessmentIncidentType,
+  type AssessmentIntegrityStatus,
+  type AssessmentProtectionSettings,
+  type EmailDeliveryStatus,
+  type ProctorEventType,
+  type ProctorSeverity,
+  type ProtectionCount,
+  type ProtectionOutcome,
+  type RoundOutcomeEmailKind,
+} from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
@@ -21,7 +33,7 @@ export interface InviteRow {
   lastError: string | null;
 }
 
-export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'TIMED_OUT';
+export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'TIMED_OUT' | 'TERMINATED';
 
 export interface AttemptRow {
   id: string;
@@ -40,7 +52,48 @@ export interface AttemptRow {
   revision: number;
   systemPassed: boolean | null;
   progressedAt: Date | null;
+  /** Protection rules copied at the start (AssessmentProtectionSettings JSON); null = not monitored. */
+  protection: unknown;
+  warningCount: number;
+  integrityStatus: AssessmentIntegrityStatus;
+  terminatedAt: Date | null;
+  terminationReason: string | null;
+  integrityDecision: 'ADVANCE' | 'REJECT' | null;
+  integrityReason: string | null;
+  integrityDecidedBy: string | null;
+  integrityDecidedAt: Date | null;
 }
+
+/** Fields the protection sets; never given when creating an attempt. */
+type ProtectionFields =
+  | 'protection'
+  | 'warningCount'
+  | 'integrityStatus'
+  | 'terminatedAt'
+  | 'terminationReason'
+  | 'integrityDecision'
+  | 'integrityReason'
+  | 'integrityDecidedBy'
+  | 'integrityDecidedAt';
+
+export interface IncidentRow {
+  attemptId: string;
+  type: AssessmentIncidentType;
+  outcome: ProtectionOutcome;
+  warningNumber: number | null;
+  incidentId: string;
+  occurredAt: Date;
+  detail: string | null;
+  acknowledgedAt: Date | null;
+}
+
+/** What `decide` returns under the lock: null = not accepted now (nothing stored). */
+export type IncidentVerdict = (ProtectionCount & { terminationReason: string | null }) | null;
+
+export type RecordIncidentResult =
+  | { kind: 'replay'; row: IncidentRow; attempt: AttemptRow }
+  | { kind: 'ignored'; attempt: AttemptRow }
+  | { kind: 'saved'; decision: ProtectionCount; stored: boolean; attempt: AttemptRow };
 
 /** What the emails and the assessment page need about the candidate, job and company. */
 export interface CandidateContext {
@@ -93,7 +146,14 @@ export abstract class RoundEngineStore {
   abstract attemptByInvite(inviteId: string): Promise<AttemptRow | null>;
   abstract getAttempt(attemptId: string): Promise<AttemptRow | null>;
   /** Creates the attempt, or returns the one that already exists for this invite (two tabs pressing Start). */
-  abstract createAttempt(data: Omit<AttemptRow, 'id' | 'answers' | 'codingState' | 'revision' | 'systemPassed' | 'progressedAt' | 'submittedAt' | 'status'> & { consentVersion: string; codingState?: CodingState }): Promise<AttemptRow>;
+  abstract createAttempt(
+    data: Omit<AttemptRow, 'id' | 'answers' | 'codingState' | 'revision' | 'systemPassed' | 'progressedAt' | 'submittedAt' | 'status' | ProtectionFields> & {
+      consentVersion: string;
+      codingState?: CodingState;
+      /** Protection rules shown to the candidate (null = not monitored). */
+      protection?: AssessmentProtectionSettings | null;
+    },
+  ): Promise<AttemptRow>;
   /** DSA rounds: stores the candidate's progress while the attempt is in progress (false = it is not, nothing stored). */
   abstract saveCodingState(attemptId: string, state: CodingState): Promise<boolean>;
   /** Stores the answers if the attempt is in progress and `revision` is newer. Returns the revision now stored. */
@@ -106,6 +166,21 @@ export abstract class RoundEngineStore {
   abstract releaseProgress(attemptId: string): Promise<void>;
   abstract countEvents(attemptId: string): Promise<number>;
   abstract addEvents(tenantId: string, attemptId: string, events: EventWrite[]): Promise<void>;
+
+  // ---- protection (one warning counter per attempt)
+  /**
+   * Under the attempt's row lock: a known incidentId -> its stored row; otherwise `decide` sees the locked attempt and
+   * every earlier incident, and its verdict (and the termination it may carry) is stored in the same transaction.
+   */
+  abstract recordIncident(
+    attemptId: string,
+    input: { incidentId: string; type: AssessmentIncidentType; detail: string | null; now: Date; maxRows: number },
+    decide: (attempt: AttemptRow, prior: IncidentRow[]) => IncidentVerdict,
+  ): Promise<RecordIncidentResult>;
+  abstract incidents(attemptId: string): Promise<IncidentRow[]>;
+  abstract acknowledgeIncident(attemptId: string, warningNumber: number, at: Date): Promise<boolean>;
+  /** HR's decision on a terminated attempt in review, once (false = not in review / already decided). */
+  abstract decideIntegrity(tenantId: string, attemptId: string, d: { decision: 'ADVANCE' | 'REJECT'; reason: string; by: string | null }, at: Date): Promise<boolean>;
 
   // ---- progression / emails
   abstract queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string): Promise<boolean>;
@@ -133,7 +208,7 @@ export abstract class RoundEngineStore {
   abstract forApplication(
     tenantId: string,
     applicationId: string,
-  ): Promise<{ invites: InviteRow[]; attempts: AttemptRow[]; events: EventRow[]; outcomeEmails: OutcomeEmailRow[] } | null>;
+  ): Promise<{ invites: InviteRow[]; attempts: AttemptRow[]; events: EventRow[]; outcomeEmails: OutcomeEmailRow[]; incidents: IncidentRow[] } | null>;
   abstract revokeInvite(tenantId: string, applicationId: string, roundId: string, byId: string | null, at: Date): Promise<boolean>;
   /** A FAILED invitation goes back to the queue (a new link is made when it is sent). */
   abstract requeueFailedInvite(tenantId: string, applicationId: string, roundId: string): Promise<boolean>;
@@ -203,6 +278,7 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
         startedAt: data.startedAt,
         deadlineAt: data.deadlineAt,
         ...(data.codingState ? { codingState: data.codingState as unknown as Prisma.InputJsonObject } : {}),
+        ...(data.protection ? { protection: data.protection as unknown as Prisma.InputJsonObject } : {}),
       },
       skipDuplicates: true,
     });
@@ -251,6 +327,73 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
 
   countEvents(attemptId: string) {
     return this.db.proctorEvent.count({ where: { attemptId } });
+  }
+
+  async recordIncident(
+    attemptId: string,
+    input: { incidentId: string; type: AssessmentIncidentType; detail: string | null; now: Date; maxRows: number },
+    decide: (attempt: AttemptRow, prior: IncidentRow[]) => IncidentVerdict,
+  ): Promise<RecordIncidentResult> {
+    return this.db.$transaction(async (tx) => {
+      // the row lock: reports of one attempt are decided one after the other (the counter has one writer)
+      await tx.$queryRaw`SELECT 1 AS locked FROM round_attempts WHERE id = ${attemptId}::uuid FOR UPDATE`;
+      const attempt = toAttempt(await tx.roundAttempt.findUniqueOrThrow({ where: { id: attemptId } }));
+      const existing = await tx.roundProtectionIncident.findUnique({ where: { attemptId_incidentId: { attemptId, incidentId: input.incidentId } } });
+      if (existing) return { kind: 'replay' as const, row: toIncident(existing), attempt };
+      const prior = (await tx.roundProtectionIncident.findMany({ where: { attemptId }, orderBy: { occurredAt: 'asc' } })).map(toIncident);
+      const verdict = decide(attempt, prior);
+      if (!verdict) return { kind: 'ignored' as const, attempt };
+      const { terminationReason, ...decision } = verdict;
+      const counted = decision.outcome === 'WARNING' || decision.outcome === 'TERMINATED';
+      const stored = counted || prior.length < input.maxRows;
+      if (stored) {
+        await tx.roundProtectionIncident.create({
+          data: {
+            id: uuidv7(),
+            tenantId: attempt.tenantId,
+            attemptId,
+            applicationId: attempt.applicationId,
+            type: input.type,
+            outcome: decision.outcome,
+            warningNumber: decision.warningNumber,
+            incidentId: input.incidentId,
+            occurredAt: input.now,
+            detail: input.detail,
+          },
+        });
+      }
+      if (counted) {
+        await tx.roundAttempt.update({
+          where: { id: attemptId },
+          data: {
+            warningCount: decision.warningCount,
+            // the test ends with the answers saved so far; the result waits for HR (no email until HR decided)
+            ...(decision.terminate
+              ? { status: 'TERMINATED' as const, submittedAt: input.now, terminatedAt: input.now, terminationReason: terminationReason?.slice(0, 300) ?? null, integrityStatus: 'INTEGRITY_VIOLATION_REVIEW' as const }
+              : {}),
+          },
+        });
+      }
+      const fresh = toAttempt(await tx.roundAttempt.findUniqueOrThrow({ where: { id: attemptId } }));
+      return { kind: 'saved' as const, decision, stored, attempt: fresh };
+    });
+  }
+
+  async incidents(attemptId: string) {
+    return (await this.db.roundProtectionIncident.findMany({ where: { attemptId }, orderBy: { occurredAt: 'asc' }, take: 500 })).map(toIncident);
+  }
+
+  async acknowledgeIncident(attemptId: string, warningNumber: number, at: Date) {
+    const r = await this.db.roundProtectionIncident.updateMany({ where: { attemptId, warningNumber, outcome: 'WARNING', acknowledgedAt: null }, data: { acknowledgedAt: at } });
+    return r.count > 0;
+  }
+
+  async decideIntegrity(tenantId: string, attemptId: string, d: { decision: 'ADVANCE' | 'REJECT'; reason: string; by: string | null }, at: Date) {
+    const r = await this.db.roundAttempt.updateMany({
+      where: { id: attemptId, tenantId, status: 'TERMINATED', integrityStatus: 'INTEGRITY_VIOLATION_REVIEW', integrityDecision: null },
+      data: { integrityStatus: 'REVIEWED', integrityDecision: d.decision, integrityReason: d.reason, integrityDecidedBy: d.by, integrityDecidedAt: at },
+    });
+    return r.count > 0;
   }
 
   async addEvents(tenantId: string, attemptId: string, events: EventWrite[]) {
@@ -404,7 +547,13 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
 
   async unprogressedAttempts(finishedBefore: Date, limit: number) {
     const rows = await this.db.roundAttempt.findMany({
-      where: { status: { not: 'IN_PROGRESS' }, progressedAt: null, submittedAt: { lt: finishedBefore } },
+      where: {
+        status: { not: 'IN_PROGRESS' },
+        progressedAt: null,
+        submittedAt: { lt: finishedBefore },
+        // a terminated attempt waiting for HR is only retried until it is graded (no next step before HR decided)
+        NOT: { integrityStatus: 'INTEGRITY_VIOLATION_REVIEW', systemPassed: { not: null } },
+      },
       orderBy: { submittedAt: 'asc' },
       take: limit,
     });
@@ -419,10 +568,15 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
       this.db.roundAttempt.findMany({ where: { tenantId, applicationId } }),
       this.db.roundOutcomeEmail.findMany({ where: { tenantId, applicationId } }),
     ]);
-    const events = attempts.length
-      ? await this.db.proctorEvent.findMany({ where: { tenantId, attemptId: { in: attempts.map((a) => a.id) } }, orderBy: { occurredAt: 'asc' } })
-      : [];
+    const ids = attempts.map((a) => a.id);
+    const [events, incidents] = attempts.length
+      ? await Promise.all([
+          this.db.proctorEvent.findMany({ where: { tenantId, attemptId: { in: ids } }, orderBy: { occurredAt: 'asc' } }),
+          this.db.roundProtectionIncident.findMany({ where: { tenantId, attemptId: { in: ids } }, orderBy: { occurredAt: 'asc' } }),
+        ])
+      : [[], []];
     return {
+      incidents: incidents.map(toIncident),
       invites: invites.map(toInvite),
       attempts: attempts.map(toAttempt),
       outcomeEmails: outcomeEmails.map(toOutcome),
@@ -484,6 +638,28 @@ function toAttempt(r: AttemptDb): AttemptRow {
     revision: r.revision,
     systemPassed: r.systemPassed,
     progressedAt: r.progressedAt,
+    protection: r.protection,
+    warningCount: r.warningCount,
+    integrityStatus: r.integrityStatus,
+    terminatedAt: r.terminatedAt,
+    terminationReason: r.terminationReason,
+    integrityDecision: r.integrityDecision === 'ADVANCE' || r.integrityDecision === 'REJECT' ? r.integrityDecision : null,
+    integrityReason: r.integrityReason,
+    integrityDecidedBy: r.integrityDecidedBy,
+    integrityDecidedAt: r.integrityDecidedAt,
+  };
+}
+
+function toIncident(r: Prisma.RoundProtectionIncidentGetPayload<object>): IncidentRow {
+  return {
+    attemptId: r.attemptId,
+    type: r.type,
+    outcome: r.outcome,
+    warningNumber: r.warningNumber,
+    incidentId: r.incidentId,
+    occurredAt: r.occurredAt,
+    detail: r.detail,
+    acknowledgedAt: r.acknowledgedAt,
   };
 }
 

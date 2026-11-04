@@ -12,4 +12,6 @@ export * from './schemas/sql-bank';
 export * from './schemas/assessments';
 export * from './schemas/round-engine';
 export * from './schemas/group-discussion';
+export * from './schemas/ai-interview';
+export * from './schemas/protection';
 export * from './events';

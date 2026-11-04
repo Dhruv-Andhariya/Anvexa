@@ -3,6 +3,7 @@
 import { QUESTION_KINDS, type ApplicationRoundEngine, type RoundEngineRound, type StudentAssessment, type StudentRoundReview } from '@hireflow/contracts';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { AiInterviewPanel } from '@/components/ai-interview-panel';
 import { AiScreeningPanel } from '@/components/ai-screening-panel';
 import { OnlineTestPanel } from '@/components/online-test-panel';
 import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui';
@@ -123,8 +124,13 @@ export function StudentReview({ applicationId }: { applicationId: string }) {
             review={r}
             step={i + 3}
             onChanged={setData}
+            onReload={() => void getStudentAssessment(applicationId).then(setData).catch(() => undefined)}
             online={engine?.rounds.find((e) => e.roundId === r.round.id)}
-            onOnlineChanged={setEngine}
+            onOnlineChanged={(d) => {
+              setEngine(d);
+              // an integrity decision may change the round's result (HR override): show it at once
+              void getStudentAssessment(applicationId).then(setData).catch(() => undefined);
+            }}
           />
         ))
       )}
@@ -137,6 +143,7 @@ function RoundReview({
   review,
   step,
   onChanged,
+  onReload,
   online,
   onOnlineChanged,
 }: {
@@ -144,6 +151,8 @@ function RoundReview({
   review: StudentRoundReview;
   step: number;
   onChanged: (d: StudentAssessment) => void;
+  /** The round result changed elsewhere (AI interview decision): load the review again. */
+  onReload: () => void;
   /** How the round engine ran this round online (invite, attempt, proctoring); undefined when not loaded. */
   online?: RoundEngineRound;
   onOnlineChanged: (d: ApplicationRoundEngine) => void;
@@ -183,7 +192,9 @@ function RoundReview({
         </div>
       </dl>
 
-      {online && <OnlineTestPanel applicationId={applicationId} round={online} onChanged={onOnlineChanged} />}
+      {/* a round a module runs (GD, AI interview) has its own panel, not the "run by HR" note */}
+      {online && (online.online || r.runBy !== 'MODULE') && <OnlineTestPanel applicationId={applicationId} round={online} onChanged={onOnlineChanged} />}
+      {r.type === 'AI_INTERVIEW' && <AiInterviewPanel applicationId={applicationId} roundId={r.id} onDecided={onReload} />}
 
       {review.override && (
         <p className="rounded-md border border-border bg-accent-soft px-3 py-2 text-sm">

@@ -33,6 +33,16 @@ const nextConfig: NextConfig = {
           { key: "Permissions-Policy", value: "camera=(self), microphone=(), fullscreen=(self)" },
         ],
       },
+      // AI technical interview page: same rules for its personal link; camera (preview only) and microphone are needed.
+      {
+        source: "/interview/:token*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), autoplay=(self), fullscreen=(self)" },
+        ],
+      },
       // M18 group discussion page: same rules for its personal link; camera and microphone are needed (live video room).
       {
         source: "/gd/:token*",

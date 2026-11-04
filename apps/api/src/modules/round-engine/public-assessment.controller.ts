@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Post, Put, UseGuards } from '@nestjs/common';
-import type { AssessmentPublicView, SaveAssessmentAnswersResult } from '@hireflow/contracts';
+import type { AssessmentPublicView, AssessmentViolationResult, SaveAssessmentAnswersResult } from '@hireflow/contracts';
 import { featureFlag } from '../../common/feature-flags';
 import { rateLimit } from '../applications';
 import { Public } from '../auth';
@@ -59,5 +59,23 @@ export class PublicAssessmentController {
   @UseGuards(rateLimit('assessment'))
   events(@Headers(TOKEN_HEADER) token: string | undefined, @Body() body: unknown): Promise<{ accepted: number }> {
     return this.engine.events(token, body);
+  }
+
+  /** POST /api/v1/public/assessment/violation - body { incidentId, type, detail? }; the server decides if it is a warning. */
+  @Post('violation')
+  @HttpCode(200)
+  @UseGuards(rateLimit('assessment'))
+  @Header('Cache-Control', 'no-store')
+  violation(@Headers(TOKEN_HEADER) token: string | undefined, @Body() body: unknown): Promise<AssessmentViolationResult> {
+    return this.engine.violation(token, body);
+  }
+
+  /** POST /api/v1/public/assessment/violation/ack - body { warningNumber } (the candidate read the warning). */
+  @Post('violation/ack')
+  @HttpCode(200)
+  @UseGuards(rateLimit('assessment'))
+  @Header('Cache-Control', 'no-store')
+  acknowledge(@Headers(TOKEN_HEADER) token: string | undefined, @Body() body: unknown): Promise<{ acknowledged: boolean }> {
+    return this.engine.acknowledge(token, body);
   }
 }

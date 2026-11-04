@@ -42,8 +42,36 @@ enum RoundAttemptStatus {
   IN_PROGRESS
   SUBMITTED // the candidate submitted
   TIMED_OUT // the time limit ran out: the saved answers were submitted by the server
+  TERMINATED // ended by the server: more protection warnings than allowed (saved answers kept; HR reviews first)
 
   @@map("round_attempt_status")
+}
+
+/// Assessment protection (one warning counter per attempt). Same rules as the AI interview (contracts protection.ts).
+enum RoundIncidentType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  FULLSCREEN_EXIT
+  MULTIPLE_FACES
+
+  @@map("round_incident_type")
+}
+
+enum RoundIncidentOutcome {
+  WARNING
+  TERMINATED
+  RECORDED
+  GROUPED
+
+  @@map("round_incident_outcome")
+}
+
+enum RoundIntegrityStatus {
+  NONE
+  INTEGRITY_VIOLATION_REVIEW // terminated by the warning limit: the result waits for HR (no email until then)
+  REVIEWED
+
+  @@map("round_integrity_status")
 }
 
 /// The one attempt of a candidate at one round. The server owns the clock (deadline_at) and the answers; the result
@@ -73,6 +101,18 @@ model RoundAttempt {
   systemPassed   Boolean?           @map("system_passed")
   /// Set once the next step (next invite / decision email) was queued, so it happens exactly once.
   progressedAt   DateTime?          @map("progressed_at")
+  /// Protection rules this attempt runs with (AssessmentProtectionSettings JSON), copied at the start. null = not monitored.
+  protection          Json?
+  /// The ONE warning counter; only changed under the attempt's row lock.
+  warningCount        Int                  @default(0) @map("warning_count")
+  integrityStatus     RoundIntegrityStatus @default(NONE) @map("integrity_status")
+  terminatedAt        DateTime?            @map("terminated_at")
+  terminationReason   String?              @map("termination_reason")
+  /// HR's integrity decision on a terminated attempt (ADVANCE / REJECT), with the reason; then the next step follows.
+  integrityDecision   String?              @map("integrity_decision")
+  integrityReason     String?              @map("integrity_reason")
+  integrityDecidedBy  String?              @map("integrity_decided_by")
+  integrityDecidedAt  DateTime?            @map("integrity_decided_at")
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @updatedAt @map("updated_at")
 
@@ -80,6 +120,7 @@ model RoundAttempt {
   round       JobRound       @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
   invite      RoundInvite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
   events      ProctorEvent[]
+  incidents   RoundProtectionIncident[]
 
   @@unique([applicationId, roundId])
   @@index([status, deadlineAt])
@@ -127,6 +168,30 @@ model ProctorEvent {
   @@index([attemptId, occurredAt])
   @@index([tenantId])
   @@map("round_proctor_events")
+}
+
+/// One monitored incident of an attempt (metadata only: type, server time, short detail - never images).
+model RoundProtectionIncident {
+  id             String               @id @db.Uuid
+  tenantId       String               @map("tenant_id") @db.Uuid
+  attemptId      String               @map("attempt_id") @db.Uuid
+  applicationId  String               @map("application_id") @db.Uuid
+  type           RoundIncidentType
+  outcome        RoundIncidentOutcome
+  warningNumber  Int?                 @map("warning_number")
+  /// Made by the page once per incident: sent again = answered from this row.
+  incidentId     String               @map("incident_id")
+  occurredAt     DateTime             @map("occurred_at")
+  detail         String?
+  acknowledgedAt DateTime?            @map("acknowledged_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  attempt RoundAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, incidentId])
+  @@index([attemptId, occurredAt])
+  @@index([tenantId, applicationId])
+  @@map("round_protection_incidents")
 }
 
 enum RoundOutcomeEmailKind {

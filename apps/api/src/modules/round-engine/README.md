@@ -89,7 +89,12 @@ await roundEngine.recordModuleResult(tenantId, 'SQL', {
 The result and every answer show on the HR **Assessments** page (code in a monospace block), and the student moves on
 exactly as after an online test (next invitation or email, queued once). A module can only record rounds of its own
 type (`409 ROUND_NOT_FOR_MODULE`) and of the given company (`404`). The GD module connects itself when
-`FEATURE_GROUP_DISCUSSION` is on, DSA when `DSA_ROUNDS` is on. Not connected yet: SQL, AI interview.
+`FEATURE_GROUP_DISCUSSION` is on, DSA when `DSA_ROUNDS` is on, the AI technical interview (`ai-interview` module) when
+`FEATURE_AI_INTERVIEW` is on. Not connected yet: SQL.
+
+`recordModuleResult(tenantId, module, input, hrDecision?)`: a module whose result is decided by HR (the AI interview)
+passes `hrDecision = { passed, reason, actor }`. When it differs from the score-based result it is saved as HR's override
+(reason + audit, exactly like the Assessments page), and the next step follows HR's decision.
 
 ## Not yet
 - No event bus (M30): progression is done here, idempotently, instead of a central orchestrator.
@@ -103,3 +108,23 @@ type (`409 ROUND_NOT_FOR_MODULE`) and of the given company (`404`). The GD modul
 - Other modules may import this module ONLY through `index.ts` (never its internals or tables).
 - Events this module sends/listens to are defined in `packages/contracts` (see doc section 10.5).
 - "Done" means: code behind a feature flag, tests, events in contracts, audit logging, retries, this README updated (doc 18.1).
+
+## Test protection (multiple-choice tests: Aptitude & English, Technical MCQ, custom tests)
+
+One warning counter per attempt, the same rules as the AI technical interview (`countProtectionIncident` in
+`packages/contracts/src/schemas/protection.ts`; this module's part: `assessment-protection.ts`).
+
+- The page (`careers-site /assessment/[token]`) reports incidents: `TAB_SWITCH` (hidden), `WINDOW_BLUR` (other window
+  > 2 s), `FULLSCREEN_EXIT`, `MULTIPLE_FACES` (2+ faces for 5 s, counted on the candidate's device - no image is sent).
+  `POST /public/assessment/violation { incidentId, type }` decides under the attempt's row lock (`SELECT ... FOR UPDATE`):
+  same `incidentId` = same answer, a second event within 3 s of a counted one is GROUPED, otherwise warning N.
+- Default (env): 2 warnings, then the next incident ends the test (`status TERMINATED`) with the answers saved so far.
+  The attempt is graded (HR sees the score) but **held**: no outcome email / next invite until HR decides
+  (`POST /round-engine/applications/:applicationId/rounds/:roundId/integrity-decision { decision, reason }`, `jobs.write`).
+  A decision against the score is stored as HR's override; then the usual next step runs once.
+- Rules are copied onto the attempt at the start (`round_attempts.protection`); attempts started before have none and
+  are not monitored. Env: `ASSESSMENT_PROTECTION`, `ASSESSMENT_MAX_WARNINGS`, `ASSESSMENT_TAB_MONITORING`,
+  `ASSESSMENT_FULLSCREEN_REQUIRED`, `ASSESSMENT_FACE_POLICY` (WARN / RECORD / OFF). DSA coding rounds keep their own
+  proctoring (dsa module).
+- Audit: `assessment.protection_warning`, `assessment.terminated`, `assessment.integrity_decided`.
+- Migration `20261104140000_assessment_protection` (additive). Tests: `tests/round-engine/assessment-protection.test.ts`.
