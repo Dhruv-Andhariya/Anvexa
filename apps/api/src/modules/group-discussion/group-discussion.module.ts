@@ -2,6 +2,8 @@ import { Inject, Module, type OnModuleInit } from '@nestjs/common';
 import { isFeatureOn } from '../../common/feature-flags';
 import { ApplicationsModule } from '../applications';
 import { AssessmentsModule } from '../assessments';
+import { PipelineModule } from '../pipeline';
+import { RoundEngineModule } from '../round-engine';
 import { RoundModules, RoundsConfigModule } from '../rounds-config';
 import { TenantsModule } from '../tenants';
 import { GdLiveService } from './gd-live.service';
@@ -22,7 +24,7 @@ import { GdAudioStorage, LocalGdAudioStorage } from './storage';
  * confirms the selection. Off with FEATURE_GROUP_DISCUSSION=off.
  */
 @Module({
-  imports: [TenantsModule, RoundsConfigModule, ApplicationsModule, AssessmentsModule],
+  imports: [TenantsModule, RoundsConfigModule, ApplicationsModule, AssessmentsModule, PipelineModule, RoundEngineModule],
   controllers: [HrGdController, PublicGdController],
   providers: [
     GdService,

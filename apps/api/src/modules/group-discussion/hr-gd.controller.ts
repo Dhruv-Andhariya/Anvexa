@@ -192,6 +192,14 @@ export class HrGdController {
     return this.resultsService.decide(tenantId, batchId, participantId, body, actor);
   }
 
+  /** PUT .../batches/:batchId/students/:participantId/rubric - body { scores: [{ parameter, marks }], remarks }; HR's evaluator form. */
+  @RequirePermission('jobs.write')
+  @Put('batches/:batchId/students/:participantId/rubric')
+  async scoreRubric(@Param('batchId', ParseUUIDPipe) batchId: string, @Param('participantId', ParseUUIDPipe) participantId: string, @Body() body: unknown): Promise<GdResults> {
+    const [tenantId, actor] = await Promise.all([this.tenant.currentTenantId(), this.tenant.currentActor()]);
+    return this.resultsService.scoreRubric(tenantId, batchId, participantId, body, actor);
+  }
+
   /** PUT .../private-talks/:talkId/include - body { include }; the group is evaluated again. */
   @RequirePermission('jobs.write')
   @Put('private-talks/:talkId/include')

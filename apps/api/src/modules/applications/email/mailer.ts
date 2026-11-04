@@ -139,7 +139,36 @@ function mailErrorText(err: unknown): string {
   }
 }
 
+/**
+ * Domains that can never belong to a real applicant: the reserved example / test names (RFC 2606, RFC 6761) and local
+ * names. Demo scripts, seeds and tests use them, so mail to them is refused before it leaves: no demo or test
+ * address ever gets a link. The refusal is permanent (SMTP 550), so it is never retried.
+ */
+const RESERVED_DOMAIN = /(^|\.)(example\.(com|net|org)|example|test|invalid|localhost|local)$/i;
+
+export function isReservedAddress(to: string): boolean {
+  const domain = to.trim().split('@').pop() ?? '';
+  return !domain || !to.includes('@') || RESERVED_DOMAIN.test(domain.replace(/\.$/, ''));
+}
+
+/** Wraps the real mailer: refuses reserved demo / test addresses (see isReservedAddress). */
+export class ApplicantOnlyMailer implements Mailer {
+  constructor(readonly inner: Mailer) {}
+  get enabled() {
+    return this.inner.enabled;
+  }
+  async send(to: string, message: EmailMessage): Promise<void> {
+    if (isReservedAddress(to)) throw new MailError('EENVELOPE: demo or test address (reserved domain), not sent', 550);
+    return this.inner.send(to, message);
+  }
+}
+
 export function mailerFromEnv(env: NodeJS.ProcessEnv = process.env): Mailer {
+  const inner = rawMailerFromEnv(env);
+  return inner.enabled ? new ApplicantOnlyMailer(inner) : inner;
+}
+
+function rawMailerFromEnv(env: NodeJS.ProcessEnv): Mailer {
   const gmailUser = env.GMAIL_USER?.trim();
   // Google shows App Passwords in groups of 4 ("abcd efgh ijkl mnop"); the spaces are not part of it.
   const gmailPass = env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '');

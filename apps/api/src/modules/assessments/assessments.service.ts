@@ -108,6 +108,22 @@ export class AssessmentsService {
     });
   }
 
+  // ---------- pipeline module (in-process, through index.ts) ----------
+
+  /** Round results of a job or of one student, as stored (HR override included in `override`). */
+  resultsFor(tenantId: string, where: { jobId: string } | { applicationId: string }) {
+    return this.guard(() => this.store.listResults(tenantId, where));
+  }
+
+  /** The students of a job who reached the rounds (contact details included: HR views only). */
+  studentsOf(tenantId: string, jobId: string) {
+    return this.guard(() => this.store.listStudents(tenantId, jobId));
+  }
+
+  jobTitle(tenantId: string, jobId: string) {
+    return this.guard(async () => (await this.store.getJob(tenantId, jobId))?.title ?? null);
+  }
+
   // ---------- HR ----------
 
   async jobs(tenantId: string): Promise<AssessmentJob[]> {

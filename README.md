@@ -110,6 +110,12 @@ Full guide: [`docs/ASSESSMENT_ROUNDS.md`](docs/ASSESSMENT_ROUNDS.md).
 - **Round engine (teammate):** `RoundsConfigService.forRoundEngine()` to read a job's rounds, `lockForAttempts()`,
   then `AssessmentsService.record()` after every round. See the guide, section 6.
 
+### 6b. Hiring pipeline rules — `pipeline`
+Between the rounds: the Stage 2 overall criterion (all technical rounds passed and/or a total % across DSA, SQL and GD),
+specific rejection reasons per student, a per-job switch for rejection emails, HR's GD rubric (evaluator form on the GD
+results page), and the **Personal interview** page (students who cleared the technical interview, call status and notes,
+CSV export). Guide: [docs/HIRING_PIPELINE.md](docs/HIRING_PIPELINE.md).
+
 ### 7. Audit log — `audit` (M32)
 - Every important action (login, company changes, invitations, job created, JD generated/edited/approved, publish, resume downloaded) is written to `audit_logs`.
 

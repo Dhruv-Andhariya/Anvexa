@@ -511,7 +511,20 @@ export const gdResultStudentSchema = z.object({
     .nullable(),
   /** HR's override (null = follow the AI). */
   hrDecision: z.object({ decision: gdRecommendationSchema, reason: z.string(), by: z.string().nullable(), at: z.string() }).nullable(),
-  /** What happens on "Confirm selection". Absent students are never selected. */
+  /** HR's rubric scores (only when the round has a rubric); null = not scored yet. */
+  rubric: z
+    .object({
+      scores: z.array(z.object({ parameter: z.string(), marks: z.number() })),
+      total: z.number(),
+      maxTotal: z.number(),
+      /** What the pass rule decided from these marks. */
+      passed: z.boolean(),
+      remarks: z.string(),
+      at: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** What happens on "Confirm selection": HR's decision, else the rubric result, else the AI. Absent = never selected. */
   finalDecision: gdRecommendationSchema,
   resultEmail: z.object({ status: z.string(), sentAt: z.string().nullable() }).nullable(),
 });
@@ -535,6 +548,8 @@ export const gdResultsSchema = z.object({
   sessionAudio: gdSessionAudioSchema.nullable(),
   /** Why the whole-session audio could not be built (HR can try again). */
   sessionAudioError: z.string().nullable(),
+  /** HR's rubric of this GD round (null = none: the AI's overall score decides). */
+  rubric: z.array(z.object({ name: z.string(), maxMarks: z.number().int() })).nullable().optional(),
   students: z.array(gdResultStudentSchema),
   privateTalks: z.array(gdPrivateTalkSchema),
   activity: z.array(gdActivitySchema),

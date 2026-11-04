@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { applicationRef, buildConfirmationEmail } from '../../src/modules/applications/email/confirmation-email';
-import { DisabledMailer, MailError, SmtpMailer, mailErrorReason, mailerFromEnv, smtpResponseCode, smtpUrlOptions } from '../../src/modules/applications/email/mailer';
+import { ApplicantOnlyMailer, DisabledMailer, MailError, SmtpMailer, isReservedAddress, mailErrorReason, mailerFromEnv as guardedMailerFromEnv, smtpResponseCode, smtpUrlOptions, type Mailer } from '../../src/modules/applications/email/mailer';
+
+/** The SMTP mailer inside the applicant-only guard (the transport options live there). */
+const mailerFromEnv = (env: NodeJS.ProcessEnv): Mailer => {
+  const m = guardedMailerFromEnv(env);
+  return m instanceof ApplicantOnlyMailer ? m.inner : m;
+};
 
 const input = {
   candidateName: 'Asha Patel',
@@ -46,6 +52,31 @@ describe('confirmation email', () => {
   });
 
   it('short reference is stable and upper-case', () => expect(applicationRef('0192f3a1-7c2e-7a10-8b2c-123456789abc')).toBe('HF-56789ABC'));
+});
+
+describe('only real applicants get email (no demo or test address)', () => {
+  it('every configured mailer is wrapped by the applicant-only guard', () => {
+    expect(guardedMailerFromEnv({ SMTP_URL: 'smtp://localhost:1025' })).toBeInstanceOf(ApplicantOnlyMailer);
+    expect(guardedMailerFromEnv({ GMAIL_USER: 'a@gmail.com', GMAIL_APP_PASSWORD: 'abcd efgh ijkl mnop' })).toBeInstanceOf(ApplicantOnlyMailer);
+    expect(guardedMailerFromEnv({})).toBeInstanceOf(DisabledMailer);
+  });
+
+  it('recognises reserved demo / test domains, and nothing else', () => {
+    for (const a of ['student.1791964478216@example.com', 'x@example.org', 'x@mail.example.net', 'demo.hr@hireflow.local', 'a@b.test', 'a@b.invalid', 'a@localhost', 'a@x.example', 'no-at-sign', 'a@'])
+      expect(isReservedAddress(a), a).toBe(true);
+    for (const a of ['asha@gmail.com', 'naina@joyride.city', 'student@college.ac.in', 'x@examples.com', 'x@example.com.au', 'x@testing.io'])
+      expect(isReservedAddress(a), a).toBe(false);
+  });
+
+  it('refuses a reserved address permanently (SMTP 550, never retried) and never hands it to the server', async () => {
+    const sent: string[] = [];
+    const m = new ApplicantOnlyMailer({ enabled: true, send: async (to) => void sent.push(to) });
+    const err = await m.send('student@example.com', { subject: 's', text: 't', html: 'h' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MailError);
+    expect((err as MailError).responseCode).toBe(550);
+    await m.send('asha@gmail.com', { subject: 's', text: 't', html: 'h' });
+    expect(sent).toEqual(['asha@gmail.com']);
+  });
 });
 
 describe('mailerFromEnv', () => {

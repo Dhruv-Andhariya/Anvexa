@@ -6,6 +6,7 @@ import { PASS_MODES, messagesUnder, move, newQuestion, passMarkHint, type RoundD
 import { Button, inputClass } from '../ui';
 import { AiGeneratePanel } from './ai-generate-panel';
 import { InterviewProtectionSettings } from './interview-protection-settings';
+import { GdRubricSettings } from './gd-rubric-settings';
 import { QuestionEditor } from './question-editor';
 
 const ROUND_TYPE_KEYS = Object.keys(ROUND_TYPES) as RoundType[];
@@ -181,6 +182,9 @@ export function RoundCard({
           </div>
 
           {round.type === 'AI_INTERVIEW' && <InterviewProtectionSettings jobId={jobId} roundId={round.id} readOnly={disabled} />}
+          {round.type === 'GROUP_DISCUSSION' && (
+            <GdRubricSettings jobId={jobId} roundId={round.id} maxScore={round.passMode === 'INTERVIEWER_SCORE' && Number(round.passMaxScore) > 0 ? Number(round.passMaxScore) : null} readOnly={disabled} />
+          )}
 
           <section aria-label="Questions" className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
