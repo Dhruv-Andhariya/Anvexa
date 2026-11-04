@@ -23,6 +23,7 @@ import {
 import { isFeatureOn } from '../../common/feature-flags';
 import { AssessmentsService } from '../assessments';
 import { AuditService } from '../audit';
+import { PipelineService } from '../pipeline';
 import { RoundModules, RoundsConfigService, type RoundsForEngine } from '../rounds-config';
 import type { Actor } from '../tenants';
 import {
@@ -134,6 +135,8 @@ export class RoundEngineService {
     @Inject(ROUND_ENGINE_CLOCK) private readonly now: () => Date,
     /** Round modules (DSA, SQL, AI interview) that take students; none connected = HR runs those rounds. */
     @Optional() @Inject(RoundModules) private readonly modules: RoundModules = new RoundModules(),
+    /** Pipeline rules (Stage 2 overall criterion, rejection emails on / off). None = every round's own rule only. */
+    @Optional() @Inject(PipelineService) private readonly pipeline: PipelineService | null = null,
   ) {}
 
   // ---------------------------------------------------------------- candidate (public, token)
@@ -379,10 +382,11 @@ export class RoundEngineService {
       if (!(await this.store.claimProgress(attempt.id, this.now()))) return; // another process did it
       // the outcome HR sees (an HR override made before this point included)
       // a GD round next: no email here - the group-discussion module adds the student to its pool and invites them
-      const step = this.next(config.rounds, round, recorded.outcome === 'PASSED');
+      let step: NextStep;
+      let applied: StepEffect;
       try {
-        if (step.kind === 'INVITE') await this.store.queueInvite(attempt.tenantId, attempt.applicationId, attempt.jobId, step.round.id);
-        else if (step.kind === 'EMAIL') await this.store.queueOutcomeEmail(attempt.tenantId, attempt.applicationId, round.id, step.email, step.nextRoundName);
+        step = await this.nextFor(attempt.tenantId, attempt.jobId, attempt.applicationId, config.rounds, round, recorded.outcome === 'PASSED');
+        applied = await this.applyStep(attempt.tenantId, attempt.applicationId, attempt.jobId, round.id, step);
       } catch (err) {
         await this.store.releaseProgress(attempt.id);
         throw err;
@@ -397,6 +401,7 @@ export class RoundEngineService {
           roundId: round.id,
           outcome: recorded.outcome,
           next: describeStep(step),
+          ...applied,
         },
       });
     } catch (err) {
@@ -417,11 +422,14 @@ export class RoundEngineService {
    * completed when it is the first round, and no result in this round yet. Rounds that are plain online tests are the
    * round engine's own. The module keeps track of whom it already invited.
    */
-  waitingForModule(module: RoundModule, opts: { tenantId?: string; limit?: number } = {}) {
+  async waitingForModule(module: RoundModule, opts: { tenantId?: string; limit?: number } = {}) {
     // DSA rounds are invited and run by this engine itself (roundKind CODING), never handed to a module
-    if (module === 'DSA') return Promise.resolve([]);
+    if (module === 'DSA') return [];
     const types = (Object.entries(ROUND_MODULE_OF) as [RoundType, RoundModule][]).filter(([, m]) => m === module).map(([t]) => t);
-    return this.store.moduleCandidates(types, Math.min(Math.max(opts.limit ?? 100, 1), 500), opts.tenantId);
+    const rows = await this.store.moduleCandidates(types, Math.min(Math.max(opts.limit ?? 100, 1), 500), opts.tenantId);
+    if (!this.pipeline) return rows;
+    const allowed = await Promise.all(rows.map((r) => this.pipeline!.gateAllows(r.tenantId, r.jobId, r.applicationId, r.roundId)));
+    return rows.filter((_, i) => allowed[i]);
   }
 
   /**
@@ -447,18 +455,63 @@ export class RoundEngineService {
       await this.assessments.override(tenantId, applicationId, round.id, { passed: hrDecision.passed, reason: hrDecision.reason }, hrDecision.actor);
       recorded = { ...recorded, outcome: hrDecision.passed ? 'PASSED' : 'FAILED' };
     }
-    const step = this.next(config.rounds, round, recorded.outcome === 'PASSED');
-    if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, ctx.jobId, step.round.id);
-    else if (step.kind === 'EMAIL') await this.store.queueOutcomeEmail(tenantId, applicationId, round.id, step.email, step.nextRoundName);
+    const step = await this.nextFor(tenantId, ctx.jobId, applicationId, config.rounds, round, recorded.outcome === 'PASSED');
+    const applied = await this.applyStep(tenantId, applicationId, ctx.jobId, round.id, step);
     await this.audit.record({
       tenantId,
       actorUserId: null,
       action: 'assessment.progressed',
       subjectType: 'application',
       subjectId: applicationId,
-      metadata: { roundId: round.id, module, outcome: recorded.outcome, next: describeStep(step) },
+      metadata: { roundId: round.id, module, outcome: recorded.outcome, next: describeStep(step), ...applied },
     });
     return recorded;
+  }
+
+  /**
+   * A round run outside the engine (group discussion) was decided and its result recorded: the student moves on like
+   * after an online test. Only what that module does not do itself happens here: the next online round's invitation,
+   * or the Stage 2 overall rejection. A failed student and the "selected" email are the module's own.
+   * Safe to call twice (invitations and outcome emails are queued once).
+   */
+  async continueAfterExternalRound(tenantId: string, applicationId: string, roundId: string, passed: boolean): Promise<NextStep | null> {
+    if (!passed) return null;
+    const ctx = await this.store.context(tenantId, applicationId);
+    const config = ctx ? await this.rounds.forRoundEngine(tenantId, ctx.jobId) : null;
+    const round = config?.rounds.find((r) => r.id === roundId);
+    if (!ctx || !config || !round) return null;
+    const step = await this.nextFor(tenantId, ctx.jobId, applicationId, config.rounds, round, true);
+    // the module already told the student they were selected: no second "cleared" email
+    const applied = step.kind === 'EMAIL' && step.email !== 'REJECTED' ? { emailSkipped: 'module' } : await this.applyStep(tenantId, applicationId, ctx.jobId, round.id, step);
+    await this.audit.record({
+      tenantId,
+      actorUserId: null,
+      action: 'assessment.progressed',
+      subjectType: 'application',
+      subjectId: applicationId,
+      metadata: { roundId: round.id, outcome: 'PASSED', next: describeStep(step), ...applied },
+    });
+    return step;
+  }
+
+  /** The next step, with the pipeline's Stage 2 overall criterion applied after the last technical round. */
+  private async nextFor(tenantId: string, jobId: string, applicationId: string, rounds: SavedRound[], round: SavedRound, passed: boolean): Promise<NextStep> {
+    const step = this.next(rounds, round, passed);
+    if (passed && this.pipeline && (await this.pipeline.failsStage2Overall(tenantId, jobId, applicationId, rounds, round))) {
+      return { kind: 'EMAIL', email: 'REJECTED', nextRoundName: null, stage2Overall: true } as NextStep;
+    }
+    return step;
+  }
+
+  /** Queues what a step needs. A rejection email is left out when the job switched rejection emails off. */
+  private async applyStep(tenantId: string, applicationId: string, jobId: string, roundId: string, step: NextStep): Promise<StepEffect> {
+    const overall = (step as { stage2Overall?: boolean }).stage2Overall ? { stage2Overall: 'failed' } : {};
+    if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, jobId, step.round.id);
+    else if (step.kind === 'EMAIL') {
+      if (step.email === 'REJECTED' && this.pipeline && !(await this.pipeline.rejectionEmailsOn(tenantId, jobId))) return { ...overall, emailSkipped: 'rejection_emails_off' };
+      await this.store.queueOutcomeEmail(tenantId, applicationId, roundId, step.email, step.nextRoundName);
+    }
+    return overall;
   }
 
   /** Invites a candidate whose AI screening is complete to the job's first round (when it is an online test). */
@@ -730,6 +783,9 @@ export class RoundEngineService {
     };
   }
 }
+
+/** What applyStep() did besides the step itself (audit metadata). */
+type StepEffect = { stage2Overall?: string; emailSkipped?: string };
 
 const describeStep = (step: NextStep) =>
   step.kind === 'INVITE'

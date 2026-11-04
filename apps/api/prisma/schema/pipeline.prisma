@@ -1,0 +1,77 @@
+// Hiring pipeline rules (pipeline module): what happens between the rounds, on top of each round's own pass rule.
+//   Stage 1 aptitude / English -> Stage 2 technical rounds (DSA, SQL, GD in HR's order) -> technical interview ->
+//   personal interview (HR call). Owner: pipeline module. Additive only.
+
+/// Stage 2 overall criterion, checked once the student finished the last technical round (DSA / SQL / GD).
+enum PipelineStage2Rule {
+  /// Every technical round passed (each round's own pass rule). The behaviour before this setting existed.
+  ALL_ROUNDS_PASSED
+  /// Marks scored across the technical rounds >= stage2_min_percent of their total marks.
+  TOTAL_PERCENT
+  /// Both of the above.
+  BOTH
+
+  @@map("pipeline_stage2_rule")
+}
+
+/// Per-job pipeline settings. No row = the defaults (ALL_ROUNDS_PASSED, rejection emails on).
+/// Frozen together with the rounds (job_round_configs.locked_at). No foreign key on purpose: settings hold no
+/// personal data, and the rounds editor re-creates job_rounds on every save.
+model JobPipelineSettings {
+  jobId            String             @id @map("job_id") @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  stage2Rule       PipelineStage2Rule @default(ALL_ROUNDS_PASSED) @map("stage2_rule")
+  /// TOTAL_PERCENT / BOTH: 1-100.
+  stage2MinPercent Int?               @map("stage2_min_percent")
+  /// false = no rejection email after a failed round (the student's status still shows the rejection to HR).
+  rejectionEmails  Boolean            @default(true) @map("rejection_emails")
+  updatedById      String?            @map("updated_by_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("job_pipeline_settings")
+}
+
+/// HR's scoring rubric of one round (group discussion): [{ name, maxMarks }]. Keyed by the round id without a foreign
+/// key, because the rounds editor deletes and re-creates job_rounds (keeping their ids) on every save.
+model RoundRubric {
+  roundId     String   @id @map("round_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  jobId       String   @map("job_id") @db.Uuid
+  parameters  Json
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId, jobId])
+  @@map("round_rubrics")
+}
+
+enum PiCallStatus {
+  NOT_CALLED
+  CALLED
+  SCHEDULED
+  SELECTED
+  REJECTED
+
+  @@map("pi_call_status")
+}
+
+/// Personal interview (HR call) of a student who cleared the technical interview. Deleted with the application.
+model PiCall {
+  applicationId String       @id @map("application_id") @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  jobId         String       @map("job_id") @db.Uuid
+  status        PiCallStatus @default(NOT_CALLED)
+  notes         String       @default("")
+  updatedById   String?      @map("updated_by_id") @db.Uuid
+  updatedByName String?      @map("updated_by_name")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, jobId])
+  @@map("pi_calls")
+}

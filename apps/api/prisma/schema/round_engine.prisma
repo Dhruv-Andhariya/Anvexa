@@ -77,48 +77,48 @@ enum RoundIntegrityStatus {
 /// The one attempt of a candidate at one round. The server owns the clock (deadline_at) and the answers; the result
 /// itself is in round_results (assessments module).
 model RoundAttempt {
-  id             String             @id @db.Uuid
-  tenantId       String             @map("tenant_id") @db.Uuid
-  applicationId  String             @map("application_id") @db.Uuid
-  jobId          String             @map("job_id") @db.Uuid
-  roundId        String             @map("round_id") @db.Uuid
-  inviteId       String             @unique @map("invite_id") @db.Uuid
-  status         RoundAttemptStatus @default(IN_PROGRESS)
-  consentVersion String             @map("consent_version")
-  consentAt      DateTime           @map("consent_at")
-  startedAt      DateTime           @map("started_at")
+  id                 String               @id @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  applicationId      String               @map("application_id") @db.Uuid
+  jobId              String               @map("job_id") @db.Uuid
+  roundId            String               @map("round_id") @db.Uuid
+  inviteId           String               @unique @map("invite_id") @db.Uuid
+  status             RoundAttemptStatus   @default(IN_PROGRESS)
+  consentVersion     String               @map("consent_version")
+  consentAt          DateTime             @map("consent_at")
+  startedAt          DateTime             @map("started_at")
   /// null = the round has no time limit.
-  deadlineAt     DateTime?          @map("deadline_at")
-  submittedAt    DateTime?          @map("submitted_at")
+  deadlineAt         DateTime?            @map("deadline_at")
+  submittedAt        DateTime?            @map("submitted_at")
   /// { [questionId]: { selected: number[], marked: boolean } } - the autosaved answers.
-  answers        Json               @default("{}")
+  answers            Json                 @default("{}")
   /// DSA (coding) rounds only: { progress: { [questionId]: best score, passed, total, attempts, language, bestCode },
   /// finishReason } - what the candidate achieved so far. null for MCQ rounds. Never sent to the browser as is.
-  codingState    Json?              @map("coding_state")
+  codingState        Json?                @map("coding_state")
   /// Highest autosave revision applied; an older (late) save never overwrites a newer one.
-  revision       Int                @default(0)
+  revision           Int                  @default(0)
   /// Result as graded by the assessments module (null until graded).
-  systemPassed   Boolean?           @map("system_passed")
+  systemPassed       Boolean?             @map("system_passed")
   /// Set once the next step (next invite / decision email) was queued, so it happens exactly once.
-  progressedAt   DateTime?          @map("progressed_at")
+  progressedAt       DateTime?            @map("progressed_at")
   /// Protection rules this attempt runs with (AssessmentProtectionSettings JSON), copied at the start. null = not monitored.
-  protection          Json?
+  protection         Json?
   /// The ONE warning counter; only changed under the attempt's row lock.
-  warningCount        Int                  @default(0) @map("warning_count")
-  integrityStatus     RoundIntegrityStatus @default(NONE) @map("integrity_status")
-  terminatedAt        DateTime?            @map("terminated_at")
-  terminationReason   String?              @map("termination_reason")
+  warningCount       Int                  @default(0) @map("warning_count")
+  integrityStatus    RoundIntegrityStatus @default(NONE) @map("integrity_status")
+  terminatedAt       DateTime?            @map("terminated_at")
+  terminationReason  String?              @map("termination_reason")
   /// HR's integrity decision on a terminated attempt (ADVANCE / REJECT), with the reason; then the next step follows.
-  integrityDecision   String?              @map("integrity_decision")
-  integrityReason     String?              @map("integrity_reason")
-  integrityDecidedBy  String?              @map("integrity_decided_by")
-  integrityDecidedAt  DateTime?            @map("integrity_decided_at")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
+  integrityDecision  String?              @map("integrity_decision")
+  integrityReason    String?              @map("integrity_reason")
+  integrityDecidedBy String?              @map("integrity_decided_by")
+  integrityDecidedAt DateTime?            @map("integrity_decided_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
 
-  application Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  round       JobRound       @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
-  invite      RoundInvite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  application Application               @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       JobRound                  @relation(fields: [roundId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  invite      RoundInvite               @relation(fields: [inviteId], references: [id], onDelete: Cascade)
   events      ProctorEvent[]
   incidents   RoundProtectionIncident[]
 

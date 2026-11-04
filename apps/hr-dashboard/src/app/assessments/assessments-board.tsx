@@ -1,11 +1,12 @@
 'use client';
 
-import { ROUND_MODULE_LABEL, ROUND_TYPES, type AiScreeningProgress, type AssessmentRoundSummary, type AssessmentJob, type AssessmentStage, type JobAssessments, type RoundCell } from '@hireflow/contracts';
+import { PIPELINE_STATUS_LABEL, ROUND_MODULE_LABEL, ROUND_TYPES, isRejection, type JobPipelineStatuses, type AiScreeningProgress, type AssessmentRoundSummary, type AssessmentJob, type AssessmentStage, type JobAssessments, type RoundCell } from '@hireflow/contracts';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui';
 import { ApiError } from '@/lib/api';
+import { downloadCsv, getPipelineStatuses } from '@/lib/pipeline-api';
 import { getJobAssessments, listAssessmentJobs } from '@/lib/rounds-api';
 import { GdRecordings } from './gd-recordings';
 import { OUTCOME_STYLE, OUTCOME_TEXT, STAGE_STYLE, STAGE_TEXT, pill, scoreText } from './assessment-styles';
@@ -104,6 +105,7 @@ export function AssessmentsBoard() {
 
 function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t: Tab) => void }) {
   const [data, setData] = useState<JobAssessments | null>(null);
+  const [pipeline, setPipeline] = useState<JobPipelineStatuses | null>(null);
   const [error, setError] = useState('');
   const [stage, setStage] = useState<AssessmentStage | 'ALL'>('ALL');
   const [search, setSearch] = useState('');
@@ -112,7 +114,10 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
     async (signal?: AbortSignal) => {
       setError('');
       try {
-        setData(await getJobAssessments(jobId, { signal }));
+        // pipeline statuses are extra detail: the board still works if they cannot be loaded
+        const [assessments, statuses] = await Promise.all([getJobAssessments(jobId, { signal }), getPipelineStatuses(jobId, { signal }).catch(() => null)]);
+        setData(assessments);
+        setPipeline(statuses);
       } catch (err) {
         if (!signal?.aborted) setError(messageOf(err));
       }
@@ -135,6 +140,7 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
     );
   }
 
+  const pipelineOf = new Map((pipeline?.students ?? []).map((p) => [p.applicationId, p]));
   const needle = search.trim().toLowerCase();
   const students = data.students.filter(
     (s) => (stage === 'ALL' || s.stage === stage) && (!needle || `${s.name} ${s.email} ${s.college}`.toLowerCase().includes(needle)),
@@ -212,9 +218,30 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
               Search
               <input className={`${inputClass} w-64`} placeholder="Name, email or college" value={search} onChange={(e) => setSearch(e.target.value)} />
             </label>
-            <Button className="ml-auto" onClick={() => load()}>
-              Refresh
+            <Button
+              className="ml-auto"
+              variant="secondary"
+              disabled={!students.length}
+              onClick={() =>
+                downloadCsv(
+                  `assessments-${data.jobTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.csv`,
+                  ['Name', 'Email', 'College', 'Resume (ATS)', ...data.rounds.map((r) => r.name), 'Stage', 'Pipeline status', 'Stage 2 overall %'],
+                  students.map((st) => [
+                    st.name,
+                    st.email,
+                    st.college,
+                    st.atsScore,
+                    ...st.rounds.map((c) => `${OUTCOME_TEXT[c.outcome]}${c.score !== null ? ` (${scoreText(c.score, c.maxScore)})` : ''}`),
+                    STAGE_TEXT[st.stage],
+                    pipelineOf.get(st.applicationId) ? PIPELINE_STATUS_LABEL[pipelineOf.get(st.applicationId)!.status] : '',
+                    pipelineOf.get(st.applicationId)?.stage2?.percent ?? '',
+                  ]),
+                )
+              }
+            >
+              Export CSV
             </Button>
+            <Button onClick={() => load()}>Refresh</Button>
           </div>
 
           {students.length === 0 ? (
@@ -269,6 +296,7 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                       ))}
                       <td className="px-3 py-2">
                         <span className={`${pill} ${STAGE_STYLE[s.stage]}`}>{STAGE_TEXT[s.stage]}</span>
+                        <PipelineCell row={pipelineOf.get(s.applicationId)} />
                       </td>
                     </tr>
                   ))}
@@ -277,6 +305,23 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+/** The student's pipeline stage, the specific rejection reason, and the Stage 2 overall percentage. */
+function PipelineCell({ row }: { row: JobPipelineStatuses['students'][number] | undefined }) {
+  if (!row) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-0.5 text-xs">
+      <span className={isRejection(row.status) ? 'font-medium text-danger' : row.status === 'SELECTED' ? 'font-medium text-success' : 'text-muted'}>
+        {PIPELINE_STATUS_LABEL[row.status]}
+      </span>
+      {row.stage2?.decided && row.stage2.percent !== null && (
+        <span className="text-muted">
+          Stage 2: {row.stage2.percent}% ({row.stage2.scored} / {row.stage2.total})
+        </span>
       )}
     </div>
   );

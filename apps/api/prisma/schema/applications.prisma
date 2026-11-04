@@ -54,23 +54,24 @@ model Application {
   confirmationEmailSentAt DateTime?        @map("confirmation_email_sent_at")
   createdAt               DateTime         @default(now()) @map("created_at")
 
-  candidate          Candidate           @relation(fields: [candidateId], references: [id])
-  resume             Resume?
+  candidate           Candidate            @relation(fields: [candidateId], references: [id])
+  resume              Resume?
   /// M10/M11 (ats.prisma): deleted with the application (DPDP erase).
-  atsEvaluation      AtsEvaluation?
-  decisionEmail      CandidateEmail?
-  screeningInvite    ScreeningInvite?
+  atsEvaluation       AtsEvaluation?
+  decisionEmail       CandidateEmail?
+  screeningInvite     ScreeningInvite?
   /// M12 (screening.prisma): the AI screening round of this application.
-  screeningSession   ScreeningSession?
+  screeningSession    ScreeningSession?
   /// Assessment round results (rounds.prisma), deleted with the application.
-  roundResults       RoundResult[]
+  roundResults        RoundResult[]
   /// M13 round engine (round_engine.prisma): online test invites, attempts, outcome emails.
-  roundInvites       RoundInvite[]
-  roundAttempts      RoundAttempt[]
-  roundOutcomeEmails RoundOutcomeEmail[]
-  dsaProctorSessions DsaProctorSession[]
+  roundInvites        RoundInvite[]
+  roundAttempts       RoundAttempt[]
+  roundOutcomeEmails  RoundOutcomeEmail[]
+  piCall              PiCall?
+  dsaProctorSessions  DsaProctorSession[]
   /// M18 AI group discussion (group_discussion.prisma).
-  gdParticipants     GdParticipant[]
+  gdParticipants      GdParticipant[]
   /// AI technical interview rounds (ai_interview.prisma).
   aiInterviewInvites  AiInterviewInvite[]
   aiInterviewSessions AiInterviewSession[]

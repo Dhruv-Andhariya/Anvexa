@@ -1,6 +1,7 @@
 import { Inject, Module, type OnModuleInit } from '@nestjs/common';
 import { ApplicationsModule } from '../applications';
 import { AssessmentsModule } from '../assessments';
+import { PipelineModule } from '../pipeline';
 import { RoundModules, RoundsConfigModule } from '../rounds-config';
 import { TenantsModule } from '../tenants';
 import { codingRoundsEnabled } from './coding-round';
@@ -15,7 +16,7 @@ import { ROUND_ENGINE_WORKER_CONFIG, RoundEngineWorker, roundEngineWorkerConfigF
  * assessments module, and moves each candidate on (next invite / outcome email). Off with FEATURE_ROUND_ENGINE=off.
  */
 @Module({
-  imports: [ApplicationsModule, TenantsModule, RoundsConfigModule, AssessmentsModule],
+  imports: [ApplicationsModule, TenantsModule, RoundsConfigModule, AssessmentsModule, PipelineModule],
   controllers: [PublicAssessmentController, HrRoundEngineController],
   providers: [
     RoundEngineService,

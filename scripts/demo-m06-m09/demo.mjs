@@ -17,6 +17,10 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { crc32 } from 'node:zlib';
 
+// Switched off (2026-11-04, owner's rule): links and emails go ONLY to students who applied for the job themselves.
+// This demo creates students who never applied and gives them personal links, so it does not run any more.
+console.error('This demo is switched off: links are only ever given to students who applied for the job themselves.');
+process.exit(1);
 const API = (process.env.API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 const MAILPIT = (process.env.MAILPIT_URL || 'http://localhost:8025').replace(/\/+$/, '');
 const HR_EMAIL = process.env.DEMO_HR_EMAIL || 'demo.hr@hireflow.local';

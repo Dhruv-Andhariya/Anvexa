@@ -17,6 +17,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Switched off (2026-11-04, owner's rule): links and emails go ONLY to students who applied for the job themselves.
+// This demo creates students who never applied and gives them personal links, so it does not run any more.
+console.error('This demo is switched off: links are only ever given to students who applied for the job themselves.');
+process.exit(1);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 process.loadEnvFile(path.join(root, '.env'));
 const require = createRequire(path.join(root, 'apps/api/package.json'));

@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   gdDecisionRequestSchema,
   gdIncludePrivateTalkRequestSchema,
@@ -7,12 +7,16 @@ import {
   type GdPhase,
   type GdRecommendation,
   type GdResults,
+  rubricScoresRequestSchema,
+  rubricTotal,
 } from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
 import { AssessmentsService } from '../assessments';
 import { AuditService } from '../audit';
+import { PipelineService } from '../pipeline';
+import { RoundEngineService } from '../round-engine';
 import { RoundsConfigService } from '../rounds-config';
 import type { Actor } from '../tenants';
 import { GdMailService } from './gd-mail.service';
@@ -61,6 +65,10 @@ export class GdResultsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(GD_RESULTS_CONFIG) private readonly config: GdResultsConfig,
     @Inject(GD_CLOCK) private readonly now: () => Date,
+    /** Pipeline rules: HR's rubric, rejection emails on / off. None = AI score only, emails always (as before). */
+    @Optional() @Inject(PipelineService) private readonly pipeline: PipelineService | null = null,
+    /** Moves selected students on (next online round, Stage 2 overall criterion). None = the GD ends the engine's part. */
+    @Optional() @Inject(RoundEngineService) private readonly engine: RoundEngineService | null = null,
   ) {}
 
   // ================================================================ processing (worker loop)
@@ -276,8 +284,10 @@ export class GdResultsService {
       this.db.job.findFirst({ where: { id: batch.event.jobId }, select: { title: true } }),
     ]);
     const nameOf = new Map(people.map((p) => [p.id, p.application.candidate.name]));
+    const rubric = await this.rubricFor(tenantId, batch.event.jobId, batch.event.roundId);
     const students = people.map((p) => {
       const e = evals.find((x) => x.participantId === p.id);
+      const rubricResult = rubric ? rubricResultOf(rubric.parameters, rubric.passes, e ?? null) : null;
       const email = emails.find((x) => x.participantId === p.id);
       const metrics = e ? gdMetricsSchema.safeParse(e.metrics) : null;
       return {
@@ -299,7 +309,8 @@ export class GdResultsService {
             }
           : null,
         hrDecision: e?.hrDecision ? { decision: e.hrDecision, reason: e.hrDecisionReason ?? '', by: e.hrDecidedByName, at: (e.hrDecidedAt ?? e.updatedAt).toISOString() } : null,
-        finalDecision: finalDecisionOf(p.attendance, e ?? null),
+        ...(rubric ? { rubric: rubricResult } : {}),
+        finalDecision: finalDecisionOf(p.attendance, e ?? null, rubricResult ? rubricResult.passed : null),
         resultEmail: email ? { status: email.status, sentAt: email.sentAt?.toISOString() ?? null } : null,
       };
     });
@@ -312,6 +323,7 @@ export class GdResultsService {
       roundName: round?.name ?? 'Group Discussion',
       jobTitle: job?.title ?? '',
       roundId: batch.event.roundId,
+      rubric: rubric?.parameters ?? null,
       topic: batch.topicText,
       startsAt: batch.startsAt.toISOString(),
       batchStatus: batch.status,
@@ -355,6 +367,47 @@ export class GdResultsService {
     return this.results(tenantId, batchId);
   }
 
+  /**
+   * HR's evaluator form: marks per rubric parameter for one student. Every parameter exactly once, 0..maxMarks;
+   * anything else is refused with 400 (never clamped). The rubric result then decides the student's selection,
+   * unless HR overrides it.
+   */
+  async scoreRubric(tenantId: string, batchId: string, participantId: string, body: unknown, actor: Actor): Promise<GdResults> {
+    const parsed = rubricScoresRequestSchema.safeParse(body);
+    if (!parsed.success) throw gdError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', parsed.error.issues[0]?.message ?? 'The request is invalid.');
+    const batch = await this.editable(tenantId, batchId);
+    const rubric = await this.rubricFor(tenantId, batch.event.jobId, batch.event.roundId);
+    if (!rubric) throw gdError(HttpStatus.CONFLICT, 'GD_NO_RUBRIC', 'This group discussion round has no rubric. HR adds one on the rounds editor.');
+    const p = await this.db.gdParticipant.findFirst({ where: { id: participantId, batchId: batch.id } });
+    if (!p) throw gdError(HttpStatus.NOT_FOUND, 'GD_PARTICIPANT_NOT_FOUND', 'Student not found.');
+    if (!ATTENDED.includes(p.attendance)) throw gdError(HttpStatus.CONFLICT, 'GD_ABSENT', 'This student did not take part, so they cannot be scored.');
+    this.pipeline!.checkRubricScores(rubric.parameters, parsed.data.scores);
+    // stored under the rubric's own names, in the rubric's order
+    const scores = rubric.parameters.map((r) => ({ parameter: r.name, marks: parsed.data.scores.find((x) => x.parameter.toLowerCase() === r.name.toLowerCase())!.marks }));
+    const fields = { rubricScores: scores as unknown as Prisma.InputJsonArray, rubricRemarks: parsed.data.remarks || null, rubricScoredById: actor.id, rubricScoredAt: this.now() };
+    await this.db.gdEvaluation.upsert({
+      where: { participantId },
+      create: { id: uuidv7(), tenantId, batchId, participantId, status: 'FAILED', error: 'Not evaluated yet.', ...fields },
+      update: fields,
+    });
+    const total = scores.reduce((sum, x) => sum + x.marks, 0);
+    await this.audit.record({ tenantId, actorUserId: actor.id, action: 'gd.rubric_scored', subjectType: 'application', subjectId: p.applicationId, metadata: { batchId, total, maxTotal: rubricTotal(rubric.parameters) } });
+    return this.results(tenantId, batchId);
+  }
+
+  /** The round's rubric with its pass rule (null = no rubric, or no pipeline module). */
+  private async rubricFor(tenantId: string, jobId: string, roundId: string) {
+    const parameters = this.pipeline ? await this.pipeline.rubricOf(tenantId, roundId) : null;
+    if (!parameters) return null;
+    const round = (await this.rounds.forRoundEngine(tenantId, jobId))?.rounds.find((r) => r.id === roundId);
+    const maxTotal = rubricTotal(parameters);
+    const rule = round?.passRule ?? null;
+    /** The rubric total as the round's score, and whether it passes HR's rule. */
+    const scoreOf = (total: number) => (rule?.mode === 'INTERVIEWER_SCORE' ? (total / maxTotal) * (rule.maxScore ?? maxTotal) : rule?.mode === 'PERCENTAGE' ? (total / maxTotal) * 100 : total);
+    const passes = (total: number) => (rule ? scoreOf(total) + 1e-9 >= rule.value : total * 2 >= maxTotal);
+    return { parameters, maxTotal, scoreOf, passes, maxScore: rule?.mode === 'INTERVIEWER_SCORE' ? (rule.maxScore ?? maxTotal) : null };
+  }
+
   /** "Include in evaluation" for one private talk. The group is evaluated again (HR's overrides are kept). */
   async includePrivateTalk(tenantId: string, talkId: string, body: unknown, actor: Actor): Promise<GdResults> {
     const parsed = gdIncludePrivateTalkRequestSchema.safeParse(body);
@@ -393,6 +446,14 @@ export class GdResultsService {
       throw gdError(HttpStatus.CONFLICT, 'GD_PROCESSING', 'The evaluation is still running. Wait for the results first.');
     }
     const view = await this.results(tenantId, batchId);
+    const rubric = await this.rubricFor(tenantId, batch.event.jobId, batch.event.roundId);
+    if (rubric) {
+      const missing = view.students.filter((s) => ATTENDED.includes(s.attendance) && !s.rubric);
+      if (missing.length) {
+        throw gdError(HttpStatus.CONFLICT, 'GD_RUBRIC_INCOMPLETE', `Score every student on the rubric first (${missing.length} still to score: ${missing.slice(0, 3).map((s) => s.name).join(', ')}${missing.length > 3 ? '…' : ''}).`);
+      }
+    }
+    const rejectionEmails = this.pipeline ? await this.pipeline.rejectionEmailsOn(tenantId, batch.event.jobId) : true;
     const claimed = await this.db.gdBatch.updateMany({ where: { id: batchId, confirmedAt: null }, data: { confirmedAt: this.now(), confirmedById: actor.id } });
     if (!claimed.count) throw gdError(HttpStatus.CONFLICT, 'GD_CONFIRMED', 'This selection was already confirmed.');
 
@@ -403,11 +464,13 @@ export class GdResultsService {
       if (ATTENDED.includes(s.attendance) && round) {
         try {
           const overall = s.evaluation?.overall ?? 0;
+          // with a rubric: HR's marks are the result (scaled to the pass rule's unit); else the AI's overall score
+          const interviewerScore = rubric && s.rubric ? Math.round(rubric.scoreOf(s.rubric.total) * 100) / 100 : Math.round((overall / 10) * maxScore * 10) / 10;
           const recorded = await this.assessments.record(tenantId, {
             applicationId: s.applicationId,
             roundId: round.id,
-            interviewerScore: Math.round((overall / 10) * maxScore * 10) / 10,
-            notes: s.evaluation?.feedback || null,
+            interviewerScore,
+            notes: (rubric && s.rubric?.remarks) || s.evaluation?.feedback || null,
             startedAt: batch.lockedAt?.toISOString() ?? null,
             submittedAt: (batch.endedAt ?? this.now()).toISOString(),
           });
@@ -421,7 +484,17 @@ export class GdResultsService {
           this.logger.warn(`GD result not recorded application=${s.applicationId} (${err instanceof Error ? err.message : 'unknown'})`);
         }
       }
-      await this.mail.queueResult(tenantId, batchId, s.participantId, s.finalDecision === 'SELECTED', s.email);
+      const selected = s.finalDecision === 'SELECTED';
+      // the job switched rejection emails off: a student who was not selected gets no email (HR still sees the result)
+      if (selected || rejectionEmails) await this.mail.queueResult(tenantId, batchId, s.participantId, selected, s.email);
+      // selected: the next round follows (an online round's invitation, or the Stage 2 overall check)
+      if (selected && round && this.engine) {
+        try {
+          await this.engine.continueAfterExternalRound(tenantId, s.applicationId, round.id, true);
+        } catch (err) {
+          this.logger.warn(`GD next step not queued application=${s.applicationId} (${err instanceof Error ? err.message : 'unknown'})`);
+        }
+      }
     }
     await this.activityLog(tenantId, batchId, actor, 'CONFIRMED', null, { selected: view.students.filter((s) => s.finalDecision === 'SELECTED').length });
     await this.audit.record({ tenantId, actorUserId: actor.id, action: 'gd.selection_confirmed', subjectType: 'gd_batch', subjectId: batchId, metadata: {} });
@@ -477,10 +550,32 @@ export class GdResultsService {
   }
 }
 
-/** Absent = never selected; else HR's decision, else the AI's recommendation, else not selected. */
-export function finalDecisionOf(attendance: GdAttendance, e: { hrDecision: GdRecommendation | null; recommendation: GdRecommendation | null } | null): GdRecommendation {
+/**
+ * Absent = never selected; else HR's decision, else HR's rubric result (when the round has a rubric and the student
+ * was scored), else the AI's recommendation, else not selected.
+ */
+export function finalDecisionOf(
+  attendance: GdAttendance,
+  e: { hrDecision: GdRecommendation | null; recommendation: GdRecommendation | null } | null,
+  rubricPassed: boolean | null = null,
+): GdRecommendation {
   if (!ATTENDED.includes(attendance)) return 'NOT_SELECTED';
-  return e?.hrDecision ?? e?.recommendation ?? 'NOT_SELECTED';
+  if (e?.hrDecision) return e.hrDecision;
+  if (rubricPassed !== null) return rubricPassed ? 'SELECTED' : 'NOT_SELECTED';
+  return e?.recommendation ?? 'NOT_SELECTED';
+}
+
+/** A student's rubric marks as HR sees them (null = not scored yet). */
+function rubricResultOf(
+  parameters: { name: string; maxMarks: number }[],
+  passes: (total: number) => boolean,
+  e: { rubricScores: Prisma.JsonValue | null; rubricRemarks: string | null; rubricScoredAt: Date | null } | null,
+) {
+  if (!e?.rubricScores || !Array.isArray(e.rubricScores)) return null;
+  const scores = (e.rubricScores as { parameter: string; marks: number }[]).filter((x) => parameters.some((p) => p.name === x.parameter));
+  if (scores.length !== parameters.length) return null; // the rubric changed after scoring: score again
+  const total = scores.reduce((sum, x) => sum + x.marks, 0);
+  return { scores, total, maxTotal: rubricTotal(parameters), passed: passes(total), remarks: e.rubricRemarks ?? '', at: e.rubricScoredAt?.toISOString() ?? null };
 }
 
 const rank = (s: { attendance: GdAttendance; evaluation: { overall: number | null } | null }) =>

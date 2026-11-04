@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { move, newRound, type RoundDraft, type Validation } from '@/lib/rounds';
 import { Button, inputClass } from '../ui';
 import { RoundCard } from './round-card';
+import { PipelineSettingsPanel } from './pipeline-settings';
 
 const ROUND_TYPE_KEYS = Object.keys(ROUND_TYPES) as RoundType[];
 
@@ -90,6 +91,10 @@ export function RoundsEditor({
           </Button>
           {full && <span className="text-xs text-muted">A job can have at most {ROUNDS_LIMITS.roundsMax} rounds.</span>}
         </div>
+      )}
+
+      {rounds.length > 0 && (
+        <PipelineSettingsPanel jobId={jobId} roundTypes={rounds.map((r) => r.type)} saved={rounds.some((r) => !!r.id)} readOnly={disabled} />
       )}
 
       {validation && validation.general.length > 0 && (

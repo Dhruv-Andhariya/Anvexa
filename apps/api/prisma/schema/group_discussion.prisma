@@ -394,6 +394,11 @@ model GdEvaluation {
   hrDecidedById    String?            @map("hr_decided_by_id") @db.Uuid
   hrDecidedByName  String?            @map("hr_decided_by_name")
   hrDecidedAt      DateTime?          @map("hr_decided_at")
+  /// HR's rubric scores (when the round has a rubric): [{ parameter, marks }], each 0..maxMarks. null = not scored.
+  rubricScores     Json?              @map("rubric_scores")
+  rubricRemarks    String?            @map("rubric_remarks")
+  rubricScoredById String?            @map("rubric_scored_by_id") @db.Uuid
+  rubricScoredAt   DateTime?          @map("rubric_scored_at")
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
 

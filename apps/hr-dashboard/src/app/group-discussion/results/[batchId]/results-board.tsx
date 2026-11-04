@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { SessionRecording } from '@/components/gd/session-recording';
-import { confirmGdSelection, getGdResults, includePrivateTalk, rebuildGdSessionAudio, reprocessGd, setGdDecision } from '@/lib/gd-api';
+import { confirmGdSelection, getGdResults, includePrivateTalk, rebuildGdSessionAudio, reprocessGd, setGdDecision, setGdRubricScores } from '@/lib/gd-api';
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 const pill = 'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium';
@@ -111,7 +111,9 @@ export function ResultsBoard({ batchId }: { batchId: string }) {
           <p className="text-sm text-muted">
             {confirmed
               ? `Confirmed ${dateTime.format(new Date(data.confirmedAt!))}. Result emails go out automatically.`
-              : 'The AI recommends; you decide. Change any decision below, then confirm to record the results and email every student.'}
+              : data.rubric
+                ? 'Score every student on the rubric (the AI’s scores are a guide); the rubric total decides unless you override it. Then confirm to record the results.'
+                : 'The AI recommends; you decide. Change any decision below, then confirm to record the results and email every student.'}
           </p>
         </div>
         {!confirmed && (
@@ -152,6 +154,8 @@ export function ResultsBoard({ batchId }: { batchId: string }) {
                 onToggle={() => setOpen(open === s.participantId ? null : s.participantId)}
                 disabled={busy || confirmed}
                 onDecide={(decision, reason) => void run(() => setGdDecision(batchId, s.participantId, decision, reason))}
+                rubric={data.rubric ?? null}
+                onScore={(scores, remarks) => run(() => setGdRubricScores(batchId, s.participantId, scores, remarks))}
               />
             ))}
           </tbody>
@@ -244,6 +248,8 @@ function StudentRow({
   onToggle,
   disabled,
   onDecide,
+  rubric,
+  onScore,
 }: {
   rank: number;
   s: GdResultStudent;
@@ -251,8 +257,11 @@ function StudentRow({
   onToggle: () => void;
   disabled: boolean;
   onDecide: (decision: GdRecommendation | null, reason: string) => void;
+  rubric: { name: string; maxMarks: number }[] | null;
+  onScore: (scores: { parameter: string; marks: number }[], remarks: string) => Promise<void>;
 }) {
   const [reason, setReason] = useState(s.hrDecision?.reason ?? '');
+  const [scoring, setScoring] = useState(false);
   const e = s.evaluation;
   const absent = s.attendance === 'ABSENT' || s.attendance === 'INVITED' || s.attendance === 'SCHEDULED';
   const value = s.hrDecision?.decision ?? 'AI';
@@ -264,6 +273,22 @@ function StudentRow({
           <p className="font-medium">{s.name}</p>
           <p className="text-xs text-muted">{s.email}</p>
           {absent && <span className={`${pill} mt-1 border-border text-muted`}>Absent</span>}
+          {rubric && !absent && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+              {s.rubric ? (
+                <span className={`${pill} ${s.rubric.passed ? DECISION.SELECTED.style : DECISION.NOT_SELECTED.style}`}>
+                  Rubric {s.rubric.total} / {s.rubric.maxTotal}
+                </span>
+              ) : (
+                <span className={`${pill} border-danger/40 text-danger`}>Not scored yet</span>
+              )}
+              {!disabled && (
+                <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={() => setScoring(!scoring)} aria-expanded={scoring}>
+                  {scoring ? 'Close' : s.rubric ? 'Edit scores' : 'Score'}
+                </Button>
+              )}
+            </div>
+          )}
         </td>
         <td className="px-3 py-2 text-lg font-semibold tabular-nums">{e?.overall != null ? e.overall.toFixed(1) : '—'}</td>
         <td className="px-3 py-2">
@@ -283,7 +308,11 @@ function StudentRow({
                 onChange={(ev) => onDecide(ev.target.value === 'AI' ? null : (ev.target.value as GdRecommendation), reason)}
                 aria-label={`Decision for ${s.name}`}
               >
-                <option value="AI">Follow AI ({e?.recommendation ? DECISION[e.recommendation].text.toLowerCase() : 'not selected'})</option>
+                {rubric ? (
+                  <option value="AI">Follow rubric ({s.rubric ? (s.rubric.passed ? 'selected' : 'not selected') : 'not scored yet'})</option>
+                ) : (
+                  <option value="AI">Follow AI ({e?.recommendation ? DECISION[e.recommendation].text.toLowerCase() : 'not selected'})</option>
+                )}
                 <option value="SELECTED">Selected (override)</option>
                 <option value="NOT_SELECTED">Not selected (override)</option>
               </select>
@@ -305,6 +334,21 @@ function StudentRow({
           )}
         </td>
       </tr>
+      {scoring && rubric && (
+        <tr className="border-b border-border bg-background/60">
+          <td colSpan={7} className="px-3 py-4">
+            <RubricForm
+              name={s.name}
+              rubric={rubric}
+              initial={s.rubric ?? null}
+              onSave={async (scores, remarks) => {
+                await onScore(scores, remarks);
+                setScoring(false);
+              }}
+            />
+          </td>
+        </tr>
+      )}
       {open && e && (
         <tr className="border-b border-border bg-background/60">
           <td colSpan={7} className="px-3 py-4">
@@ -412,5 +456,77 @@ function SessionCard({ data, busy, onRebuild }: { data: GdResults; busy: boolean
         </div>
       )}
     </Card>
+  );
+}
+
+/** HR's evaluator form: one mark per rubric parameter, never more than its maximum. */
+function RubricForm({
+  name,
+  rubric,
+  initial,
+  onSave,
+}: {
+  name: string;
+  rubric: { name: string; maxMarks: number }[];
+  initial: { scores: { parameter: string; marks: number }[]; remarks: string } | null;
+  onSave: (scores: { parameter: string; marks: number }[], remarks: string) => Promise<void>;
+}) {
+  const [marks, setMarks] = useState<Record<string, string>>(() =>
+    Object.fromEntries(rubric.map((p) => [p.name, String(initial?.scores.find((x) => x.parameter === p.name)?.marks ?? '')])),
+  );
+  const [remarks, setRemarks] = useState(initial?.remarks ?? '');
+  const [saving, setSaving] = useState(false);
+  const problems = rubric
+    .map((p) => {
+      const raw = marks[p.name] ?? '';
+      const n = Number(raw);
+      if (raw.trim() === '') return `Score ${p.name}.`;
+      return !Number.isFinite(n) || n < 0 || n > p.maxMarks ? `${p.name}: between 0 and ${p.maxMarks}.` : null;
+    })
+    .filter((x): x is string => !!x);
+  const total = rubric.reduce((sum, p) => sum + (Number(marks[p.name]) || 0), 0);
+  const max = rubric.reduce((sum, p) => sum + p.maxMarks, 0);
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        if (problems.length) return;
+        setSaving(true);
+        void onSave(rubric.map((p) => ({ parameter: p.name, marks: Number(marks[p.name]) })), remarks.trim()).finally(() => setSaving(false));
+      }}
+    >
+      <p className="text-sm font-medium">Rubric scores for {name}</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {rubric.map((p) => (
+          <label key={p.name} className="flex flex-col gap-1 text-sm">
+            {p.name} <span className="text-xs text-muted">out of {p.maxMarks}</span>
+            <input
+              type="number"
+              min={0}
+              max={p.maxMarks}
+              step="0.5"
+              className={`${inputClass} w-28`}
+              value={marks[p.name] ?? ''}
+              aria-invalid={problems.some((x) => x.startsWith(p.name))}
+              onChange={(ev) => setMarks({ ...marks, [p.name]: ev.target.value })}
+            />
+          </label>
+        ))}
+      </div>
+      <label className="flex flex-col gap-1 text-sm">
+        Remarks (optional, kept with the result)
+        <textarea className={inputClass} rows={2} maxLength={1000} value={remarks} onChange={(ev) => setRemarks(ev.target.value)} />
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={saving || problems.length > 0}>
+          {saving && <Spinner />} Save scores
+        </Button>
+        <span className="text-sm tabular-nums">
+          Total {Math.round(total * 100) / 100} / {max}
+        </span>
+        {problems.length > 0 && <span className="text-xs text-danger">{problems[0]}</span>}
+      </div>
+    </form>
   );
 }

@@ -93,6 +93,10 @@ export const getGdResults = (batchId: string, opts: Options = {}): Promise<GdRes
 export const setGdDecision = (batchId: string, participantId: string, decision: GdRecommendation | null, reason: string, opts: Options = {}): Promise<GdResults> =>
   call('PUT', `${batch(batchId)}/students/${encodeURIComponent(participantId)}/decision`, { decision, reason }, results, opts);
 
+/** HR's evaluator form: marks per rubric parameter (0..maxMarks each; out of range is refused, never clamped). */
+export const setGdRubricScores = (batchId: string, participantId: string, scores: { parameter: string; marks: number }[], remarks: string, opts: Options = {}): Promise<GdResults> =>
+  call('PUT', `${batch(batchId)}/students/${encodeURIComponent(participantId)}/rubric`, { scores, remarks }, results, opts);
+
 export const includePrivateTalk = (talkId: string, include: boolean, opts: Options = {}): Promise<GdResults> =>
   call('PUT', `/group-discussion/private-talks/${encodeURIComponent(talkId)}/include`, { include }, results, opts);
 

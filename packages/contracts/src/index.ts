@@ -14,4 +14,5 @@ export * from './schemas/round-engine';
 export * from './schemas/group-discussion';
 export * from './schemas/ai-interview';
 export * from './schemas/protection';
+export * from './schemas/pipeline';
 export * from './events';
