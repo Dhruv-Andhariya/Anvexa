@@ -339,6 +339,32 @@ describe('report and HR decision', () => {
     expect(answers).toEqual([expect.objectContaining({ questionId: HR_Q, answer: 'Answer two.' })]);
   });
 
+  it('automatic decisions: the worker advances by the pass mark once the report is ready (no HR click)', async () => {
+    await finished(); // 7 of 10, pass mark 6
+    const loop = workerLoop({ autoDecide: true });
+    expect(await loop.autoDecide()).toBe(1);
+    expect(engine.recorded).toHaveLength(1);
+    expect(engine.recorded[0]).toMatchObject({ module: 'AI_INTERVIEW', input: { applicationId: APP, roundId: ROUND, interviewerScore: 7 }, hrDecision: { passed: true } });
+    expect(sessionOf()).toMatchObject({ decision: 'ADVANCE', decidedByName: 'Automatic (pass mark)' });
+    expect(audit.entries.some((e) => e.action === 'ai_interview.auto_decided')).toBe(true);
+    expect(await loop.autoDecide()).toBe(0); // once
+    expect(engine.recorded).toHaveLength(1);
+  });
+
+  it('automatic decisions: below the pass mark the student is rejected', async () => {
+    await finished(40); // 4 of 10, pass mark 6
+    await workerLoop({ autoDecide: true }).autoDecide();
+    expect(engine.recorded[0]!.hrDecision).toMatchObject({ passed: false });
+    expect(sessionOf().decision).toBe('REJECT');
+  });
+
+  it('automatic decisions never touch an interview ended by the warning limit (HR reviews it)', async () => {
+    await finished();
+    store.sessions.get(sessionOf().id)!.status = 'TERMINATED';
+    expect(await workerLoop({ autoDecide: true }).autoDecide()).toBe(0);
+    expect(engine.recorded).toEqual([]);
+  });
+
   it('a decision that could not be recorded is recorded by the worker loop later', async () => {
     await finished();
     engine.failNext = true;
@@ -361,6 +387,7 @@ const config = (over: Partial<AiInterviewWorkerConfig> = {}): AiInterviewWorkerC
   enabled: false,
   pollMs: 10_000,
   autoInvite: true,
+  autoDecide: false,
   baseUrl: 'https://careers.example/interview/{token}',
   linkDays: 7,
   allowLocalLinks: false,

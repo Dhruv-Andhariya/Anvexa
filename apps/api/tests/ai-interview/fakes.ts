@@ -409,6 +409,12 @@ export class MemoryStore extends AiInterviewStore {
   async decidedNotRecorded(limit: number) {
     return [...this.sessions.values()].filter((s) => s.decision && !s.recordedAt).slice(0, limit).map((s) => ({ ...s }));
   }
+  async undecidedWithReport(limit: number) {
+    return [...this.sessions.values()]
+      .filter((s) => (s.status === 'COMPLETED' || s.status === 'INCOMPLETE') && !s.decision && this.reports.get(s.id)?.status === 'DONE')
+      .slice(0, limit)
+      .map((s) => ({ ...s }));
+  }
   async invitesForApplication(tenantId: string, applicationId: string) {
     return [...this.invites.values()].filter((i) => i.tenantId === tenantId && i.applicationId === applicationId);
   }

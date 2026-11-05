@@ -71,10 +71,11 @@ export function gradeResult(round: SavedRound, input: ResultNumbers): Graded {
       score = correctCount ?? 0;
       break;
     case 'MARKS':
-      maxScore = totalMarks;
+      // HR may set the round's total (e.g. out of 50): the student's marks are scaled to it
+      maxScore = rule.maxScore ?? totalMarks;
       if (marks === null) problems.push('Send marks (or marks per answer) for this round.');
-      else if (marks > maxScore) problems.push(`marks cannot be more than the ${maxScore} total marks.`);
-      score = round2(marks ?? 0);
+      else if (marks > totalMarks) problems.push(`marks cannot be more than the ${totalMarks} total marks.`);
+      score = rule.maxScore && totalMarks ? round2(((marks ?? 0) / totalMarks) * rule.maxScore) : round2(marks ?? 0);
       break;
     case 'PERCENTAGE':
       maxScore = 100;

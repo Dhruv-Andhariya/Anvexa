@@ -41,6 +41,8 @@ import { GdAudioStorage, LocalGdAudioStorage } from './storage';
     { provide: GD_RESULTS_CONFIG, useFactory: () => gdResultsConfigFromEnv() },
     { provide: GD_CLOCK, useValue: () => new Date() },
   ],
+  // the coding page (dsa module) takes a student who qualified straight to their GD page
+  exports: [GdMailService],
 })
 export class GroupDiscussionModule implements OnModuleInit {
   constructor(@Inject(RoundModules) private readonly roundModules: RoundModules) {}

@@ -50,7 +50,8 @@ const noBody: Schema<void> = { safeParse: () => ({ success: true, data: undefine
 
 // Browser talks ONLY to the HireFlow API. Gemini credentials live in the AI worker, never here.
 // Auth is an httpOnly session cookie set by the API: this code never sees or stores a token.
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+// Same-origin by default: next.config.ts forwards /api/v1 to the API (works on localhost and through a tunnel).
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 /** Dispatched on window when the API answers 401, so the session provider can send the user to /login. */
 export const UNAUTHENTICATED_EVENT = 'hireflow:unauthenticated';

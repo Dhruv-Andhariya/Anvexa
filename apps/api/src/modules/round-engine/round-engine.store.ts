@@ -183,7 +183,13 @@ export abstract class RoundEngineStore {
   abstract decideIntegrity(tenantId: string, attemptId: string, d: { decision: 'ADVANCE' | 'REJECT'; reason: string; by: string | null }, at: Date): Promise<boolean>;
 
   // ---- progression / emails
-  abstract queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string): Promise<boolean>;
+  /** notBefore: the invitation email is held until then (the coding page may hand the student over itself, see continueInvite). */
+  abstract queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string, notBefore?: Date): Promise<boolean>;
+  /**
+   * The coding page took the student straight into this round: the invitation gets its link token and counts as
+   * delivered, so no email is sent. Only while it is still QUEUED (never emailed) and not withdrawn; true when it did.
+   */
+  abstract continueInvite(inviteId: string, tokenHash: string, expiresAt: Date, at: Date): Promise<boolean>;
   abstract queueOutcomeEmail(tenantId: string, applicationId: string, roundId: string, kind: RoundOutcomeEmailKind, nextRoundName: string | null): Promise<boolean>;
   /** Students waiting for a round module's round (see RoundEngineService.waitingForModule). */
   abstract moduleCandidates(types: string[], limit: number, tenantId?: string): Promise<{ tenantId: string; applicationId: string; jobId: string; roundId: string }[]>;
@@ -434,9 +440,20 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
     });
   }
 
-  async queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string) {
-    const r = await this.db.roundInvite.createMany({ data: { id: uuidv7(), tenantId, applicationId, jobId, roundId }, skipDuplicates: true });
+  async queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string, notBefore?: Date) {
+    const r = await this.db.roundInvite.createMany({
+      data: { id: uuidv7(), tenantId, applicationId, jobId, roundId, ...(notBefore ? { nextAttemptAt: notBefore } : {}) },
+      skipDuplicates: true,
+    });
     return r.count > 0;
+  }
+
+  async continueInvite(inviteId: string, tokenHash: string, expiresAt: Date, at: Date) {
+    const r = await this.db.roundInvite.updateMany({
+      where: { id: inviteId, emailStatus: 'QUEUED', revokedAt: null },
+      data: { tokenHash, expiresAt, emailStatus: 'SENT', sentAt: at, lockedAt: null, lastError: null },
+    });
+    return r.count === 1;
   }
 
   async queueOutcomeEmail(tenantId: string, applicationId: string, roundId: string, kind: RoundOutcomeEmailKind, nextRoundName: string | null) {

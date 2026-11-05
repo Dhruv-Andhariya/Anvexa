@@ -12,6 +12,17 @@ import { gdBaseUrlFromEnv, gdLink, hrLiveLink, isPublicGdLink, newGdToken } from
 
 export const GD_MAIL_CONFIG = Symbol('GD_MAIL_CONFIG');
 
+/**
+ * Where a student who just qualified for a GD stands (for the coding page, which takes them there in the same tab).
+ * READY carries their personal GD link - the same one their invitation email carries.
+ */
+export type GdStudentLink =
+  | { status: 'JOINING_POOL' }
+  | { status: 'WAITING'; waiting: number; needed: number }
+  | { status: 'SCHEDULED'; startsAt: string }
+  | { status: 'READY'; startsAt: string; link: string }
+  | { status: 'NONE' };
+
 export interface GdMailConfig {
   /** Base of the student link (GD_URL or CAREERS_SITE_URL/gd/{token}); null = not set up. */
   baseUrl: string | null;
@@ -60,6 +71,25 @@ export class GdMailService {
     @Inject(GD_MAIL_CONFIG) private readonly config: GdMailConfig,
     @Inject(GD_CLOCK) private readonly now: () => Date,
   ) {}
+
+  /**
+   * The student's GD state after they qualified: still being added to the pool, waiting for enough students (needed =
+   * AUTO_GD_MIN_STUDENTS), scheduled (link not made yet - the invitation goes out within seconds), or READY with the
+   * personal link. Only for the student's own application (the caller proved it with their round link).
+   */
+  async studentLink(tenantId: string, applicationId: string, roundId: string, needed: number): Promise<GdStudentLink> {
+    const p = await this.db.gdParticipant.findFirst({ where: { tenantId, applicationId, roundId }, include: { batch: true } });
+    if (!p) return { status: 'JOINING_POOL' };
+    if (p.attendance === 'WAITING' || !p.batch) {
+      const waiting = await this.db.gdParticipant.count({ where: { tenantId, roundId, attendance: 'WAITING' } });
+      return { status: 'WAITING', waiting, needed };
+    }
+    if (!['SCHEDULED', 'LOBBY_OPEN', 'LIVE'].includes(p.batch.status)) return { status: 'NONE' };
+    const startsAt = p.batch.startsAt.toISOString();
+    const base = this.config.baseUrl;
+    if (!p.tokenSealed || !this.box || !base) return { status: 'SCHEDULED', startsAt };
+    return { status: 'READY', startsAt, link: gdLink(base, this.box.decrypt(p.tokenSealed)) };
+  }
 
   /** Queues what is due: invitations for scheduled students, HR links, reminders shortly before the start. */
   async queueDue(): Promise<number> {

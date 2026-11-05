@@ -3,7 +3,7 @@ import { isRoundSkipped } from '@hireflow/contracts';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
-import { buildRoundClearedEmail, buildRoundInviteEmail, buildRoundRejectionEmail } from './emails';
+import { buildPersonalInterviewSelectedEmail, buildRoundClearedEmail, buildRoundInviteEmail, buildRoundRejectionEmail } from './emails';
 import { cameraMonitored, codingKindOf, codingMinutes, codingRoundsEnabled } from './coding-round';
 import { DEFAULT_LINK_DAYS, assessmentBaseUrlFromEnv, assessmentLink, dsaBaseUrlFromEnv, isPublicLink, newAssessmentToken } from './link';
 import { DEADLINE_GRACE_MS, roundKind } from './online-test';
@@ -192,6 +192,8 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
         companyWebsite: ctx.companyWebsite,
         roundName: round.name,
         clearedStep: previous ? previous.name : 'AI screening round',
+        // the aptitude invitation and the one right after the aptitude round say "shortlisted"
+        shortlisted: round.type === 'APTITUDE' || previous?.type === 'APTITUDE',
         timeLimitMinutes: coding ? codingMinutes(round) : round.timeLimitMinutes,
         questionCount: round.questions.length,
         instructions: round.description,
@@ -235,12 +237,17 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
       const ctx = await this.store.context(row.tenantId, row.applicationId);
       if (!ctx) return;
       const config = await this.rounds.forRoundEngine(row.tenantId, ctx.jobId);
-      const roundName = config?.rounds.find((r) => r.id === row.roundId)?.name ?? 'assessment';
+      const cleared = config?.rounds.find((r) => r.id === row.roundId);
+      const roundName = cleared?.name ?? 'assessment';
       const base = { candidateName: ctx.candidateName, jobTitle: ctx.jobTitle, companyName: ctx.companyName, companyWebsite: ctx.companyWebsite, roundName };
+      const nextRoundName = row.kind === 'CLEARED_NEXT_BY_HR' ? row.nextRoundName : null;
       const message =
         row.kind === 'REJECTED'
           ? buildRoundRejectionEmail(base)
-          : buildRoundClearedEmail({ ...base, nextRoundName: row.kind === 'CLEARED_NEXT_BY_HR' ? row.nextRoundName : null });
+          : cleared?.type === 'AI_INTERVIEW'
+            ? // passed the AI technical interview: selected for the personal interview (no link, HR sends the schedule)
+              buildPersonalInterviewSelectedEmail({ ...base, nextRoundName })
+            : buildRoundClearedEmail({ ...base, nextRoundName });
       await this.mailer.send(ctx.email, message);
       delivered = true;
       await this.store.outcomeEmailSent(row.id, this.now());

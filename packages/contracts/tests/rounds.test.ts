@@ -46,7 +46,7 @@ describe('pass mark', () => {
     expect(issues({ rounds: [aptitude(10, 11)] })).toContain('The pass mark cannot be more than the 10 questions.');
   });
   it('limits marks to the total marks and percentage to 100', () => {
-    expect(issues({ rounds: [aptitude(4, 5, 'MARKS')] })).toContain('The pass mark cannot be more than the 4 total marks.');
+    expect(issues({ rounds: [aptitude(4, 5, 'MARKS')] })).toContain('The pass mark (5) is more than the total (4). Set the total in "out of" to 5 or more, or lower the pass mark.');
     expect(issues({ rounds: [aptitude(4, 101, 'PERCENTAGE')] })).toContain('The pass mark cannot be more than 100%.');
   });
   it('checks an interviewer score against its maximum', () => {

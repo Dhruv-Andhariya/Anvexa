@@ -5,15 +5,20 @@ import {
   jobRoundsSchema,
   studentAssessmentSchema,
   type AssessmentJob,
+  type CodingProblemsGenerateRequest,
+  type CodingProblemsResult,
   type GenerateQuestionsRequest,
   type GenerateQuestionsResult,
   type JobAssessments,
   type JobRounds,
   type OverrideRoundResultRequest,
+  type PassRuleChangeResult,
+  type PassRuleInput,
   type SaveRoundsRequest,
   type SkipRoundResult,
   type StudentAssessment,
 } from '@hireflow/contracts';
+import { API_URL, ApiError } from './api';
 import { call, type Options } from './publisher-api';
 
 /**
@@ -67,3 +72,34 @@ export const overrideRoundResult = (applicationId: string, roundId: string, req:
     (v) => studentAssessmentSchema.parse(v),
     opts,
   );
+
+/** HR changes one round's passing criterion, also after students started: that round's results are graded again. */
+export const changePassRule = (jobId: string, roundId: string, passRule: PassRuleInput, opts: Options = {}): Promise<PassRuleChangeResult> =>
+  call('PUT', `/assessments/jobs/${encodeURIComponent(jobId)}/rounds/${encodeURIComponent(roundId)}/pass-rule`, { passRule }, (v) => v as PassRuleChangeResult, opts);
+
+/** DSA coding round: new problems written by the AI (their test outputs checked by running a reference solution). */
+export const generateCodingProblems = (jobId: string, req: CodingProblemsGenerateRequest, opts: Options = {}): Promise<CodingProblemsResult> =>
+  call('POST', `/dsa-hr/jobs/${encodeURIComponent(jobId)}/coding-problems/generate`, req, (v) => v as CodingProblemsResult, opts);
+
+/** DSA coding round: the problems of HR's PDF, Word (.docx) or CSV file. Nothing is saved until the round is saved. */
+export async function importCodingProblems(jobId: string, file: File): Promise<CodingProblemsResult> {
+  const form = new FormData();
+  form.append('file', file);
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/dsa-hr/jobs/${encodeURIComponent(jobId)}/coding-problems/import`, {
+      method: 'POST',
+      headers: { 'x-requested-with': 'hireflow' },
+      body: form,
+      credentials: 'include',
+    });
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the HireFlow API. Check that it is running and try again.');
+  }
+  const json = (await res.json().catch(() => undefined)) as { code?: string; message?: string } | undefined;
+  if (!res.ok) {
+    const fallback = res.status === 413 ? 'The file is larger than 5 MB.' : 'The file could not be imported. Please try again.';
+    throw new ApiError(res.status, json?.code ?? `HTTP_${res.status}`, json?.message ?? fallback);
+  }
+  return json as unknown as CodingProblemsResult;
+}

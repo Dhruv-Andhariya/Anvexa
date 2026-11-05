@@ -40,6 +40,9 @@ from .parsing import (
 from .rounds import PROMPT_FILE as ROUND_QUESTIONS_PROMPT_FILE
 from .rounds import RoundQuestionsRequest, RoundQuestionsResult
 from .rounds import generate_questions as run_round_questions
+from .rounds.coding import PROMPT_FILE as CODING_PROBLEMS_PROMPT_FILE
+from .rounds.coding import CodingProblemsRequest, CodingProblemsResult
+from .rounds.coding import coding_problems as run_coding_problems
 from .schemas import (
     JdContent,
     JdGenerateRequest,
@@ -120,6 +123,10 @@ def get_screening_extract_prompt() -> PromptSpec:
 
 def get_round_questions_prompt() -> PromptSpec:
     return load_prompt(get_settings().prompts_dir / ROUND_QUESTIONS_PROMPT_FILE)
+
+
+def get_coding_problems_prompt() -> PromptSpec:
+    return load_prompt(get_settings().prompts_dir / CODING_PROBLEMS_PROMPT_FILE)
 
 
 def get_interview_plan_prompt() -> PromptSpec:
@@ -347,3 +354,12 @@ def round_questions(  # M05: question suggestions for one assessment round (HR r
     prompt: Annotated[PromptSpec, Depends(get_round_questions_prompt)],
 ):
     return run_round_questions(body, provider_factory(), prompt, budget_seconds=get_settings().round_questions_budget_seconds)
+
+
+@app.post("/v1/rounds/coding-problems", response_model=CodingProblemsResult)
+def coding_problems(  # DSA coding round: new problems, or the problems of HR's PDF / Word file (HR reviews them; nothing is saved)
+    body: CodingProblemsRequest,
+    provider_factory: Annotated[Callable[[], LLMProvider], Depends(get_llm_provider)],
+    prompt: Annotated[PromptSpec, Depends(get_coding_problems_prompt)],
+):
+    return run_coding_problems(body, provider_factory(), prompt, budget_seconds=get_settings().coding_problems_budget_seconds)

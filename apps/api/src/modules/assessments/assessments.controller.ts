@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Put, UseGuards } from '@nestjs/common';
-import type { AssessmentJob, JobAssessments, StudentAssessment } from '@hireflow/contracts';
+import type { AssessmentJob, JobAssessments, PassRuleChangeResult, StudentAssessment } from '@hireflow/contracts';
 import { featureFlag } from '../../common/feature-flags';
 import { RequirePermission } from '../auth';
 import { TenantContext } from '../tenants';
@@ -33,6 +33,17 @@ export class AssessmentsController {
   @Get('applications/:applicationId')
   async student(@Param('applicationId', ParseUUIDPipe) applicationId: string): Promise<StudentAssessment> {
     return this.service.student(await this.tenant.currentTenantId(), applicationId);
+  }
+
+  /**
+   * PUT /api/v1/assessments/jobs/:jobId/rounds/:roundId/pass-rule - body { passRule: { mode, value, maxScore } }.
+   * Works after the rounds were locked too: the round's results are graded again with the new rule.
+   */
+  @RequirePermission('jobs.write')
+  @Put('jobs/:jobId/rounds/:roundId/pass-rule')
+  async changePassRule(@Param('jobId', ParseUUIDPipe) jobId: string, @Param('roundId', ParseUUIDPipe) roundId: string, @Body() body: unknown): Promise<PassRuleChangeResult> {
+    const [tenantId, actor] = await Promise.all([this.tenant.currentTenantId(), this.tenant.currentActor()]);
+    return this.service.changePassRule(tenantId, jobId, roundId, body, actor);
   }
 
   /** PUT /api/v1/assessments/applications/:applicationId/rounds/:roundId/override - body { passed, reason }. */

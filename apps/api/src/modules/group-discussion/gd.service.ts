@@ -86,6 +86,19 @@ export class GdService {
     };
   }
 
+  /**
+   * The automatic version of HR's "Schedule" (gd.worker autoSchedule): every waiting student into groups, the first
+   * group `leadMinutes` from now, with HR's last settings for this round (else the defaults). Returns the start time.
+   */
+  async scheduleAutomatically(tenantId: string, roundId: string, opts: { minGroupSize: number; leadMinutes: number }): Promise<string> {
+    const { suggestedSettings } = await this.overview(tenantId, roundId);
+    const settings = { ...suggestedSettings, minGroupSize: Math.min(suggestedSettings.minGroupSize, opts.minGroupSize) };
+    const startsAt = new Date(this.now().getTime() + Math.max(opts.leadMinutes, GD_LIMITS.minLeadMinutes + 1) * 60_000);
+    const when = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(startsAt);
+    await this.createEvent(tenantId, roundId, { name: `Group discussion ${when} (automatic)`.slice(0, GD_LIMITS.nameMax), startsAt: startsAt.toISOString(), settings }, null);
+    return startsAt.toISOString();
+  }
+
   /** Puts EVERY waiting student of the round into groups, starting at `startsAt`, one group after another. */
   async createEvent(tenantId: string, roundId: string, body: unknown, actor: Actor | null): Promise<GdRoundOverview> {
     const parsed = createGdEventRequestSchema.safeParse(body);

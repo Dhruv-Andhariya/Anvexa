@@ -193,3 +193,75 @@ describe('grading rules', () => {
     ] })).toThrow('worth at most 5 marks');
   });
 });
+
+describe('HR changes the passing criterion, also after students started', () => {
+  const record = (applicationId: string, n: number) => service.record(TENANT, { applicationId, roundId: saved[0]!.id, answers: aptitudeAnswers(n) });
+
+  it('works on locked rounds, re-grades every result of that round and lists who changed', async () => {
+    await record(APP, 7); // 7 of 10: fails "8 correct"
+    await record(SECOND_APP, 9); // passes
+    expect((await rounds.forRoundEngine(TENANT, JOB))!.locked).toBe(true);
+    const res = await service.changePassRule(TENANT, JOB, saved[0]!.id, { passRule: { mode: 'CORRECT_COUNT', value: 6 } }, ACTOR);
+    expect(res).toMatchObject({ roundId: saved[0]!.id, passRule: { mode: 'CORRECT_COUNT', value: 6, maxScore: null }, regraded: 2 });
+    expect(res.changed).toEqual([{ applicationId: APP, name: 'Asha Patel', before: 'FAILED', after: 'PASSED', overridden: false }]);
+    expect((await rounds.forRoundEngine(TENANT, JOB))!.rounds[0]!.passRule).toEqual({ mode: 'CORRECT_COUNT', value: 6, maxScore: null });
+    expect((await service.student(TENANT, APP)).rounds[0]).toMatchObject({ outcome: 'PASSED' });
+    // the questions stay frozen
+    expect(code(await rounds.save(TENANT, JOB, { rounds: [aptitude], complete: true }, ACTOR).catch((e: unknown) => e))).toBe('ROUNDS_LOCKED');
+  });
+
+  it('can switch the criterion (marks / percentage) for the same answers; HR overrides are kept', async () => {
+    await record(APP, 5);
+    await service.override(TENANT, APP, saved[0]!.id, { passed: true, reason: 'Interview went very well' }, ACTOR);
+    const res = await service.changePassRule(TENANT, JOB, saved[0]!.id, { passRule: { mode: 'PERCENTAGE', value: 40 } }, ACTOR);
+    expect(res.changed).toEqual([{ applicationId: APP, name: 'Asha Patel', before: 'FAILED', after: 'PASSED', overridden: true }]);
+    expect((await service.student(TENANT, APP)).rounds[0]).toMatchObject({ outcome: 'PASSED', override: { passed: true } });
+  });
+
+  it('refuses a pass mark above the total, and changes nothing', async () => {
+    await record(APP, 7);
+    const err = await service.changePassRule(TENANT, JOB, saved[0]!.id, { passRule: { mode: 'CORRECT_COUNT', value: 11 } }, ACTOR).catch((e: unknown) => e);
+    expect([status(err), code(err)]).toEqual([400, 'INVALID_PASS_RULE']);
+    expect((await rounds.forRoundEngine(TENANT, JOB))!.rounds[0]!.passRule).toEqual({ mode: 'CORRECT_COUNT', value: 8, maxScore: null });
+  });
+
+  it('refuses a criterion the recorded results cannot be graded with, and changes nothing', async () => {
+    await record(APP, 7);
+    const err = await service.changePassRule(TENANT, JOB, saved[0]!.id, { passRule: { mode: 'INTERVIEWER_SCORE', value: 5, maxScore: 10 } }, ACTOR).catch((e: unknown) => e);
+    expect(code(err)).toBe('PASS_RULE_INCOMPATIBLE');
+    expect((await rounds.forRoundEngine(TENANT, JOB))!.rounds[0]!.passRule!.mode).toBe('CORRECT_COUNT');
+  });
+
+  it("another company's round is not found", async () => {
+    const err = await service.changePassRule(OTHER_TENANT, JOB, saved[0]!.id, { passRule: { mode: 'CORRECT_COUNT', value: 6 } }, ACTOR).catch((e: unknown) => e);
+    expect(status(err)).toBe(404);
+  });
+});
+
+describe('HR sets the total marks of a round (e.g. out of 50, 60 or 1000)', () => {
+  // aptitude: 10 questions of 1 mark
+  const record = (applicationId: string, n: number) => service.record(TENANT, { applicationId, roundId: saved[0]!.id, answers: aptitudeAnswers(n) });
+
+  it('scales the marks to HR\'s total, so the pass mark can be any number up to that total', async () => {
+    await rounds.save(TENANT, JOB, { rounds: [{ ...aptitude, passRule: { mode: 'MARKS', value: 30, maxScore: 50 } }, sql, interview], complete: true }, ACTOR);
+    saved = (await rounds.forRoundEngine(TENANT, JOB))!.rounds;
+    expect(saved[0]!.passRule).toEqual({ mode: 'MARKS', value: 30, maxScore: 50 });
+    expect(await record(APP, 7)).toMatchObject({ outcome: 'PASSED', score: 35, maxScore: 50, passMark: 30 }); // 7 of 10 = 35 of 50
+    expect(await record(SECOND_APP, 5)).toMatchObject({ outcome: 'FAILED', score: 25, maxScore: 50 });
+  });
+
+  it('a pass mark above the questions\' own total is fine once HR sets a bigger total; above HR\'s total it is refused', async () => {
+    const save = (passRule: unknown) => rounds.save(TENANT, JOB, { rounds: [{ ...aptitude, passRule } as RoundInput], complete: true }, ACTOR);
+    await expect(save({ mode: 'MARKS', value: 600, maxScore: 1000 })).resolves.toBeTruthy();
+    expect(code(await save({ mode: 'MARKS', value: 22 }).catch((e: unknown) => e))).toBe('INVALID_ROUNDS'); // no total: out of the 10 question marks
+    expect(code(await save({ mode: 'MARKS', value: 60, maxScore: 50 }).catch((e: unknown) => e))).toBe('INVALID_ROUNDS');
+  });
+
+  it('also works when changing the criterion after students started (re-graded with the new total)', async () => {
+    await record(APP, 4); // 4 of 10 marks: fails "8 correct"
+    const res = await service.changePassRule(TENANT, JOB, saved[0]!.id, { passRule: { mode: 'MARKS', value: 20, maxScore: 50 } }, ACTOR);
+    expect(res.passRule).toEqual({ mode: 'MARKS', value: 20, maxScore: 50 });
+    expect(res.changed).toEqual([expect.objectContaining({ applicationId: APP, before: 'FAILED', after: 'PASSED' })]); // 20 of 50
+    expect((await service.student(TENANT, APP)).rounds[0]).toMatchObject({ outcome: 'PASSED', score: 20, maxScore: 50 });
+  });
+});

@@ -103,6 +103,35 @@ export class AiInterviewHrService {
     return this.view(tenantId, applicationId);
   }
 
+  /**
+   * Automatic decision (AUTO_AI_INTERVIEW_DECISIONS, worker): an interview that ended normally and has its AI report is
+   * advanced or rejected by the round's pass rule (AI score vs HR's pass mark), with no HR click. Interviews ended by
+   * the warning limit (TERMINATED) are never decided here - HR reviews them. Returns true when it decided.
+   */
+  async autoDecide(session: SessionRow): Promise<boolean> {
+    if (session.decision || session.status === 'TERMINATED' || !ENDED.includes(session.status)) return false;
+    const reportRow = await this.store.report(session.id);
+    if (reportRow?.status !== 'DONE') return false;
+    const report = parseReport(reportRow.report);
+    const proposed = interviewerScore(report?.overallScore ?? null, parseConfig(session.config).passRule);
+    if (!proposed) return false; // no interviewer-score pass rule: HR decides
+    const decision = proposed.score >= proposed.passMark ? 'ADVANCE' : 'REJECT';
+    const reason = `Automatic: AI score ${proposed.score} of ${proposed.maxScore}, pass mark ${proposed.passMark}.`;
+    const decided = await this.store.decide(session.tenantId, session.id, { decision, reason, byId: null, byName: 'Automatic (pass mark)' }, this.now());
+    if (!decided) return false;
+    await this.audit.record({
+      tenantId: session.tenantId,
+      actorUserId: null,
+      action: 'ai_interview.auto_decided',
+      subjectType: 'application',
+      subjectId: session.applicationId,
+      metadata: { roundId: session.roundId, decision, aiScore: proposed.score, maxScore: proposed.maxScore, passMark: proposed.passMark },
+    });
+    // hands it to the round engine (next round / personal-interview email); recover() retries if interrupted
+    await this.record((await this.store.session(session.id))!);
+    return true;
+  }
+
   /** POST .../rounds/:roundId/report - make the report again (after a failure). */
   async retryReport(tenantId: string, applicationId: string, roundId: string): Promise<AiInterviewHrView> {
     const session = (await this.store.sessionsForApplication(tenantId, applicationId)).find((s) => s.roundId === roundId);

@@ -155,10 +155,14 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     return true;
   }
 
-  async queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string) {
+  /** Invitation emails held until a time (queueInvite's notBefore), by invite id. */
+  holdUntil = new Map<string, Date>();
+  async queueInvite(tenantId: string, applicationId: string, jobId: string, roundId: string, notBefore?: Date) {
     if (this.invites.some((i) => i.applicationId === applicationId && i.roundId === roundId)) return false;
+    const inviteId = id();
+    if (notBefore) this.holdUntil.set(inviteId, notBefore);
     this.invites.push({
-      id: id(),
+      id: inviteId,
       tenantId,
       applicationId,
       jobId,
@@ -184,8 +188,14 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
   async screeningsToInvite() {
     return this.completedScreenings.filter((s) => !this.invites.some((i) => i.applicationId === s.applicationId && i.roundId === s.roundId));
   }
-  async claimDueInvites() {
-    const due = this.invites.filter((i) => i.emailStatus === 'QUEUED');
+  async continueInvite(inviteId: string, tokenHash: string, expiresAt: Date, at: Date) {
+    const i = this.invites.find((x) => x.id === inviteId);
+    if (!i || i.emailStatus !== 'QUEUED' || i.revokedAt) return false;
+    Object.assign(i, { tokenHash, expiresAt, emailStatus: 'SENT', sentAt: at, lastError: null });
+    return true;
+  }
+  async claimDueInvites(now?: Date) {
+    const due = this.invites.filter((i) => i.emailStatus === 'QUEUED' && !(now && (this.holdUntil.get(i.id)?.getTime() ?? 0) > now.getTime()));
     due.forEach((i) => Object.assign(i, { emailStatus: 'SENDING', attempts: i.attempts + 1 }));
     return due.map((i) => ({ ...i }));
   }

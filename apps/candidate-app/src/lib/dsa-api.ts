@@ -246,6 +246,22 @@ const base = (token: string) => `/dsa/${encodeURIComponent(token)}`;
 export const getAssessment = (token: string) => request<AssessmentState>('GET', base(token));
 export const startAssessment = (token: string) => request<AssessmentState>('POST', `${base(token)}/start`);
 export const finishAssessment = (token: string) => request<AssessmentState>('POST', `${base(token)}/finish`);
+
+/** What follows the round, asked once it ended (mirrors ContinueAfterCoding in apps/api round-engine.service.ts). */
+export type NextStep =
+  | { status: 'NEXT_ROUND'; token: string; roundName: string }
+  | { status: 'EMAILED'; roundName: string }
+  | { status: 'GROUP_DISCUSSION'; roundName: string; gd: GdStep }
+  | { status: 'WAITING' }
+  | { status: 'DONE' };
+/** Where the student stands for the group discussion (mirrors GdStudentLink in apps/api group-discussion). */
+export type GdStep =
+  | { status: 'JOINING_POOL' }
+  | { status: 'WAITING'; waiting: number; needed: number }
+  | { status: 'SCHEDULED'; startsAt: string }
+  | { status: 'READY'; startsAt: string; link: string }
+  | { status: 'NONE' };
+export const continueAfterRound = (token: string) => request<NextStep>('POST', `${base(token)}/continue`);
 export const runCode = (token: string, input: { questionId: string; language: Language; code: string }) =>
   request<RunResponse>('POST', `${base(token)}/run`, input);
 export const submitCode = (token: string, input: { questionId: string; language: Language; code: string }) =>

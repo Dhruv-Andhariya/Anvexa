@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import time
 
 import numpy as np
@@ -171,9 +173,26 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.shutdown(reason="group discussion ended")
 
 
+def _load_threshold() -> float:
+    # Production mode refuses new groups above 75 % CPU ("worker is at full capacity"): on a busy laptop a group could
+    # then start with NO moderator - no rules, no topic. The bot is light, so it takes every group unless this is set.
+    raw = os.environ.get("GD_MODERATOR_LOAD_THRESHOLD", "").strip()
+    try:
+        return float(raw) if raw else math.inf
+    except ValueError:
+        return math.inf
+
+
 def run() -> None:
     # one warm process is plenty for a few groups at a time and keeps a laptop's memory free (each holds the voice);
     # loading the voice takes well over the default 10 s on a busy laptop
     cli.run_app(
-        WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, agent_name=AGENT_NAME, num_idle_processes=1, initialize_process_timeout=90.0)
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
+            agent_name=AGENT_NAME,
+            num_idle_processes=1,
+            initialize_process_timeout=90.0,
+            load_threshold=_load_threshold(),
+        )
     )

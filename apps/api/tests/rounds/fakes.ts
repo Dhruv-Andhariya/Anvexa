@@ -58,6 +58,12 @@ export class MemoryRoundsConfigStore extends RoundsConfigStore {
     r.skip = skip ? { ...skip, byName: skip.byId === ACTOR.id ? ACTOR.name : null } : null;
     return true;
   }
+  async setPassRule(tenantId: string, jobId: string, roundId: string, rule: { mode: StoredRound['passMode']; value: number; maxScore: number | null }) {
+    const r = this.configs.get(jobId)?.rounds.find((x) => x.id === roundId);
+    if (!r || this.configs.get(jobId)!.tenantId !== tenantId) return false;
+    Object.assign(r, { passMode: rule.mode, passValue: rule.value, passMaxScore: rule.maxScore });
+    return true;
+  }
 }
 
 export class FakeGenerator {

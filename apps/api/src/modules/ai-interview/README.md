@@ -15,7 +15,7 @@ back through `RoundEngineService.recordModuleResult()` (next invitation or outco
 |---|---|
 | `flow.ts` | Pure rules: config snapshot, server clock (pauses, grace), next question (limits, fallbacks), fallback plan, greeting / closing |
 | `ai-interview.service.ts` | Candidate flow: link -> session, start / resume / pause / events / repeat / end, answers, spoken questions, plan, report |
-| `ai-interview-hr.service.ts` | HR view (incl. integrity: warnings, incidents, termination), decision (once; reason when overruling the score or deciding on a terminated interview), hand-over to the round engine |
+| `ai-interview-hr.service.ts` | HR view (incl. integrity: warnings, incidents, termination), decision (once; reason when overruling the score or deciding on a terminated interview), hand-over to the round engine; `autoDecide`: with `AUTO_AI_INTERVIEW_DECISIONS` (default on) the worker advances / rejects by the round's pass mark once the report is ready (audit `ai_interview.auto_decided`); interviews ended by the warning limit still wait for HR |
 | `protection.ts` | Pure protection rules: which incident qualifies, grouping / dedup, the ONE warning counter, termination text, the page's protection state |
 | `protection.service.ts` | `InterviewProtectionService`: the single source of truth for warnings (public report + acknowledge; HR round settings) |
 | `ai-interview.worker.ts` | Background loop: invite waiting students, send invitation emails, time-out sweep, reports, unrecorded decisions |

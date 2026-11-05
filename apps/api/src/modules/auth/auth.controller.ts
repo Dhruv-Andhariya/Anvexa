@@ -39,7 +39,8 @@ export class AuthController {
   @Public()
   @Get('google/start')
   googleStart(@Req() req: AuthRequest, @Res() res: RedirectResponse, @Query('next') next?: string) {
-    const step = this.google.start(safeNextPath(str(next)), clientIp(req), overHttps(req));
+    // the dashboard's /api/v1 proxy forwards the address HR is on: sign-in returns through that same address
+    const step = this.google.start(safeNextPath(str(next)), clientIp(req), overHttps(req), str(req.headers['x-forwarded-host']));
     if (step.cookie) res.setHeader('Set-Cookie', step.cookie);
     res.redirect(302, step.redirectTo);
   }

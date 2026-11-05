@@ -246,8 +246,9 @@ export function PublishDialog({ job, onClose, onPublished }: { job: PublishableJ
               </div>
               {locked && (
                 <p className="rounded-md border border-border bg-accent-soft px-4 py-2 text-sm">
-                  Students have started these rounds, so the rounds, questions and passing criteria are locked. You can still
-                  skip a round (or undo a skip): students then get the link of the next round that runs.
+                  Students have started these rounds, so the rounds and questions are locked. You can still change each round&apos;s
+                  passing criterion and pass mark (saving it grades that round&apos;s results again), and skip a round (or undo a
+                  skip): students then get the link of the next round that runs.
                 </p>
               )}
               {notice && <p className="rounded-md border border-success/40 bg-success-soft px-4 py-2 text-sm text-success">{notice}</p>}
@@ -266,6 +267,7 @@ export function PublishDialog({ job, onClose, onPublished }: { job: PublishableJ
                   rounds={drafts}
                   validation={validation}
                   disabled={busy || locked}
+                  locked={locked && !busy}
                   onChange={editRounds}
                   onSkipped={(key, skipped, message) => {
                     // saved on the server already: not an unsaved edit

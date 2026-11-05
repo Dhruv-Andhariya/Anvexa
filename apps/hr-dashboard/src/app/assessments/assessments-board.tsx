@@ -11,6 +11,15 @@ import { getJobAssessments, listAssessmentJobs } from '@/lib/rounds-api';
 import { GdRecordings } from './gd-recordings';
 import { OUTCOME_STYLE, OUTCOME_TEXT, STAGE_STYLE, STAGE_TEXT, pill, scoreText } from './assessment-styles';
 
+/** Menu steps that open this board on one kind of round (Assessments menu in the header). */
+export const BOARD_STEPS = {
+  sql: { title: 'SQL round', types: ['SQL'] },
+  dsa: { title: 'DSA round', types: ['CODING'] },
+  interview: { title: 'Technical interview', types: ['AI_INTERVIEW', 'TECHNICAL_INTERVIEW'] },
+} as const satisfies Record<string, { title: string; types: readonly string[] }>;
+type Step = keyof typeof BOARD_STEPS;
+const stepOf = (v: string | null): Step | null => (v && v in BOARD_STEPS ? (v as Step) : null);
+
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 type Tab = 'students' | 'rounds';
 const STAGES: (AssessmentStage | 'ALL')[] = ['ALL', 'IN_PROGRESS', 'CLEARED', 'NOT_CLEARED', 'NOT_STARTED'];
@@ -43,8 +52,12 @@ export function AssessmentsBoard() {
 
   const tab: Tab = params.get('tab') === 'rounds' ? 'rounds' : 'students';
   const jobId = params.get('job') ?? jobs?.[0]?.jobId ?? null;
+  const step = stepOf(params.get('step'));
+  const roundFilter = params.get('round');
   const go = (next: { job?: string; tab?: Tab }) => {
-    const q = new URLSearchParams({ job: next.job ?? jobId ?? '', tab: next.tab ?? tab });
+    // another job has other rounds: the one-round filter only stays on the same job
+    const keepRound = roundFilter && (!next.job || next.job === jobId);
+    const q = new URLSearchParams({ job: next.job ?? jobId ?? '', tab: next.tab ?? tab, ...(step ? { step } : {}), ...(keepRound ? { round: roundFilter } : {}) });
     router.replace(`/assessments?${q.toString()}`);
   };
 
@@ -69,7 +82,7 @@ export function AssessmentsBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Assessments</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{step ? `Assessments · ${BOARD_STEPS[step].title}` : roundFilter ? 'Assessments · one round' : 'Assessments'}</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Every round of the hiring process: resume (ATS) score, AI voice screening, and each assessment round. Pick a job to see every shortlisted student,
           their result in each round, and open a student for the full review.
@@ -96,15 +109,16 @@ export function AssessmentsBoard() {
               ))}
             </select>
           </label>
-          {jobId && <JobResults key={jobId} jobId={jobId} tab={tab} onTab={(t) => go({ tab: t })} />}
+          {jobId && <JobResults key={`${jobId}:${step ?? ''}:${roundFilter ?? ''}`} jobId={jobId} tab={tab} onTab={(t) => go({ tab: t })} step={step} roundId={roundFilter} />}
         </>
       )}
     </div>
   );
 }
 
-function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t: Tab) => void }) {
-  const [data, setData] = useState<JobAssessments | null>(null);
+function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: Tab; onTab: (t: Tab) => void; step: Step | null; roundId: string | null }) {
+  const [loaded, setData] = useState<JobAssessments | null>(null);
+  let data = loaded;
   const [pipeline, setPipeline] = useState<JobPipelineStatuses | null>(null);
   const [error, setError] = useState('');
   const [stage, setStage] = useState<AssessmentStage | 'ALL'>('ALL');
@@ -140,6 +154,13 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
     );
   }
 
+  // one round of HR's process (Assessments menu), or one kind of round
+  const focus = roundId ? data.rounds.find((r) => r.id === roundId) ?? null : null;
+  if (focus || step) {
+    const types: readonly string[] = step ? BOARD_STEPS[step].types : [];
+    const keep = new Set(data.rounds.filter((r) => (focus ? r.id === focus.id : types.includes(r.type))).map((r) => r.id));
+    data = { ...data, rounds: data.rounds.filter((r) => keep.has(r.id)), students: data.students.map((st) => ({ ...st, rounds: st.rounds.filter((c) => keep.has(c.roundId)) })) };
+  }
   const pipelineOf = new Map((pipeline?.students ?? []).map((p) => [p.applicationId, p]));
   const needle = search.trim().toLowerCase();
   const students = data.students.filter(
@@ -174,6 +195,28 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
           <p className="text-sm text-muted">Set up its rounds, questions and passing criteria on the Publish page.</p>
           <Link href={`/publish?job=${encodeURIComponent(jobId)}`} className="text-sm font-medium text-accent hover:underline">
             Open the Publish page →
+          </Link>
+        </Card>
+      )}
+
+      {(step || roundId) && (
+        <Card className="flex flex-wrap items-center gap-3">
+          <p className="text-sm">
+            {focus
+              ? <>Step {focus.position + 1} of this job: <span className="font-medium">{focus.name}</span>{focus.passRuleText ? ` · pass: ${focus.passRuleText}` : ''}</>
+              : roundId
+                ? 'That round is not part of this job (any more). Pick a step from the Assessments menu.'
+                : data.rounds.length
+                  ? `Showing only the ${BOARD_STEPS[step!].title.toLowerCase()} of this job.`
+                  : `This job has no ${BOARD_STEPS[step!].title.toLowerCase()}. Add one on the Publish page (rounds editor).`}
+          </p>
+          {(step === 'sql' || focus?.type === 'SQL') && (
+            <Link href="/sql-questions" className="text-sm font-medium text-accent hover:underline">
+              SQL question bank →
+            </Link>
+          )}
+          <Link href={`/assessments?job=${encodeURIComponent(jobId)}`} className="ml-auto text-sm font-medium text-accent hover:underline">
+            Every round →
           </Link>
         </Card>
       )}

@@ -149,6 +149,16 @@ export class RoundsConfigService {
     return { questions, dropped: raw.questions.length + raw.invalid - questions.length, model: raw.model, promptVersion: raw.promptVersion };
   }
 
+  /** What the job is about (approved JD + HR's requirements), for AI authoring of a round's problems. 409 once locked. */
+  async jobFactsFor(tenantId: string, jobId: string): Promise<QuestionJobFacts> {
+    return this.guard(async () => {
+      const found = await this.store.getJob(tenantId, jobId);
+      if (!found) throw jobNotFound();
+      if ((await this.store.getConfig(tenantId, jobId))?.lockedAt) throw roundsLocked();
+      return jobFacts(found.title, found.form, found.jd);
+    });
+  }
+
   /**
    * For the publisher: the public "Selection process" of the job = its round NAMES in order, and whether the rounds
    * are complete. null when the rounds migration is not applied (publishing then works as before it existed).
@@ -220,6 +230,16 @@ export class RoundsConfigService {
     });
   }
 
+  /**
+   * HR changes one round's passing criterion, also after students started (assessments module: it re-grades the
+   * results first). Only the rule changes; questions and everything else stay frozen. Audited.
+   */
+  async setPassRule(tenantId: string, jobId: string, roundId: string, rule: PassRule, actor: Actor | null): Promise<void> {
+    const ok = await this.guard(() => this.store.setPassRule(tenantId, jobId, roundId, { mode: rule.mode, value: rule.value, maxScore: (rule.mode === 'INTERVIEWER_SCORE' || rule.mode === 'MARKS') ? rule.maxScore : null }));
+    if (!ok) throw apiError(HttpStatus.NOT_FOUND, 'ROUND_NOT_FOUND', 'Round not found.');
+    await this.audit.record({ tenantId, actorUserId: actor?.id ?? null, action: 'rounds.pass_rule_changed', subjectType: 'job', subjectId: jobId, metadata: { roundId, ...rule } });
+  }
+
   /** Configs of several jobs (assessments job list). */
   async listConfigs(tenantId: string, jobIds: string[]): Promise<StoredConfig[]> {
     return this.guard(() => this.store.listConfigs(tenantId, jobIds));
@@ -260,7 +280,7 @@ function toStored(rounds: RoundConfig[], current: StoredConfig | null): StoredRo
     timeLimitMinutes: r.timeLimitMinutes,
     passMode: r.passRule?.mode ?? null,
     passValue: r.passRule?.value ?? null,
-    passMaxScore: r.passRule?.mode === 'INTERVIEWER_SCORE' ? r.passRule.maxScore : null,
+    passMaxScore: r.passRule?.mode === 'INTERVIEWER_SCORE' || r.passRule?.mode === 'MARKS' ? r.passRule.maxScore : null,
     questions: r.questions.map((q, j) => ({
       id: keep(q.id, questionIds, usedQuestions),
       position: j + 1,

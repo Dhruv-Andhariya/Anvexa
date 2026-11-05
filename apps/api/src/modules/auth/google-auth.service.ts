@@ -37,15 +37,17 @@ export class GoogleAuthService {
   }
 
   /** Redirect to Google's account chooser; the cookie remembers state, PKCE verifier and where to go afterwards. */
-  start(next: string | undefined, ip: string, httpsRequest: boolean): { redirectTo: string; cookie?: string } {
-    if (!this.google.configured) return { redirectTo: this.failed('not_configured') };
+  start(next: string | undefined, ip: string, httpsRequest: boolean, forwardedHost?: string): { redirectTo: string; cookie?: string } {
+    const flow = this.google.flowFor(forwardedHost);
+    if (!this.google.configured) return { redirectTo: this.failed('not_configured', flow.dashboardUrl) };
     try {
       this.startsPerIp.consume(ip);
     } catch {
-      return { redirectTo: this.failed('rejected') };
+      return { redirectTo: this.failed('rejected', flow.dashboardUrl) };
     }
-    const { state, verifier, cookie } = newGoogleState(next, httpsRequest);
-    return { redirectTo: this.google.authorizeUrl(state, verifier), cookie };
+    // the cookie also remembers which dashboard address this sign-in belongs to (Google's return address + landing)
+    const { state, verifier, cookie } = newGoogleState(next, httpsRequest, flow);
+    return { redirectTo: this.google.authorizeUrl(state, verifier, flow.redirectUri), cookie };
   }
 
   /** Google sent the browser back: on success a new session token and the dashboard page to open. */
@@ -54,21 +56,24 @@ export class GoogleAuthService {
     cookieValue: string | undefined,
     ip: string,
   ): Promise<{ session?: { token: string; expiresAt: Date }; redirectTo: string }> {
+    let dashboardUrl = this.google.dashboardUrl;
     try {
-      if (q.error) throw new GoogleOAuthError('cancelled');
       const st = readGoogleState(cookieValue, q.state);
+      const flow = this.google.knownFlow(st?.flow);
+      if (flow) dashboardUrl = flow.dashboardUrl;
+      if (q.error) throw new GoogleOAuthError('cancelled');
       if (!st || !q.code) throw new GoogleOAuthError('expired');
-      const identity = await this.google.identity(q.code, st.verifier);
+      const identity = await this.google.identity(q.code, st.verifier, Date.now(), flow?.redirectUri);
       const userId = await this.userFor(identity, ip);
 
       const session = await this.sessions.create(userId);
       await this.prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
       await this.audit.record({ tenantId: null, actorUserId: userId, action: 'auth.login', metadata: { ip, method: 'google' } });
-      return { session, redirectTo: `${this.google.dashboardUrl}${st.next ?? (await this.landingPage(session.token))}` };
+      return { session, redirectTo: `${dashboardUrl}${st.next ?? (await this.landingPage(session.token))}` };
     } catch (err) {
       if (err instanceof GoogleOAuthError) {
         if (err.reason !== 'cancelled') this.logger.warn(`Google sign-in failed: ${err.reason}`);
-        return { redirectTo: this.failed(err.reason) };
+        return { redirectTo: this.failed(err.reason, dashboardUrl) };
       }
       throw err;
     }
@@ -116,7 +121,7 @@ export class GoogleAuthService {
     return s.company ? '/jobs' : s.user.isPlatformAdmin ? '/admin' : s.companies.length ? '/jobs' : '/register-company';
   }
 
-  private failed(reason: string): string {
-    return `${this.google.dashboardUrl}/login?oauth_error=${encodeURIComponent(reason)}`;
+  private failed(reason: string, dashboardUrl: string = this.google.dashboardUrl): string {
+    return `${dashboardUrl}/login?oauth_error=${encodeURIComponent(reason)}`;
   }
 }

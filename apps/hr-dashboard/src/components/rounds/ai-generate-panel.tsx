@@ -1,17 +1,19 @@
 'use client';
 
-import { QUESTION_KINDS, ROUND_TYPES, ROUNDS_LIMITS, type Difficulty, type GeneratedQuestion, type QuestionKind } from '@hireflow/contracts';
+import { QUESTION_KINDS, ROUND_TYPES, ROUNDS_LIMITS, type Difficulty, type QuestionKind } from '@hireflow/contracts';
 import { useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { fromGenerated, type QuestionDraft, type RoundDraft } from '@/lib/rounds';
 import { generateQuestions } from '@/lib/rounds-api';
 import { Button, Spinner, inputClass } from '../ui';
+import { QuestionEditor } from './question-editor';
 
 const ALL_KINDS = Object.keys(QUESTION_KINDS) as QuestionKind[];
 
 /**
- * "Generate with AI" for one round. The AI only suggests: HR ticks the questions to keep and they are added to the
- * round (saved when the rounds are saved). Nothing reaches students without HR.
+ * "Generate with AI" for one round. The AI only suggests: HR edits any suggestion (text, options, correct answer,
+ * marks...), ticks the ones to keep and they are added to the round as edited (saved when the rounds are saved).
+ * Nothing reaches students without HR.
  */
 export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: string; round: RoundDraft; onAdd: (q: QuestionDraft[]) => void; onClose: () => void }) {
   const [count, setCount] = useState('5');
@@ -20,8 +22,10 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
   const [kinds, setKinds] = useState<QuestionKind[]>(ROUND_TYPES[round.type].kinds);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [suggested, setSuggested] = useState<GeneratedQuestion[] | null>(null);
+  // the suggestions as editable questions: what HR edits here is exactly what is added
+  const [suggested, setSuggested] = useState<QuestionDraft[] | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [editing, setEditing] = useState<number | null>(null);
 
   const n = Number(count);
   const countOk = Number.isInteger(n) && n >= 1 && n <= ROUNDS_LIMITS.generateMax;
@@ -45,8 +49,9 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
         kinds,
         avoid: round.questions.map((q) => q.text).filter(Boolean),
       });
-      setSuggested(res.questions);
+      setSuggested(res.questions.map(fromGenerated));
       setPicked(new Set(res.questions.map((_, i) => i)));
+      setEditing(null);
       if (!res.questions.length) setError('The AI did not write usable questions this time. Try again or change the topics.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not generate questions. Please try again.');
@@ -55,7 +60,7 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
   };
 
   const add = () => {
-    onAdd((suggested ?? []).filter((_, i) => picked.has(i)).map(fromGenerated));
+    onAdd((suggested ?? []).filter((_, i) => picked.has(i)));
     setSuggested(null);
     onClose();
   };
@@ -128,7 +133,7 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
 
       {suggested && suggested.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-muted">Review the suggestions and keep only the ones you want.</p>
+          <p className="text-sm text-muted">Review the suggestions: edit any of them, and keep only the ones you want.</p>
           <ul className="flex flex-col gap-2">
             {suggested.map((q, i) => (
               <li key={i} className="flex gap-2 rounded-md border border-border bg-surface p-2 text-sm">
@@ -143,24 +148,55 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
                     setPicked(next);
                   }}
                 />
-                <div className="flex min-w-0 flex-col gap-1">
-                  <p className="whitespace-pre-wrap">{q.text}</p>
-                  {q.options.length > 0 && (
-                    <ol className="list-[lower-alpha] pl-5 text-muted">
-                      {q.options.map((o, j) => (
-                        <li key={j} className={q.correct.includes(j) ? 'font-medium text-success' : ''}>
-                          {o}
-                          {q.correct.includes(j) && ' ✓'}
-                        </li>
-                      ))}
+                {editing === i ? (
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <ol>
+                      <QuestionEditor
+                        q={q}
+                        index={i}
+                        count={suggested.length}
+                        path={`ai.${i}`}
+                        validation={null}
+                        disabled={false}
+                        onChange={(next) => setSuggested(suggested.map((x, k) => (k === i ? next : x)))}
+                        onMove={() => undefined}
+                        onRemove={() => {
+                          const next = new Set(picked);
+                          next.delete(i);
+                          setPicked(next);
+                          setEditing(null);
+                        }}
+                      />
                     </ol>
-                  )}
-                  {q.modelAnswer && <p className="whitespace-pre-wrap text-xs text-muted">Answer: {q.modelAnswer}</p>}
-                  <p className="text-xs text-muted">
-                    {QUESTION_KINDS[q.kind].label} · {q.marks} mark{q.marks === 1 ? '' : 's'}
-                    {q.topics.length > 0 && ` · ${q.topics.join(', ')}`}
-                  </p>
-                </div>
+                    <Button className="self-start" onClick={() => setEditing(null)}>
+                      Done editing
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <p className="whitespace-pre-wrap">{q.text}</p>
+                    {q.options.length > 0 && (
+                      <ol className="list-[lower-alpha] pl-5 text-muted">
+                        {q.options.map((o, j) => (
+                          <li key={j} className={q.correct.includes(j) ? 'font-medium text-success' : ''}>
+                            {o}
+                            {q.correct.includes(j) && ' ✓'}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {q.modelAnswer && <p className="whitespace-pre-wrap text-xs text-muted">Answer: {q.modelAnswer}</p>}
+                    <p className="text-xs text-muted">
+                      {QUESTION_KINDS[q.kind].label} · {q.marks} mark{q.marks === '1' ? '' : 's'}
+                      {q.topics.length > 0 && ` · ${q.topics.join(', ')}`}
+                    </p>
+                  </div>
+                )}
+                {editing !== i && (
+                  <Button variant="ghost" className="self-start px-2 py-1 text-xs" onClick={() => setEditing(i)}>
+                    ✎ Edit
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

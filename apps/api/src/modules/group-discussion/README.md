@@ -8,8 +8,11 @@
 
 Runs the **Group Discussion** rounds HR configured on the Publish page (round type `GROUP_DISCUSSION`; its questions
 are the topics). Students who pass every earlier round wait in the round's **pool**; HR schedules **events** that split
-the pool into **groups** (batches), each with its own time slot, LiveKit room and topic; each group runs live with an
-AI moderator; afterwards every student is transcribed and evaluated, and HR confirms the selection.
+the pool into **groups** (batches) - or the system does it by itself as soon as 6 students wait (`AUTO_GD_SCHEDULE`,
+`AUTO_GD_MIN_STUDENTS`, `AUTO_GD_LEAD_MINUTES`; first group 30 minutes later) - each with its own time slot, LiveKit room and topic; each group runs live with an
+AI moderator; afterwards every student is transcribed and evaluated, and the selection is confirmed: automatically
+(`AUTO_GD_CONFIRM`, default on - the AI's recommendation decides and selected students move straight to the next round),
+or by HR when the job has a GD rubric, an evaluation failed, or `AUTO_GD_CONFIRM=off`.
 Full guide: [`docs/GROUP_DISCUSSION_ROUND.md`](../../../../../docs/GROUP_DISCUSSION_ROUND.md).
 
 ## Files

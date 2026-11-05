@@ -53,6 +53,14 @@ export class MemoryGdStore extends GdStore {
     this.participantRows.push({ id: pid(), ...c, batchId: null, attendance: 'WAITING', name: 'Student', email: 's@example.com', college: null, createdAt: new Date() });
     return true;
   }
+  async roundsWithWaiting(min: number) {
+    const counts = new Map<string, { tenantId: string; roundId: string; waiting: number }>();
+    for (const p of this.participantRows.filter((x) => x.attendance === 'WAITING')) {
+      const k = `${p.tenantId}|${p.roundId}`;
+      counts.set(k, { tenantId: p.tenantId, roundId: p.roundId, waiting: (counts.get(k)?.waiting ?? 0) + 1 });
+    }
+    return [...counts.values()].filter((c) => c.waiting >= min);
+  }
   async listRounds(tenantId: string) {
     return this.rounds.filter((r) => r.tenantId === tenantId).map(({ tenantId: _t, ...r }) => r);
   }

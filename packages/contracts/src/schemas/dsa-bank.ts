@@ -160,3 +160,109 @@ export interface DsaProctoringReview {
     events: { type: string; severity: string; at: string; durationMs: number | null; detail: string | null }[];
   }[];
 }
+
+// ---------------------------------------------------------------- authoring coding problems (rounds editor)
+
+/** "Generate with AI" in a DSA coding round: new problems for the job, each with tests the API verified. */
+export const codingProblemsGenerateRequestSchema = z
+  .object({
+    count: z.number().int().min(1).max(5).default(3),
+    difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
+    topics: z.array(z.string().trim().min(1).max(60)).max(10).default([]),
+    /** Titles already in the round (not repeated). */
+    avoid: z.array(z.string().max(200)).max(100).default([]),
+  })
+  .strict();
+export type CodingProblemsGenerateRequest = z.input<typeof codingProblemsGenerateRequestSchema>;
+
+/** One problem ready for the rounds editor (nothing is saved until HR saves the round). */
+export interface AuthoredCodingProblem {
+  /** Where it came from: written by the AI, read from HR's PDF / Word file, or a row of HR's CSV file. */
+  origin: 'ai' | 'document' | 'csv';
+  question: {
+    kind: 'CODING';
+    text: string;
+    marks: number;
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+    topics: string[];
+    source: 'HR' | 'AI';
+    coding: DsaProblemSpec;
+  };
+  /** What HR should know or still do (e.g. "add hidden tests"); empty = ready to use. */
+  notes: string[];
+}
+export interface CodingProblemsResult {
+  problems: AuthoredCodingProblem[];
+  /** Problems that could not be used, with why (e.g. its solution did not run). */
+  dropped: { title: string; reason: string }[];
+}
+
+/**
+ * HR's CSV file: one problem per row. Column names are matched without regard to case, spaces or underscores. Cells
+ * may hold several lines (quoted, as spreadsheets save them) or "\n" for a line break.
+ */
+export const CODING_CSV_COLUMNS = {
+  required: ['title', 'statement', 'sample_input', 'sample_output'],
+  optional: ['input_format', 'output_format', 'constraints', 'difficulty', 'marks', 'sample_input_2', 'sample_output_2'],
+  /** hidden_input_1 / hidden_output_1 ... hidden_input_10 / hidden_output_10 */
+  hiddenPairs: 10,
+} as const;
+
+/** A CSV template HR can download, with one filled example row. */
+export function codingCsvTemplate(): string {
+  const hidden = Array.from({ length: 3 }, (_, i) => [`hidden_input_${i + 1}`, `hidden_output_${i + 1}`]).flat();
+  const header = ['title', 'statement', 'input_format', 'output_format', 'constraints', 'difficulty', 'marks', 'sample_input', 'sample_output', ...hidden];
+  const row = [
+    'Sum of an array',
+    'Read n integers and print their sum.',
+    'First line: n. Second line: n integers separated by spaces.',
+    'One integer: the sum.',
+    '1 <= n <= 100000\n-10^9 <= a[i] <= 10^9',
+    'EASY',
+    '10',
+    '3\n1 2 3',
+    '6',
+    '1\n5',
+    '5',
+    '4\n-1 1 -2 2',
+    '0',
+    '2\n1000000000 1000000000',
+    '2000000000',
+  ];
+  const cell = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  return [header.map(cell).join(','), row.map(cell).join(',')].join('\r\n') + '\r\n';
+}
+
+/** RFC 4180 CSV (quoted cells, "" for a quote, line breaks inside quotes; a leading BOM is ignored). */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  const s = text.replace(/^\uFEFF/, '');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (quoted) {
+      if (c === '"' && s[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && s[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += c;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}

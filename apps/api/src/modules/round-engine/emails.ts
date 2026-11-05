@@ -31,6 +31,11 @@ export interface InviteEmailInput extends CandidateEmailBase {
   codingKind?: 'code' | 'sql' | 'mixed';
   /** Coding rounds: the AI camera watches this round (DSA_PROCTOR_CAMERA); the email then asks for a webcam. */
   codingCamera?: boolean;
+  /**
+   * "Congratulations! You've been shortlisted" wording: the invitation to the aptitude round and the one right after it.
+   * Every other round's invitation is a plain "your next round" email.
+   */
+  shortlisted?: boolean;
   /** Online test protection: warnings allowed before the test ends (null / missing = protection off). */
   maxWarnings?: number | null;
 }
@@ -56,12 +61,15 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
   const round = oneLine(i.roundName);
   const duration = i.timeLimitMinutes ? `${i.timeLimitMinutes} minutes` : 'no fixed time limit';
   const instructions = i.instructions.trim().replace(/\s+/g, ' ').slice(0, 1000);
-  // "shortlisted" after every cleared step (aptitude -> DSA -> SQL -> ..., in the order HR set), same tone as the ATS email
-  const subject = `Congratulations! You've Been Shortlisted for ${v.job} – Next Step: ${round}`;
+  const subject = i.shortlisted ? `Congratulations! You've Been Shortlisted for ${v.job} – Next Step: ${round}` : `Next Step: ${round} for ${v.job} at ${v.company}`;
   const paragraphs = [
     `Dear ${v.name},`,
-    'Congratulations!',
-    `Based on your performance in the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}, you have been shortlisted for the next stage of our recruitment process: the ${round}.`,
+    ...(i.shortlisted
+      ? [
+          'Congratulations!',
+          `Based on your performance in the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}, you have been shortlisted for the next stage of our recruitment process: the ${round}.`,
+        ]
+      : [`Your next round in the recruitment process for the ${v.job} position at ${v.company} is the ${round}.`]),
     i.coding
       ? `Assessment: ${round} · ${i.questionCount} ${i.codingKind === 'sql' ? 'SQL' : 'coding'} problem${i.questionCount === 1 ? '' : 's'} · ${duration}.`
       : `Assessment: ${round} · ${i.questionCount} question${i.questionCount === 1 ? '' : 's'} · ${duration}.`,
@@ -119,6 +127,26 @@ export function buildRoundClearedEmail(i: CandidateEmailBase & { roundName: stri
     next,
     'If you have any questions, please reply to this email.',
     'We wish you the very best for the next stage!',
+  ];
+  return render(subject, paragraphs, v, 'This is an automated recruitment email.');
+}
+
+/**
+ * Passed the AI technical interview: selected for the personal interview. No link - HR schedules the personal
+ * interview and sends its date, time and mode separately. nextRoundName = HR's name for that round (null = none set up).
+ */
+export function buildPersonalInterviewSelectedEmail(i: CandidateEmailBase & { roundName: string; nextRoundName: string | null }): EmailMessage {
+  const v = values(i);
+  const round = oneLine(i.roundName);
+  const pi = oneLine(i.nextRoundName ?? '') || 'Personal Interview';
+  const subject = `Congratulations! You Are Selected for the ${pi} – ${v.job}`;
+  const paragraphs = [
+    `Dear ${v.name},`,
+    'Congratulations!',
+    `We are pleased to inform you that you have successfully cleared the ${round} for the ${v.job} position at ${v.company}, and you have been selected for the next stage: the ${pi}.`,
+    `Our HR team will contact you separately with the date, time and mode (in person or online) of your ${pi}. You do not need to do anything right now.`,
+    'Please keep an eye on your inbox (and your spam folder) for that email. If you have any questions in the meantime, simply reply to this email.',
+    'We look forward to meeting you!',
   ];
   return render(subject, paragraphs, v, 'This is an automated recruitment email.');
 }
