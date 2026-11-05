@@ -582,6 +582,39 @@ describe('round modules (DSA, SQL, AI interview)', () => {
     expect(audit.entries.some((e) => e.action === 'assessment.result_overridden')).toBe(true);
   });
 
+  it('passed the AI technical interview: "selected for the personal interview" email, with no link', async () => {
+    modules.connect('AI_INTERVIEW');
+    job = (await rounds.save(TENANT, JOB, { rounds: [aptitude, aiInterview, interview], complete: true }, ACTOR)).rounds;
+    await engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[1]!.id, interviewerScore: 8 });
+    const { w, mailer } = worker();
+    await w.sendOutcomeEmails();
+    expect(mailer.sent).toHaveLength(1);
+    const m = mailer.sent[0]!.message;
+    expect(m.subject).toBe('Congratulations! You Are Selected for the Personal Interview – AI Engineer');
+    expect(m.text).toContain('selected for the next stage: the Personal Interview');
+    expect(m.text).toContain('date, time and mode');
+    expect(m.text).not.toMatch(/\/(assessment|interview|dsa|gd)\/|personal link/i); // no test / interview link (only the company website in the signature)
+    expect(m.text).not.toMatch(/score|pass mark/i);
+  });
+
+  it('passed the AI technical interview as the last round: still the personal interview email', async () => {
+    modules.connect('AI_INTERVIEW');
+    await engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[2]!.id, interviewerScore: 8 });
+    const { w, mailer } = worker();
+    await w.sendOutcomeEmails();
+    expect(mailer.sent[0]!.message.subject).toBe('Congratulations! You Are Selected for the Personal Interview – AI Engineer');
+  });
+
+  it('failed the AI technical interview: the rejection email', async () => {
+    modules.connect('AI_INTERVIEW');
+    await engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[2]!.id, interviewerScore: 3 });
+    const { w, mailer } = worker();
+    await w.sendOutcomeEmails();
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]!.message.subject).toBe('Application Update – AI Engineer at Pattern Labs');
+    expect(mailer.sent[0]!.message.text).toContain('not been selected');
+  });
+
   it('a module can only record its own rounds, of its own company', async () => {
     expect(code(await caught(engine.recordModuleResult(TENANT, 'AI_INTERVIEW', { applicationId: APP, roundId: job[1]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');
     expect(code(await caught(engine.recordModuleResult(TENANT, 'SQL', { applicationId: APP, roundId: job[0]!.id, marks: 9 })))).toBe('ROUND_NOT_FOR_MODULE');

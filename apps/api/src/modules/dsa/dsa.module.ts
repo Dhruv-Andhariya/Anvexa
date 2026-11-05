@@ -1,8 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ApplicationsModule } from '../applications';
+import { GroupDiscussionModule } from '../group-discussion';
 import { RoundEngineModule } from '../round-engine';
+import { RoundsConfigModule } from '../rounds-config';
 import { SqlModule } from '../sql';
 import { TenantsModule } from '../tenants';
+import { CodingAuthorClient, codingAuthorOptionsFromEnv } from './authoring/coding-author.client';
+import { CodingAuthorController } from './authoring/coding-author.controller';
+import { CODING_AUTHOR_CLIENT, CodingAuthorService } from './authoring/coding-author.service';
 import { DsaHrController } from './dsa-hr.controller';
 import { DsaController } from './dsa.controller';
 import { DsaService } from './dsa.service';
@@ -30,8 +35,8 @@ const demoMode = () => ['on', 'true', '1'].includes((process.env.DSA_DEMO_MODE ?
 
 @Module({
   // SqlModule: the SQL sandbox that runs the queries of SQL problems (SQL rounds use this same coding page)
-  imports: [ApplicationsModule, RoundEngineModule, TenantsModule, SqlModule],
-  controllers: [DsaController, ProctoringController, ProctoringAdminController, DsaHrController],
+  imports: [ApplicationsModule, GroupDiscussionModule, RoundEngineModule, RoundsConfigModule, TenantsModule, SqlModule],
+  controllers: [DsaController, ProctoringController, ProctoringAdminController, DsaHrController, CodingAuthorController],
   providers: [
     DsaService,
     ProctoringService,
@@ -60,6 +65,9 @@ const demoMode = () => ['on', 'true', '1'].includes((process.env.DSA_DEMO_MODE ?
     { provide: DSA_PROCTOR_POLICY, useFactory: () => policyFromEnv() },
     // The engine that runs candidate code: Piston on the hosting machine (docs/dsa-piston-hosting.md).
     { provide: CODE_RUNNER, useFactory: () => new PistonRunner(pistonOptionsFromEnv()) },
+    // HR's rounds editor: coding problems from the AI worker or HR's file (solutions run on the code runner)
+    CodingAuthorService,
+    { provide: CODING_AUTHOR_CLIENT, useFactory: () => new CodingAuthorClient(codingAuthorOptionsFromEnv()) },
   ],
 })
 export class DsaModule {}

@@ -31,12 +31,21 @@ export const GD_RESULTS_CONFIG = Symbol('GD_RESULTS_CONFIG');
 export interface GdResultsConfig {
   /** Recordings and transcripts are deleted this many days after the GD (GD_RETENTION_DAYS, default 90). */
   retentionDays: number;
+  /**
+   * Confirm the selection automatically as soon as the evaluation is done - no HR click (AUTO_GD_CONFIRM, default on).
+   * Groups with a GD rubric (HR scores by hand) or a failed evaluation still wait for HR.
+   */
+  autoConfirm?: boolean;
 }
 
 export const gdResultsConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): GdResultsConfig => {
   const n = Number(env.GD_RETENTION_DAYS);
-  return { retentionDays: Number.isInteger(n) && n >= 1 && n <= 3650 ? n : 90 };
+  const auto = (env.AUTO_GD_CONFIRM ?? '').trim().toLowerCase();
+  return { retentionDays: Number.isInteger(n) && n >= 1 && n <= 3650 ? n : 90, autoConfirm: !['off', 'false', '0', 'no'].includes(auto) };
 };
+
+/** Shown as who confirmed a selection the system confirmed by itself. */
+const SYSTEM_ACTOR_NAME = 'Automatic (AI evaluation)';
 
 const ATTENDED: GdAttendance[] = ['JOINED', 'ADMITTED_LATE'];
 const MAX_PROCESSING_ATTEMPTS = 5;
@@ -95,6 +104,8 @@ export class GdResultsService {
       await this.db.gdBatch.update({ where: { id }, data: { processingStatus: 'DONE', processedAt: this.now(), processingLockedAt: null, processingError: null } });
       const b = await this.db.gdBatch.findUniqueOrThrow({ where: { id } });
       await this.audit.record({ tenantId: b.tenantId, actorUserId: null, action: 'gd.evaluated', subjectType: 'gd_batch', subjectId: id, metadata: {} });
+      // no HR step: selected students move on to the next round right away (see autoConfirm)
+      if (this.config.autoConfirm) await this.autoConfirm(b.tenantId, id);
       // after the results are visible: the recording is a convenience and never holds them up
       await this.buildSessionAudio(id);
     } catch (err) {
@@ -435,11 +446,35 @@ export class GdResultsService {
   }
 
   /**
+   * Automatic "Confirm selection" right after the evaluation (AUTO_GD_CONFIRM): the AI's recommendation is each
+   * student's decision. Skipped (HR confirms as before) when the job uses a GD rubric, when any student who attended
+   * has no recommendation (evaluation failed - never reject a student because the AI failed), or when already confirmed.
+   * Never throws. Returns true when it confirmed.
+   */
+  async autoConfirm(tenantId: string, batchId: string): Promise<boolean> {
+    try {
+      const batch = await this.db.gdBatch.findFirst({ where: { id: batchId, tenantId }, include: { event: true } });
+      if (!batch || batch.confirmedAt || batch.status !== 'COMPLETED') return false;
+      if (await this.rubricFor(tenantId, batch.event.jobId, batch.event.roundId)) return false;
+      const view = await this.results(tenantId, batchId);
+      if (view.students.some((s) => ATTENDED.includes(s.attendance) && !s.evaluation?.recommendation && !s.hrDecision)) {
+        this.logger.warn(`GD selection left for HR batch=${batchId} (an evaluation is missing)`);
+        return false;
+      }
+      await this.confirm(tenantId, batchId, null);
+      return true;
+    } catch (err) {
+      this.logger.warn(`GD automatic confirmation failed batch=${batchId} (${err instanceof Error ? err.message : 'unknown'})`);
+      return false;
+    }
+  }
+
+  /**
    * "Confirm selection": every student's final decision is recorded as their result of the GD round (assessments
    * module; the AI's overall score as the interviewer score, HR's decision as an override where it differs) and the
    * result emails are queued. Once only.
    */
-  async confirm(tenantId: string, batchId: string, actor: Actor): Promise<GdResults> {
+  async confirm(tenantId: string, batchId: string, actor: Actor | null): Promise<GdResults> {
     const batch = await this.editable(tenantId, batchId);
     if (batch.status !== 'COMPLETED') throw gdError(HttpStatus.CONFLICT, 'GD_NOT_ENDED', 'This group has not finished yet.');
     if (batch.processingStatus === 'PENDING' || batch.processingStatus === 'RUNNING') {
@@ -454,7 +489,7 @@ export class GdResultsService {
       }
     }
     const rejectionEmails = this.pipeline ? await this.pipeline.rejectionEmailsOn(tenantId, batch.event.jobId) : true;
-    const claimed = await this.db.gdBatch.updateMany({ where: { id: batchId, confirmedAt: null }, data: { confirmedAt: this.now(), confirmedById: actor.id } });
+    const claimed = await this.db.gdBatch.updateMany({ where: { id: batchId, confirmedAt: null }, data: { confirmedAt: this.now(), confirmedById: actor?.id ?? null } });
     if (!claimed.count) throw gdError(HttpStatus.CONFLICT, 'GD_CONFIRMED', 'This selection was already confirmed.');
 
     const config = await this.rounds.forRoundEngine(tenantId, batch.event.jobId);
@@ -477,7 +512,7 @@ export class GdResultsService {
           const selected = s.finalDecision === 'SELECTED';
           if (recorded.systemPassed !== selected) {
             const reason = (s.hrDecision?.reason ?? '').trim();
-            await this.assessments.override(tenantId, s.applicationId, round.id, { passed: selected, reason: reason.length >= 5 ? reason : 'Group discussion: selection confirmed by HR' }, actor);
+            await this.assessments.override(tenantId, s.applicationId, round.id, { passed: selected, reason: reason.length >= 5 ? reason : actor ? 'Group discussion: selection confirmed by HR' : 'Group discussion: selection confirmed automatically (AI evaluation)' }, actor);
           }
         } catch (err) {
           // the decision and the email still stand; HR can fix the round result on the Assessments page
@@ -485,19 +520,23 @@ export class GdResultsService {
         }
       }
       const selected = s.finalDecision === 'SELECTED';
-      // the job switched rejection emails off: a student who was not selected gets no email (HR still sees the result)
-      if (selected || rejectionEmails) await this.mail.queueResult(tenantId, batchId, s.participantId, selected, s.email);
-      // selected: the next round follows (an online round's invitation, or the Stage 2 overall check)
+      // selected: the next round follows (an online round's / the AI interview's invitation, or the Stage 2 overall check)
+      let nextStepEmails = false;
       if (selected && round && this.engine) {
         try {
-          await this.engine.continueAfterExternalRound(tenantId, s.applicationId, round.id, true);
+          const step = await this.engine.continueAfterExternalRound(tenantId, s.applicationId, round.id, true);
+          // the next round's invitation ("Shortlisted: ...") or the overall-criterion rejection IS the student's email
+          nextStepEmails = !!step && !(step.kind === 'EMAIL' && step.email !== 'REJECTED');
         } catch (err) {
           this.logger.warn(`GD next step not queued application=${s.applicationId} (${err instanceof Error ? err.message : 'unknown'})`);
         }
       }
+      // one email per student: not selected -> the GD rejection (unless the job switched rejection emails off);
+      // selected -> the GD "selected" email only when nothing automatic follows (next round run by HR / last round)
+      if (selected ? !nextStepEmails : rejectionEmails) await this.mail.queueResult(tenantId, batchId, s.participantId, selected, s.email);
     }
     await this.activityLog(tenantId, batchId, actor, 'CONFIRMED', null, { selected: view.students.filter((s) => s.finalDecision === 'SELECTED').length });
-    await this.audit.record({ tenantId, actorUserId: actor.id, action: 'gd.selection_confirmed', subjectType: 'gd_batch', subjectId: batchId, metadata: {} });
+    await this.audit.record({ tenantId, actorUserId: actor?.id ?? null, action: 'gd.selection_confirmed', subjectType: 'gd_batch', subjectId: batchId, metadata: { automatic: !actor } });
     return this.results(tenantId, batchId);
   }
 
@@ -543,9 +582,9 @@ export class GdResultsService {
     return batch;
   }
 
-  private async activityLog(tenantId: string, batchId: string, actor: Actor, kind: 'OVERRIDE' | 'CONFIRMED' | 'PRIVATE_INCLUDED' | 'PRIVATE_EXCLUDED', participantId: string | null, detail: Record<string, unknown> = {}) {
+  private async activityLog(tenantId: string, batchId: string, actor: Actor | null, kind: 'OVERRIDE' | 'CONFIRMED' | 'PRIVATE_INCLUDED' | 'PRIVATE_EXCLUDED', participantId: string | null, detail: Record<string, unknown> = {}) {
     await this.db.gdHrActivity.create({
-      data: { id: uuidv7(), tenantId, batchId, hrUserId: actor.id, hrName: actor.name, kind, participantId, occurredAt: this.now(), detail: detail as Prisma.InputJsonObject },
+      data: { id: uuidv7(), tenantId, batchId, hrUserId: actor?.id ?? null, hrName: actor?.name ?? SYSTEM_ACTOR_NAME, kind, participantId, occurredAt: this.now(), detail: detail as Prisma.InputJsonObject },
     });
   }
 }

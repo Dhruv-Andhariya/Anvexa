@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import type { AssessmentState, FinalResult } from '@/lib/dsa-api';
-import { LANGUAGE_LABELS } from '@/lib/dsa-api';
+import { useEffect, useState } from 'react';
+import type { AssessmentState, FinalResult, NextStep } from '@/lib/dsa-api';
+import { LANGUAGE_LABELS, continueAfterRound } from '@/lib/dsa-api';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { difficultyTone } from './problem-panel';
 import { CameraCheck, type CameraMonitor } from './camera-monitor';
@@ -188,9 +188,9 @@ export function IntroScreen({
   );
 }
 
-export function ResultScreen({ result, candidateName, showScore = true }: { result: FinalResult; candidateName: string; showScore?: boolean }) {
+export function ResultScreen({ result, candidateName, showScore = true, token }: { result: FinalResult; candidateName: string; showScore?: boolean; token: string }) {
   // An HR round: no score, no pass / fail and no per-problem marks. The hiring team writes to the candidate.
-  if (!showScore) return <SubmittedScreen result={result} candidateName={candidateName} />;
+  if (!showScore) return <SubmittedScreen result={result} candidateName={candidateName} token={token} />;
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
       <Card className="flex flex-col gap-6 p-5 sm:p-8">
@@ -256,13 +256,13 @@ export function ResultScreen({ result, candidateName, showScore = true }: { resu
           </table>
         </div>
 
-        <p className="text-sm text-muted">You can now close this window. The hiring team will review your results.</p>
+        <NextStepPanel token={token} fallback="You can now close this window. The hiring team will review your results." />
       </Card>
     </main>
   );
 }
 
-function SubmittedScreen({ result, candidateName }: { result: FinalResult; candidateName: string }) {
+function SubmittedScreen({ result, candidateName, token }: { result: FinalResult; candidateName: string; token: string }) {
   return (
     <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
       <Card className="flex flex-col gap-4 p-5 sm:p-8">
@@ -277,8 +277,123 @@ function SubmittedScreen({ result, candidateName }: { result: FinalResult; candi
               ? 'The assessment was ended automatically because the allowed number of warnings was used up. Everything you submitted before that was recorded and will be reviewed by the hiring team.'
               : 'Your solutions were submitted successfully.'}
         </p>
-        <p className="text-sm text-muted">Thank you for taking the test. The hiring team will review your work and contact you by email about the next step. You can now close this window.</p>
+        <NextStepPanel
+          token={token}
+          fallback="Thank you for taking the test. The hiring team will review your work and contact you by email about the next step. You can now close this window."
+        />
       </Card>
     </main>
   );
+}
+
+/** Seconds before the next page opens by itself (the button opens it at once). */
+const NEXT_PAGE_COUNTDOWN = 10;
+/** The result may still be calculated right after the round ended: ask again this often, this many times. */
+const WAIT_RETRY_MS = 4000;
+const WAIT_RETRIES = 8;
+/** Waiting for the group discussion to be formed: ask again this often (for as long as the page is open). */
+const GD_POLL_MS = 10_000;
+
+const timeText = (iso: string) =>
+  new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(iso)) + ' IST';
+
+/**
+ * After the round, in the same tab: straight into the next coding round (DSA -> SQL), or - after the last coding
+ * round - to the student's group discussion page once their group is formed (a waiting room until then). Anything
+ * unexpected falls back to the usual "you can close this window" text; every step is also emailed.
+ */
+function NextStepPanel({ token, fallback }: { token: string; fallback: string }) {
+  const [step, setStep] = useState<NextStep | null>(null);
+  const [seconds, setSeconds] = useState(NEXT_PAGE_COUNTDOWN);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = async (tries: number) => {
+      const next: NextStep = await continueAfterRound(token).catch((): NextStep => ({ status: 'DONE' }));
+      if (cancelled) return;
+      if (next.status === 'WAITING' && tries > 0) {
+        timer = setTimeout(() => void ask(tries - 1), WAIT_RETRY_MS);
+        return;
+      }
+      setStep(next);
+      // the group is still being formed: keep asking until the student's GD link exists
+      if (next.status === 'GROUP_DISCUSSION' && next.gd.status !== 'READY' && next.gd.status !== 'NONE') {
+        timer = setTimeout(() => void ask(0), next.gd.status === 'WAITING' ? GD_POLL_MS : WAIT_RETRY_MS);
+      }
+    };
+    void ask(WAIT_RETRIES);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [token]);
+
+  const target = step?.status === 'NEXT_ROUND' ? `/dsa/${encodeURIComponent(step.token)}` : step?.status === 'GROUP_DISCUSSION' && step.gd.status === 'READY' ? step.gd.link : null;
+  useEffect(() => {
+    if (!target) return;
+    if (seconds <= 0) {
+      window.location.assign(target);
+      return;
+    }
+    const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [target, seconds]);
+
+  if (!step) {
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted">
+        <Spinner /> Checking your next step…
+      </p>
+    );
+  }
+  if (step.status === 'NEXT_ROUND') {
+    return (
+      <div className="flex flex-col gap-3 rounded-md border border-border bg-accent-soft px-4 py-4">
+        <p className="text-sm font-medium">Well done! Your next round is the {step.roundName}.</p>
+        <p className="text-sm text-muted">It opens automatically in {Math.max(seconds, 0)} seconds. Please stay on this page.</p>
+        <div>
+          <Button variant="primary" onClick={() => window.location.assign(target!)}>
+            Start the {step.roundName} now
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (step.status === 'GROUP_DISCUSSION') {
+    const gd = step.gd;
+    return (
+      <div className="flex flex-col gap-3 rounded-md border border-border bg-accent-soft px-4 py-4">
+        <p className="text-sm font-medium">Congratulations! You have qualified for the {step.roundName}.</p>
+        {gd.status === 'READY' ? (
+          <>
+            <p className="text-sm text-muted">
+              Your group discussion starts at {timeText(gd.startsAt)}. Taking you to the group discussion page in {Math.max(seconds, 0)} seconds - you can
+              check your camera and microphone there while you wait.
+            </p>
+            <div>
+              <Button variant="primary" onClick={() => window.location.assign(gd.link)}>
+                Go to the {step.roundName} now
+              </Button>
+            </div>
+          </>
+        ) : gd.status === 'WAITING' ? (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Spinner /> Waiting for more students to finish: {Math.min(gd.waiting, gd.needed)} of {gd.needed} ready for your group. Keep this page open - it takes
+            you to your group discussion automatically. You will also get the date, time and link by email.
+          </p>
+        ) : gd.status === 'NONE' ? (
+          <p className="text-sm text-muted">You will receive an email with the date, time and joining link. You can now close this window.</p>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Spinner /> Setting up your group discussion…
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (step.status === 'EMAILED') {
+    return <p className="text-sm text-muted">Your link for the {step.roundName} has been sent to your email. You can now close this window.</p>;
+  }
+  return <p className="text-sm text-muted">{fallback}</p>;
 }

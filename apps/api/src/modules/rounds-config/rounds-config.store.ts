@@ -110,6 +110,8 @@ export abstract class RoundsConfigStore {
    * or pass rules changes. Returns false when the round is not this company's / job's.
    */
   abstract setSkip(tenantId: string, jobId: string, roundId: string, skip: Omit<RoundSkip, 'byName'> | null): Promise<boolean>;
+  /** HR changes ONE round's passing criterion, also after the rounds were locked (questions stay frozen). false = no such round. */
+  abstract setPassRule(tenantId: string, jobId: string, roundId: string, rule: { mode: StoredRound['passMode']; value: number; maxScore: number | null }): Promise<boolean>;
 }
 
 const CONFIG_INCLUDE = {
@@ -221,6 +223,11 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
   async lock(tenantId: string, jobId: string, at: Date) {
     await this.db.jobRoundConfig.updateMany({ where: { tenantId, jobId, lockedAt: null }, data: { lockedAt: at } });
     return (await this.db.jobRoundConfig.findFirst({ where: { tenantId, jobId }, select: { lockedAt: true } }))?.lockedAt ?? null;
+  }
+
+  async setPassRule(tenantId: string, jobId: string, roundId: string, rule: { mode: StoredRound['passMode']; value: number; maxScore: number | null }) {
+    const r = await this.db.jobRound.updateMany({ where: { tenantId, jobId, id: roundId }, data: { passMode: rule.mode, passValue: rule.value, passMaxScore: rule.maxScore } });
+    return r.count > 0;
   }
 }
 

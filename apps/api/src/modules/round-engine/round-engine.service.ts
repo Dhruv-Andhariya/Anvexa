@@ -50,7 +50,7 @@ import {
   parseAssessmentProtection,
   qualifiesInAssessment,
 } from './assessment-protection';
-import { TOKEN_SHAPE, hashAssessmentToken } from './link';
+import { DEFAULT_LINK_DAYS, TOKEN_SHAPE, hashAssessmentToken, newAssessmentToken } from './link';
 import {
   DEADLINE_GRACE_MS,
   InvalidAnswersError,
@@ -66,6 +66,26 @@ import {
   type StoredAnswers,
 } from './online-test';
 import { RoundEngineStore, type AttemptRow, type CandidateContext, type InviteRow } from './round-engine.store';
+
+/**
+ * After a coding round (DSA) that leads straight into another coding round (SQL), the next invitation email waits this
+ * long: the coding page normally takes the student over itself (continueAfterCoding), the email is only the fallback
+ * for a student who closed the page.
+ */
+export const CONTINUE_ON_PAGE_MS = 10 * 60_000;
+
+/** What the coding page shows after a round ended (POST /dsa/:token/continue). */
+export type ContinueAfterCoding =
+  /** Straight into the next coding round on the same page (its own link token). */
+  | { status: 'NEXT_ROUND'; token: string; roundName: string }
+  /** The next round's invitation is (or will be) emailed - another page, or the email went out already. */
+  | { status: 'EMAILED'; roundName: string }
+  /** Qualified for the group discussion: its own email brings the date, time and link. */
+  | { status: 'GROUP_DISCUSSION'; roundName: string; ref?: { tenantId: string; applicationId: string; roundId: string } }
+  /** The result is still being worked out (or a person reviews it): ask again shortly / wait for the email. */
+  | { status: 'WAITING' }
+  /** Nothing to continue with here: the outcome comes by email. */
+  | { status: 'DONE' };
 
 export const ROUND_ENGINE_CONFIG = Symbol('ROUND_ENGINE_CONFIG');
 export const ROUND_ENGINE_CLOCK = Symbol('ROUND_ENGINE_CLOCK');
@@ -396,7 +416,9 @@ export class RoundEngineService {
       let applied: StepEffect;
       try {
         step = await this.nextFor(attempt.tenantId, attempt.jobId, attempt.applicationId, config.rounds, round, recorded.outcome === 'PASSED');
-        applied = await this.applyStep(attempt.tenantId, attempt.applicationId, attempt.jobId, round.id, step);
+        // coding round -> coding round (DSA -> SQL): the page continues by itself, the email is held as a fallback
+        const hold = attempt.codingState && step.kind === 'INVITE' && step.roundKind === 'CODING' ? new Date(this.now().getTime() + CONTINUE_ON_PAGE_MS) : undefined;
+        applied = await this.applyStep(attempt.tenantId, attempt.applicationId, attempt.jobId, round.id, step, hold);
       } catch (err) {
         await this.store.releaseProgress(attempt.id);
         throw err;
@@ -568,9 +590,9 @@ export class RoundEngineService {
   }
 
   /** Queues what a step needs. A rejection email is left out when the job switched rejection emails off. */
-  private async applyStep(tenantId: string, applicationId: string, jobId: string, roundId: string, step: NextStep): Promise<StepEffect> {
+  private async applyStep(tenantId: string, applicationId: string, jobId: string, roundId: string, step: NextStep, holdInviteUntil?: Date): Promise<StepEffect> {
     const overall = (step as { stage2Overall?: boolean }).stage2Overall ? { stage2Overall: 'failed' } : {};
-    if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, jobId, step.round.id);
+    if (step.kind === 'INVITE') await this.store.queueInvite(tenantId, applicationId, jobId, step.round.id, holdInviteUntil);
     else if (step.kind === 'EMAIL') {
       if (step.email === 'REJECTED' && this.pipeline && !(await this.pipeline.rejectionEmailsOn(tenantId, jobId))) return { ...overall, emailSkipped: 'rejection_emails_off' };
       await this.store.queueOutcomeEmail(tenantId, applicationId, roundId, step.email, step.nextRoundName);
@@ -665,6 +687,54 @@ export class RoundEngineService {
     } else if (!attempt.progressedAt) {
       await this.progress(attempt.id); // finished earlier but the next step did not run yet
     }
+  }
+
+  /**
+   * The coding page after a round ended (submitted or time over): when the student passed and the next round is also a
+   * coding round (DSA -> SQL), it is opened right here - a fresh link token for that round, the invitation counted as
+   * delivered (no email). Only the holder of this round's link gets the next one (same student, same application).
+   */
+  async continueAfterCoding(token: string | undefined): Promise<ContinueAfterCoding> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    let attempt = o.attempt;
+    if (!attempt || attempt.status === 'IN_PROGRESS') return { status: 'WAITING' };
+    if (!attempt.progressedAt) {
+      await this.progress(attempt.id); // never throws; the worker retries
+      attempt = (await this.store.getAttempt(attempt.id)) ?? attempt;
+    }
+    // not graded yet, or ended by the warning limit (HR decides first)
+    if (!attempt.progressedAt) return { status: 'WAITING' };
+    const config = await this.rounds.forRoundEngine(o.ctx.tenantId, o.ctx.jobId);
+    const next = [...(config?.rounds ?? [])].sort((a, b) => a.position - b.position).find((r) => r.position > o.round.position);
+    if (!next) return { status: 'DONE' };
+    const data = await this.store.forApplication(o.ctx.tenantId, o.ctx.applicationId);
+    const invite = data?.invites.find((i) => i.roundId === next.id);
+    if (invite) {
+      if (invite.revokedAt) return { status: 'DONE' };
+      if (roundKind(next) !== 'CODING') return { status: 'EMAILED', roundName: next.name };
+      const t = newAssessmentToken();
+      const now = this.now();
+      if (!(await this.store.continueInvite(invite.id, t.tokenHash, new Date(now.getTime() + DEFAULT_LINK_DAYS * 24 * 60 * 60_000), now))) {
+        return { status: 'EMAILED', roundName: next.name }; // the email went out already: its link is the one that works
+      }
+      await this.audit.record({
+        tenantId: o.ctx.tenantId,
+        actorUserId: null,
+        action: 'assessment.continued_on_page',
+        subjectType: 'application',
+        subjectId: o.ctx.applicationId,
+        metadata: { fromRoundId: o.round.id, roundId: next.id },
+      });
+      return { status: 'NEXT_ROUND', token: t.token, roundName: next.name };
+    }
+    if (next.type === 'GROUP_DISCUSSION' && attempt.systemPassed && config) {
+      // the step the engine took (incl. the pipeline's overall criterion), not just this round's score
+      const step = await this.nextFor(o.ctx.tenantId, o.ctx.jobId, o.ctx.applicationId, config.rounds, o.round, true);
+      if (step.kind === 'GROUP_DISCUSSION') {
+        return { status: 'GROUP_DISCUSSION', roundName: next.name, ref: { tenantId: o.ctx.tenantId, applicationId: o.ctx.applicationId, roundId: next.id } };
+      }
+    }
+    return { status: 'DONE' };
   }
 
   // ---------------------------------------------------------------- HR

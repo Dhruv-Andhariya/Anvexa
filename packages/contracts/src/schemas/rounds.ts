@@ -24,6 +24,8 @@ export const ROUNDS_LIMITS = {
   topicsMax: 10,
   topicMax: 60,
   interviewerScoreMax: 100,
+  /** "Marks" rounds: the total HR sets the round out of (student marks are scaled to it). */
+  totalMarksMax: 100000,
   generateMax: 20,
 } as const;
 
@@ -183,10 +185,17 @@ export function questionProblems(
 export const passRuleSchema = z.object({
   mode: passModeSchema,
   value: z.number({ invalid_type_error: 'Enter the pass mark' }).int('Use a whole number').min(1, 'The pass mark must be at least 1'),
-  /** INTERVIEWER_SCORE only: what the interviewer scores out of (e.g. 10). */
-  maxScore: z.number().int().min(1).max(ROUNDS_LIMITS.interviewerScoreMax).nullable().default(null),
+  /**
+   * INTERVIEWER_SCORE: what the interviewer scores out of (e.g. 10, at most 100).
+   * MARKS: the round's total as HR wants it (e.g. 50, 60, 1000); the student's marks are scaled to it. null = the
+   * questions' own total.
+   */
+  maxScore: z.number({ invalid_type_error: 'Enter the total' }).int('Use a whole number').min(1, 'The total must be at least 1').max(ROUNDS_LIMITS.totalMarksMax).nullable().default(null),
 });
 export type PassRuleInput = z.input<typeof passRuleSchema>;
+
+/** HR changes one round's passing criterion (also after the rounds were locked: only the rule changes). */
+export const changePassRuleRequestSchema = z.object({ passRule: passRuleSchema }).strict();
 export type PassRule = z.output<typeof passRuleSchema>;
 
 export const roundInputSchema = z.object({
@@ -210,7 +219,7 @@ export function passMarkLimit(rule: Pick<PassRule, 'mode' | 'maxScore'>, questio
     case 'CORRECT_COUNT':
       return questions.length || null;
     case 'MARKS':
-      return questions.reduce((sum, q) => sum + q.marks, 0) || null;
+      return rule.maxScore ?? (questions.reduce((sum, q) => sum + q.marks, 0) || null);
     case 'PERCENTAGE':
       return 100;
     case 'INTERVIEWER_SCORE':
@@ -225,7 +234,7 @@ export function describePassRule(rule: PassRule, questions: Pick<RoundQuestion, 
     case 'CORRECT_COUNT':
       return `${rule.value} of ${questions.length} correct`;
     case 'MARKS':
-      return `${rule.value} of ${totalMarks} marks`;
+      return `${rule.value} of ${rule.maxScore ?? totalMarks} marks`;
     case 'PERCENTAGE':
       return `${rule.value}% of ${totalMarks} marks`;
     case 'INTERVIEWER_SCORE':
@@ -239,12 +248,14 @@ export function passRuleProblems(round: Pick<RoundConfig, 'passRule' | 'question
   if (!rule) return [];
   if (rule.mode === 'INTERVIEWER_SCORE') {
     if (!rule.maxScore) return ['Enter what the interviewer scores out of.'];
+    if (rule.maxScore > ROUNDS_LIMITS.interviewerScoreMax) return [`An interviewer scores out of ${ROUNDS_LIMITS.interviewerScoreMax} at most.`];
     return rule.value > rule.maxScore ? [`The pass score cannot be more than ${rule.maxScore}.`] : [];
   }
   const limit = passMarkLimit(rule, round.questions);
   if (limit === null) return ['Add questions before using this pass rule.'];
   if (rule.value > limit) {
-    const unit = rule.mode === 'CORRECT_COUNT' ? `the ${limit} questions` : rule.mode === 'MARKS' ? `the ${limit} total marks` : '100%';
+    if (rule.mode === 'MARKS') return [`The pass mark (${rule.value}) is more than the total (${limit}). Set the total in "out of" to ${rule.value} or more, or lower the pass mark.`];
+    const unit = rule.mode === 'CORRECT_COUNT' ? `the ${limit} questions` : '100%';
     return [`The pass mark cannot be more than ${unit}.`];
   }
   return [];

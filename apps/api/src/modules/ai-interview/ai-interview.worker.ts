@@ -20,6 +20,11 @@ export interface AiInterviewWorkerConfig {
   pollMs: number;
   /** Invite students as soon as they passed the round before (AUTO_AI_INTERVIEW_INVITES, default on). */
   autoInvite: boolean;
+  /**
+   * Advance / reject by the round's pass mark as soon as the AI report is ready, without HR (AUTO_AI_INTERVIEW_DECISIONS,
+   * default on). Interviews ended by the warning limit still wait for HR.
+   */
+  autoDecide: boolean;
   /** Base of the interview link (AI_INTERVIEW_URL or CAREERS_SITE_URL/interview/{token}); null = not set up. */
   baseUrl: string | null;
   linkDays: number;
@@ -40,6 +45,7 @@ export const aiInterviewWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.
   enabled: on(env.AI_INTERVIEW_PROCESSING, true) && isFeatureOn('ai_interview', env) && env.NODE_ENV !== 'test' && !env.VITEST,
   pollMs: int(env.AI_INTERVIEW_POLL_MS, 10_000, 1000, 600_000),
   autoInvite: on(env.AUTO_AI_INTERVIEW_INVITES, true),
+  autoDecide: on(env.AUTO_AI_INTERVIEW_DECISIONS, true),
   baseUrl: interviewBaseUrlFromEnv(env),
   linkDays: int(env.AI_INTERVIEW_LINK_DAYS, DEFAULT_LINK_DAYS, 1, 60),
   allowLocalLinks: on(env.ROUND_ALLOW_LOCAL_LINKS, false),
@@ -146,6 +152,7 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
       await this.sendInvites();
       await this.sweep();
       await this.reports();
+      if (this.config.autoDecide) await this.autoDecide();
       await this.recover();
     } catch (err) {
       if (isMissingTable(err)) {
@@ -188,6 +195,19 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
 
   async reports(): Promise<void> {
     for (const s of await this.store.sessionsNeedingReport(this.now(), 3)) await this.interviews.generateReport(s.id);
+  }
+
+  /** Finished interviews with a report and no decision: decided by the round's pass mark (see AiInterviewHrService.autoDecide). */
+  async autoDecide(): Promise<number> {
+    let decided = 0;
+    for (const s of await this.store.undecidedWithReport(20)) {
+      try {
+        if (await this.hr.autoDecide(s)) decided++;
+      } catch (err) {
+        this.logger.warn(`automatic interview decision failed application=${s.applicationId} (${err instanceof Error ? err.name : 'unknown'})`);
+      }
+    }
+    return decided;
   }
 
   async recover(): Promise<void> {

@@ -78,7 +78,11 @@ def lines_for(prev: LiveState | None, new: LiveState) -> list[str]:
                 "The topic is shown at the top of your screen."
             )
         elif new.phase == "DISCUSSION":
-            out.append(f"Thinking time is over. The discussion starts now, and you have {_duration(p.get('DISCUSSION', 900))}. Anyone may begin.")
+            if prev is None and new.topic:
+                # the moderator joined late: the group still hears its topic once
+                out.append(f"Hello everyone, I am your AI moderator. Your topic is: {new.topic}. The discussion is in progress, please continue.")
+            else:
+                out.append(f"Thinking time is over. The discussion starts now, and you have {_duration(p.get('DISCUSSION', 900))}. Anyone may begin.")
         elif new.phase == "SUMMARY":
             per = (p.get("SUMMARY", 60) // max(1, len(new.summary_order))) if new.summary_order else 60
             first = new.current_speaker or (new.summary_order[0] if new.summary_order else None)
@@ -97,6 +101,9 @@ def lines_for(prev: LiveState | None, new: LiveState) -> list[str]:
                 "The hiring team will share the results with you by email. Goodbye, and all the best."
             )
         return out
+    # the topic reached the room a moment after thinking time began: announce it now (every group hears its topic)
+    if new.phase == "THINKING" and new.topic and not prev.topic:
+        return lines_for(None, new)
     if new.phase == "SUMMARY" and new.current_speaker and prev.current_speaker != new.current_speaker:
         out.append(f"Thank you. {new.current_speaker}, please give your summary now.")
     elif new.phase == "HR_QUESTIONS" and prev.phase == "HR_QUESTIONS":

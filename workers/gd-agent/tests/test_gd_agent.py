@@ -54,6 +54,26 @@ def test_greets_with_rules_then_announces_the_topic_and_the_discussion():
     assert "starts now" in lines_for(state("THINKING"), state("DISCUSSION"))[0]
 
 
+def test_every_group_hears_its_own_topic():
+    # each group (batch) has its own topic in its own room: the moderator reads out whatever its room says
+    for topic in ("Should AI replace exams?", "Is remote work here to stay?", "Electric cars in India"):
+        assert topic in lines_for(state("INTRO", topic=None), state("THINKING", topic=topic))[0]
+
+
+def test_topic_arriving_a_moment_after_thinking_time_began_is_still_announced():
+    assert lines_for(state("INTRO", topic=None), state("THINKING", topic=None)) == []
+    late = lines_for(state("THINKING", topic=None), state("THINKING"))
+    assert "Should AI replace exams?" in late[0]
+    # announced once, not again on the next update
+    assert lines_for(state("THINKING"), state("THINKING")) == []
+
+
+def test_a_moderator_joining_late_still_announces_the_topic():
+    assert "Should AI replace exams?" in lines_for(None, state("THINKING"))[0]
+    joined = lines_for(None, state("DISCUSSION"))
+    assert "Should AI replace exams?" in joined[0] and "in progress" in joined[0]
+
+
 def test_summary_round_calls_each_student_by_name():
     first = lines_for(state("DISCUSSION"), state("SUMMARY", speaker="Asha"))
     assert "1 minute" in first[0] and first[1] == "Asha, please begin your summary."

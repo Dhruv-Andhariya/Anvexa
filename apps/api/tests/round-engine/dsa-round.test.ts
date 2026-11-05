@@ -195,7 +195,8 @@ describe('after AI screening: the DSA invitation email', () => {
     expect(mailer.sent).toHaveLength(1);
     const { to, message } = mailer.sent[0]!;
     expect(to).toBe('asha@example.com');
-    expect(message.subject).toBe("Congratulations! You've Been Shortlisted for AI Engineer – Next Step: DSA Coding Round");
+    // no aptitude round in this job: a plain "next round" email (only aptitude invitations say "shortlisted")
+    expect(message.subject).toBe('Next Step: DSA Coding Round for AI Engineer at Pattern Labs');
     const link = /https:\/\/candidates\.example\.com\/dsa\/([A-Za-z0-9_-]{43})/.exec(message.text);
     expect(link).not.toBeNull();
     expect(message.text).not.toContain('careers.example.com');
@@ -276,7 +277,6 @@ describe('DSA after the aptitude round: the DSA email goes only to students who 
     expect(mailer.sent).toHaveLength(1);
     expect(mailer.sent[0]!.message.subject).toBe("Congratulations! You've Been Shortlisted for AI Engineer – Next Step: DSA Coding Round");
     expect(mailer.sent[0]!.message.text).toContain('Based on your performance in the Aptitude');
-    expect(mailer.sent[0]!.message.text).toContain('you have been shortlisted for the next stage of our recruitment process: the DSA Coding Round');
     expect(mailer.sent[0]!.message.text).toMatch(/https:\/\/candidates\.example\.com\/dsa\/[A-Za-z0-9_-]{43}/);
   });
 
@@ -469,5 +469,82 @@ describe('coding state is read defensively', () => {
     const huge = state([999, 999, 999]);
     expect(codingMarks(saved[0]!, huge)).toBe(60);
     expect(toCodingAnswers(saved[0]!, huge).map((a) => a.marksAwarded)).toEqual([10, 20, 30]);
+  });
+});
+
+describe('DSA -> SQL on the same page (no email), then the group discussion', () => {
+  const sqlRound: RoundInput = { ...dsa, name: 'SQL Round' };
+  const gdRound: RoundInput = {
+    type: 'GROUP_DISCUSSION',
+    name: 'Group Discussion',
+    passRule: { mode: 'INTERVIEWER_SCORE', value: 6, maxScore: 10 },
+    questions: [{ kind: 'DESCRIPTIVE', text: 'AI in education', marks: 10 }],
+  };
+
+  async function finishDsa(marks: [number, number, number]) {
+    const token = invite(saved[0]!.id);
+    await engine.startCodingAttempt(token, new Date(now));
+    await engine.finishCodingAttempt(token, 'submitted', state(marks));
+    return token;
+  }
+
+  it('passed DSA: the page gets the SQL round token, the invitation counts as delivered and no email is sent', async () => {
+    await setup([dsa, sqlRound, interview]);
+    const token = await finishDsa([10, 20, 0]);
+    const sqlInvite = store.invites.find((i) => i.roundId === saved[1]!.id)!;
+    expect(sqlInvite.emailStatus).toBe('QUEUED');
+
+    const res = await engine.continueAfterCoding(token);
+    expect(res).toMatchObject({ status: 'NEXT_ROUND', roundName: 'SQL Round' });
+    expect(sqlInvite).toMatchObject({ emailStatus: 'SENT' });
+    // the returned token opens the SQL round
+    const ctx = await engine.openCodingRound((res as { token: string }).token);
+    expect(ctx.round.id).toBe(saved[1]!.id);
+
+    const { w, mailer } = worker();
+    now = new Date(now.getTime() + 30 * MIN);
+    await w.sendInvites();
+    expect(mailer.sent).toHaveLength(0);
+    expect(audit.entries.some((e) => e.action === 'assessment.continued_on_page')).toBe(true);
+  });
+
+  it('page closed: the SQL invitation email is held for a while, then sent as the fallback', async () => {
+    await setup([dsa, sqlRound, interview]);
+    await finishDsa([10, 20, 0]);
+    const { w, mailer } = worker();
+    await w.sendInvites();
+    expect(mailer.sent).toHaveLength(0); // held: the page may still take the student over
+    now = new Date(now.getTime() + 11 * MIN);
+    await w.sendInvites();
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]!.message.subject).toContain('SQL Round');
+  });
+
+  it('after the email went out the page sends the student to the email (its link keeps working)', async () => {
+    await setup([dsa, sqlRound, interview]);
+    const token = await finishDsa([10, 20, 0]);
+    now = new Date(now.getTime() + 11 * MIN);
+    await worker().w.sendInvites();
+    expect(await engine.continueAfterCoding(token)).toEqual({ status: 'EMAILED', roundName: 'SQL Round' });
+  });
+
+  it('failed DSA: nothing to continue with (the rejection comes by email)', async () => {
+    await setup([dsa, sqlRound, interview]);
+    const token = await finishDsa([10, 0, 0]);
+    expect(await engine.continueAfterCoding(token)).toEqual({ status: 'DONE' });
+    expect(store.invites.filter((i) => i.roundId === saved[1]!.id)).toHaveLength(0);
+  });
+
+  it('still running: wait', async () => {
+    await setup([dsa, sqlRound, interview]);
+    const token = invite(saved[0]!.id);
+    await engine.startCodingAttempt(token, new Date(now));
+    expect(await engine.continueAfterCoding(token)).toEqual({ status: 'WAITING' });
+  });
+
+  it('passed the last coding round before a group discussion: the page says the GD invitation follows', async () => {
+    await setup([dsa, gdRound]);
+    const token = await finishDsa([10, 20, 0]);
+    expect(await engine.continueAfterCoding(token)).toMatchObject({ status: 'GROUP_DISCUSSION', roundName: 'Group Discussion', ref: { applicationId: APP, roundId: saved[1]!.id } });
   });
 });

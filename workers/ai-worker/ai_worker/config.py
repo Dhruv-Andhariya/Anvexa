@@ -80,6 +80,7 @@ class Settings:
     screening_speech_budget_seconds: float = 20.0  # one question spoken
     screening_extract_budget_seconds: float = 60.0  # the structured summary after the screening
     round_questions_budget_seconds: float = 75.0  # M05 question suggestions; below the API's 90s timeout
+    coding_problems_budget_seconds: float = 100.0  # DSA problems with solutions; below the API's 120s timeout
     # AI technical interview round (voice). Questions are spoken with the screening TTS settings above.
     interview_plan_budget_seconds: float = 45.0  # the topic plan at the start
     # one spoken answer: transcript + next question. Under the careers-site proxy's 30 s (Next.js rewrites): when the
@@ -123,6 +124,7 @@ def get_settings() -> Settings:
         screening_speech_budget_seconds=_float_env("SCREENING_SPEECH_BUDGET_SECONDS", 20.0),
         screening_extract_budget_seconds=_float_env("SCREENING_EXTRACT_BUDGET_SECONDS", 60.0),
         round_questions_budget_seconds=_float_env("ROUND_QUESTIONS_BUDGET_SECONDS", 75.0),
+        coding_problems_budget_seconds=_float_env("CODING_PROBLEMS_BUDGET_SECONDS", 100.0),
         interview_plan_budget_seconds=_float_env("INTERVIEW_PLAN_BUDGET_SECONDS", 45.0),
         interview_turn_budget_seconds=_float_env("INTERVIEW_TURN_BUDGET_SECONDS", 24.0),
         interview_thinking_budget=max(0, _int_env("INTERVIEW_THINKING_BUDGET", 0)),

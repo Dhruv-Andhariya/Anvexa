@@ -1,13 +1,12 @@
 'use client';
 
-import { ROUND_TYPES, ROUNDS_LIMITS, type RoundType } from '@hireflow/contracts';
+import { ROUNDS_LIMITS, type RoundType } from '@hireflow/contracts';
 import { useState } from 'react';
-import { move, newRound, type RoundDraft, type Validation } from '@/lib/rounds';
-import { Button, inputClass } from '../ui';
+import { HR_ROUND_TYPES, move, newRound, roundTypeLabel, type RoundDraft, type Validation } from '@/lib/rounds';
+import { inputClass } from '../ui';
 import { RoundCard } from './round-card';
 import { PipelineSettingsPanel } from './pipeline-settings';
 
-const ROUND_TYPE_KEYS = Object.keys(ROUND_TYPES) as RoundType[];
 
 /**
  * M05: the assessment rounds of one job, in order, after the fixed resume screening and AI voice screening.
@@ -19,6 +18,7 @@ export function RoundsEditor({
   rounds,
   validation,
   disabled,
+  locked = false,
   onChange,
   onSkipped,
 }: {
@@ -27,16 +27,19 @@ export function RoundsEditor({
   rounds: RoundDraft[];
   validation: Validation | null;
   disabled: boolean;
+  /** Students started: everything is frozen except each round's passing criterion (saved on its own). */
+  locked?: boolean;
   onChange: (rounds: RoundDraft[]) => void;
   /** HR skipped / brought back a saved round (already saved on the server). */
   onSkipped: (key: string, skipped: RoundDraft['skipped'], message: string) => void;
 }) {
   const [open, setOpen] = useState<string | null>(rounds.length === 1 ? rounds[0]!.key : null);
-  const [addType, setAddType] = useState<RoundType>('APTITUDE');
   const full = rounds.length >= ROUNDS_LIMITS.roundsMax;
 
-  const add = () => {
-    const r = newRound(addType);
+  // picking a type in the "+ Add round" box adds that round at once (nothing is chosen for HR beforehand)
+  const add = (type: RoundType | '') => {
+    if (!type) return;
+    const r = newRound(type);
     onChange([...rounds, r]);
     setOpen(r.key);
   };
@@ -64,6 +67,7 @@ export function RoundsEditor({
               count={rounds.length}
               validation={validation}
               disabled={disabled}
+              locked={locked}
               expanded={open === r.key}
               onToggle={() => setOpen(open === r.key ? null : r.key)}
               onChange={(next) => onChange(rounds.map((x, j) => (j === i ? next : x)))}
@@ -81,18 +85,19 @@ export function RoundsEditor({
       {!disabled && (
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="add-round-type" className="sr-only">
-            Round to add
+            Add a round
           </label>
-          <select id="add-round-type" className={`${inputClass} w-auto`} value={addType} onChange={(e) => setAddType(e.target.value as RoundType)} disabled={full}>
-            {ROUND_TYPE_KEYS.map((t) => (
+          {/* always back on "+ Add round": choosing a type adds that round */}
+          <select id="add-round-type" className={`${inputClass} w-auto font-medium`} value="" onChange={(e) => add(e.target.value as RoundType | '')} disabled={full}>
+            <option value="" disabled>
+              + Add round…
+            </option>
+            {HR_ROUND_TYPES.map((t) => (
               <option key={t} value={t}>
-                {ROUND_TYPES[t].label}
+                {roundTypeLabel(t)}
               </option>
             ))}
           </select>
-          <Button onClick={add} disabled={full}>
-            + Add round
-          </Button>
           {full && <span className="text-xs text-muted">A job can have at most {ROUNDS_LIMITS.roundsMax} rounds.</span>}
         </div>
       )}

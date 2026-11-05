@@ -202,3 +202,13 @@ export const overrideRoundResultRequestSchema = z
   })
   .refine((o) => o.passed === null || o.reason.length >= 5, { path: ['reason'], message: 'Write why you are changing the result (at least 5 characters).' });
 export type OverrideRoundResultRequest = z.input<typeof overrideRoundResultRequestSchema>;
+
+/** PUT /assessments/jobs/:jobId/rounds/:roundId/pass-rule - HR changes a round's passing criterion (also once locked). */
+export interface PassRuleChangeResult {
+  roundId: string;
+  passRule: { mode: 'CORRECT_COUNT' | 'PERCENTAGE' | 'MARKS' | 'INTERVIEWER_SCORE'; value: number; maxScore: number | null };
+  /** Results of that round graded again with the new rule. */
+  regraded: number;
+  /** Students whose system result changed (HR overrides are kept and still win). */
+  changed: { applicationId: string; name: string; before: 'PASSED' | 'FAILED'; after: 'PASSED' | 'FAILED'; overridden: boolean }[];
+}

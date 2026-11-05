@@ -110,7 +110,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 2. Postgres, Redis, Mailpit
-docker compose -f (Join-Path $root 'infra\docker\docker-compose.yml') up -d *>> $log
+# its own log: Docker Desktop's helper keeps the redirected file open, which locked start-public.log for every later Say
+docker compose -f (Join-Path $root 'infra\docker\docker-compose.yml') up -d *>> (Join-Path $logs 'docker.log')
 WaitFor 'Postgres' 120 { (docker exec hireflow-postgres-1 pg_isready -U hire -d hireflow 2>$null) -match 'accepting' } | Out-Null
 
 # 3. Cloudflare quick tunnels (no account needed). They can start before the sites are up.
@@ -134,6 +135,22 @@ if (EnvValue 'PISTON_URL') {
 }
 # localhost is never emailed, so without a tunnel coding invitations wait (round-engine link.ts)
 if (SetEnv 'CANDIDATE_APP_URL' $(if ($dsaUrl) { $dsaUrl } else { 'http://localhost:3001' })) { $changed = $true; Say 'CANDIDATE_APP_URL updated in .env' }
+
+# HR dashboard from anywhere: its own quick tunnel. HR_DASHBOARD_URL is the base of the links the API emails to HR
+# (password reset, team invites), so it follows the tunnel. The dashboard calls the API through its own /api/v1 proxy.
+# "Sign in with Google" still returns to GOOGLE_REDIRECT_URI (localhost): email + password works from anywhere.
+# Off by default: HR uses the dashboard on this computer (http://localhost:3000). HR_PUBLIC_TUNNEL=on in .env opens it.
+$hrUrl = $null
+if ((EnvValue 'HR_PUBLIC_TUNNEL') -eq 'on') {
+  $hrUrl = Tunnel 3000 (Join-Path $logs 'cloudflared-hr.log')
+  if ($hrUrl) {
+    Say "HR dashboard URL: $hrUrl"
+    if (SetEnv 'HR_DASHBOARD_URL' $hrUrl) { $changed = $true; Say 'HR_DASHBOARD_URL updated in .env' }
+  } else { Say 'ERROR: no tunnel for the HR dashboard - it works on http://localhost:3000 only' }
+} else {
+  TunnelProcess 3000 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  if (SetEnv 'HR_DASHBOARD_URL' 'http://localhost:3000') { $changed = $true; Say 'HR_DASHBOARD_URL set back to http://localhost:3000 in .env' }
+}
 if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new URL'; 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
 
 # 4. API + dashboards (pnpm is not on PATH on this laptop, so the pinned version runs through npx)
@@ -148,11 +165,15 @@ if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (List
   # CAREERS_SITE_URL is the live tunnel here, so the API may rewrite old posts to it at start even when .env keeps
   # PUBLISHER_AUTO_REFRESH_LINKS=false (that guards plain `pnpm dev` with a localhost URL). The process env wins
   # over .env: process.loadEnvFile never overwrites a variable that is already set.
+  # The web apps run as production builds (a dev server is far too slow through a tunnel): serve-public.ps1 builds
+  # them (a few minutes) and starts them with the API. It falls back to `pnpm dev` if a build fails.
+  Say 'building the web apps for the public links (a few minutes) ...'
   Start-Process -WindowStyle Hidden -WorkingDirectory $root powershell.exe `
-    -ArgumentList '-NoProfile', '-Command', "`$env:PUBLISHER_AUTO_REFRESH_LINKS='true'; npx -y pnpm@9.15.0 dev *> '$logs\dev.log'"
+    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $PSScriptRoot 'serve-public.ps1')`""
 }
-if (-not (WaitFor 'API + careers site' 300 { (Listening 4000) -and (Listening 3300) })) { exit 1 }
+if (-not (WaitFor 'API + careers site' 900 { (Listening 4000) -and (Listening 3300) })) { exit 1 }
 if ($dsaUrl) { WaitFor 'candidate app (DSA)' 300 { Listening 3001 } | Out-Null }
+WaitFor 'HR dashboard' 300 { Listening 3000 } | Out-Null
 
 # 5. AI worker (JD generation); the apply link works without it
 if (-not (Listening 8000) -and (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -185,4 +206,15 @@ if ($dsaUrl) {
   } | Out-Null
   Say "DSA coding test links now start with: $dsaUrl/dsa/"
 }
+if ($hrUrl) {
+  WaitFor "HR dashboard $hrUrl" 120 {
+    try { (Invoke-WebRequest "$hrUrl/login" -UseBasicParsing -TimeoutSec 20).StatusCode -lt 500 } catch { [bool]$_.Exception.Response }
+  } | Out-Null
+  Say "HR dashboard: $hrUrl"
+  # "Continue with Google" on the public address returns through it: Google must know this exact callback
+  if (EnvValue 'GOOGLE_CLIENT_ID') {
+    Say "Google sign-in on the public address: add this Authorized redirect URI in Google Cloud Console (OAuth client): $hrUrl/api/v1/auth/google/callback"
+  }
+}
+if (-not $hrUrl) { Say 'HR dashboard: http://localhost:3000 (this computer only)' }
 Say '--- done ---'

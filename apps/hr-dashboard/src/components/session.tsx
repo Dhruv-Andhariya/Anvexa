@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { ApiError, UNAUTHENTICATED_EVENT, getSession, logout, switchCompany } from '@/lib/api';
 import { ROLE_LABEL } from '@/lib/roles';
+import { AssessmentsMenu } from './assessments-menu';
 import { Button, Card, ErrorNotice, Spinner } from './ui';
 
 /**
@@ -141,11 +142,18 @@ function Notice({ title, text }: { title: string; text: string }) {
 
 const Page = ({ children }: { children: ReactNode }) => <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">{children}</main>;
 
+interface NavItem {
+  href: string;
+  label: string;
+  /** Rendered as the Assessments step menu. */
+  menu?: boolean;
+}
+
 function AppHeader({ session, onChanged }: { session: Session; onChanged: () => Promise<void> }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const usable = session.company?.status === 'ACTIVE';
-  const nav = [
+  const nav: NavItem[] = [
     ...(usable
       ? [
           { href: '/jobs', label: 'Jobs' },
@@ -154,11 +162,12 @@ function AppHeader({ session, onChanged }: { session: Session; onChanged: () => 
           { href: '/applications', label: 'Applications' },
           { href: '/shortlisted', label: 'Shortlisted Students' },
           // the Group Discussion page is opened from a GD round on Assessments ("Manage groups")
-          { href: '/assessments', label: 'Assessments' },
-          // students who cleared the technical interview: HR's call list
-          { href: '/personal-interview', label: 'Personal interview' },
-          // the company's SQL question bank; questions are picked for a round in the job's rounds editor
-          { href: '/sql-questions', label: 'SQL questions' },
+          {
+            href: '/assessments',
+            label: 'Assessments',
+            // the hiring process of one job, step by step: only the rounds HR chose (assessments-menu.tsx)
+            menu: true,
+          },
           { href: '/company', label: 'Company profile' },
         ]
       : []),
@@ -192,11 +201,15 @@ function AppHeader({ session, onChanged }: { session: Session; onChanged: () => 
           <span className="text-sm text-muted">HR Dashboard</span>
         </Link>
         <nav aria-label="Main" className="flex flex-wrap gap-1 text-sm">
-          {nav.map((n) => (
-            <Link key={n.href} href={n.href} className="rounded-md px-2.5 py-1.5 text-muted hover:bg-accent-soft hover:text-foreground">
-              {n.label}
-            </Link>
-          ))}
+          {nav.map((n) =>
+            n.menu ? (
+              <AssessmentsMenu key={n.href} />
+            ) : (
+              <Link key={n.href} href={n.href} className="rounded-md px-2.5 py-1.5 text-muted hover:bg-accent-soft hover:text-foreground">
+                {n.label}
+              </Link>
+            ),
+          )}
         </nav>
         <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
           {session.companies.length > 1 ? (

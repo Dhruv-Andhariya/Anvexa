@@ -64,6 +64,9 @@ export interface RoundDraft {
   questions: QuestionDraft[];
   /** HR skipped this saved round for the job (set by Skip / Undo skip, never sent with a save). */
   skipped?: SavedRound['skipped'];
+  /** DSA coding round, editor only: how many problems HR wants, and the marks every problem carries ('' = not set). */
+  targetCount?: string;
+  marksEach?: string;
 }
 
 let seq = 0;
@@ -117,8 +120,17 @@ const codingFromSaved = (c: DsaProblemSpec | null): CodingDraft | null =>
   };
 
 /** A new round with sensible defaults: interviews are scored by the interviewer out of 10. */
+/**
+ * A group discussion is only a step of the pipeline here: the AI moderator runs it and HR selects students on the
+ * Group Discussion page, and that selection is the result. Its (hidden) rule only has to make the round complete.
+ */
+export const GD_DEFAULT_RULE = { passMode: 'INTERVIEWER_SCORE' as const, passValue: '6', passMaxScore: '10' };
+
 export function newRound(type: RoundType, name?: string): RoundDraft {
   const interview = ROUND_TYPES[type].interview;
+  if (type === 'GROUP_DISCUSSION') {
+    return { key: key(), type, name: name ?? 'Group Discussion', description: '', timeLimitMinutes: '', ...GD_DEFAULT_RULE, questions: [] };
+  }
   return {
     key: key(),
     type,
@@ -209,14 +221,14 @@ const int = (s: string) => (s.trim() === '' ? null : Number(s));
 export function toRequest(drafts: RoundDraft[], complete: boolean): SaveRoundsRequest {
   return {
     complete,
-    rounds: drafts.map((r) => ({
+    rounds: drafts.map((r) => (r.type === 'GROUP_DISCUSSION' && (!r.passMode || !r.passValue.trim()) ? { ...r, ...GD_DEFAULT_RULE } : r)).map((r) => ({
       ...(r.id ? { id: r.id } : {}),
       type: r.type,
       name: r.name,
       description: r.description,
       timeLimitMinutes: int(r.timeLimitMinutes),
       passRule: r.passMode
-        ? { mode: r.passMode, value: int(r.passValue) as number, maxScore: r.passMode === 'INTERVIEWER_SCORE' ? int(r.passMaxScore) : null }
+        ? { mode: r.passMode, value: int(r.passValue) as number, maxScore: r.passMode === 'INTERVIEWER_SCORE' || r.passMode === 'MARKS' ? int(r.passMaxScore) : null }
         : null,
       questions: r.questions.map((q) => ({
         ...(q.id ? { id: q.id } : {}),
@@ -293,6 +305,36 @@ export function move<T>(list: T[], from: number, to: number): T[] {
 }
 
 /** "out of 10 questions", "out of 40 marks"... next to the pass mark field. */
+/** The highest pass mark this round allows (null = cannot tell yet: no questions / no maximum score). */
+export function passMarkMax(r: RoundDraft): number | null {
+  if (!r.passMode) return null;
+  return passMarkLimit({ mode: r.passMode, maxScore: int(r.passMaxScore) }, r.questions.map((q) => ({ marks: Number(q.marks) || 0 })));
+}
+
+/** Why the pass mark typed is not usable (null = fine). Same limits as the server. */
+export function passMarkProblem(r: RoundDraft): string | null {
+  if (!r.passMode) return null;
+  const raw = r.passValue.trim();
+  if (!raw) return 'Enter the pass mark.';
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return 'Use a whole number.';
+  if (n < 1) return 'The pass mark must be at least 1.';
+  const max = passMarkMax(r);
+  if (r.passMode !== 'PERCENTAGE' && r.passMode !== 'CORRECT_COUNT' && r.passMaxScore.trim()) {
+    const total = Number(r.passMaxScore);
+    const cap = r.passMode === 'INTERVIEWER_SCORE' ? 100 : 100000;
+    if (!Number.isInteger(total) || total < 1 || total > cap) return `The total must be a whole number from 1 to ${cap}.`;
+  }
+  if (max === null) return r.passMode === 'INTERVIEWER_SCORE' ? 'Enter what the interviewer scores out of.' : 'Add questions before using this criterion.';
+  if (n > max) {
+    if (r.passMode === 'MARKS') return `The pass mark (${n}) is more than the total (${max}). Change the total in "out of" to ${n} or more, or lower the pass mark.`;
+    if (r.passMode === 'INTERVIEWER_SCORE') return `The pass mark (${n}) is more than the score out of ${max}. Raise "out of", or lower the pass mark.`;
+    const unit = r.passMode === 'CORRECT_COUNT' ? `the ${max} questions` : '100%';
+    return `The pass mark cannot be more than ${unit}. Enter a number from 1 to ${max}.`;
+  }
+  return null;
+}
+
 export function passMarkHint(r: RoundDraft): string {
   if (!r.passMode) return '';
   const marks = r.questions.map((q) => ({ marks: Number(q.marks) || 0 }));
@@ -301,7 +343,7 @@ export function passMarkHint(r: RoundDraft): string {
     case 'CORRECT_COUNT':
       return limit ? `out of ${limit} question${limit === 1 ? '' : 's'}` : 'add questions first';
     case 'MARKS':
-      return limit ? `out of ${limit} marks` : 'add questions first';
+      return limit ? `out of ${limit} marks` : 'add questions first';  // (the "out of" box is shown instead, round-card.tsx)
     case 'PERCENTAGE':
       return '% of the total marks';
     case 'INTERVIEWER_SCORE':
@@ -316,4 +358,36 @@ export function keepKeys(saved: RoundDraft[], previous: RoundDraft[]): RoundDraf
     if (!before) return r;
     return { ...r, key: before.key, questions: r.questions.map((q, j) => ({ ...q, key: before.questions[j]?.key ?? q.key })) };
   });
+}
+
+/** The round types HR can pick for a job, in this order (other types stay valid on rounds that already have them). */
+export const HR_ROUND_TYPES: RoundType[] = ['APTITUDE', 'CODING', 'SQL', 'GROUP_DISCUSSION'];
+
+/** How a round type is named in the rounds editor. */
+export const roundTypeLabel = (t: RoundType): string => (t === 'CODING' ? 'DSA coding round' : t === 'GROUP_DISCUSSION' ? 'Group discussion' : ROUND_TYPES[t].label);
+
+/** A coding problem from the AI or HR's file (CodingAuthorPanel) as an editable question of the round. */
+export function fromAuthored(p: import('@hireflow/contracts').AuthoredCodingProblem): QuestionDraft {
+  const c = p.question.coding;
+  return {
+    key: key(),
+    kind: 'CODING',
+    text: p.question.text,
+    options: [],
+    correct: [],
+    modelAnswer: '',
+    language: '',
+    marks: String(p.question.marks),
+    difficulty: p.question.difficulty,
+    topics: p.question.topics,
+    source: p.question.source,
+    coding: {
+      title: c.title,
+      inputFormat: c.inputFormat,
+      outputFormat: c.outputFormat,
+      constraints: c.constraints,
+      tests: c.tests.map((t) => ({ key: key(), input: t.input, output: t.output, hidden: t.hidden })),
+    },
+    sql: null,
+  };
 }

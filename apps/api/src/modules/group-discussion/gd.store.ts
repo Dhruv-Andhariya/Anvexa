@@ -93,6 +93,8 @@ export abstract class GdStore {
   abstract poolCandidates(limit: number): Promise<PoolCandidate[]>;
   /** Adds the student to the round's pool (WAITING). false = already there. */
   abstract addToPool(c: PoolCandidate): Promise<boolean>;
+  /** GD rounds (any company) with at least `min` students WAITING in the pool: for automatic scheduling. */
+  abstract roundsWithWaiting(min: number): Promise<{ tenantId: string; roundId: string; waiting: number }[]>;
 
   // ---- HR
   abstract listRounds(tenantId: string): Promise<GdRoundRow[]>;
@@ -204,6 +206,11 @@ export class PrismaGdStore extends GdStore {
   async addToPool(c: PoolCandidate) {
     const r = await this.db.gdParticipant.createMany({ data: { id: uuidv7(), ...c }, skipDuplicates: true });
     return r.count > 0;
+  }
+
+  async roundsWithWaiting(min: number) {
+    const groups = await this.db.gdParticipant.groupBy({ by: ['tenantId', 'roundId'], where: { attendance: 'WAITING' }, _count: { _all: true } });
+    return groups.filter((g) => g._count._all >= min).map((g) => ({ tenantId: g.tenantId, roundId: g.roundId, waiting: g._count._all }));
   }
 
   async listRounds(tenantId: string) {

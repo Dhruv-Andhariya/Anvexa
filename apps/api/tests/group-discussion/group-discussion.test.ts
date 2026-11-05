@@ -179,6 +179,39 @@ describe('who reaches the GD round (round engine hand-off)', () => {
   });
 });
 
+describe('automatic scheduling (no HR click)', () => {
+  const autoWorker = () =>
+    new GdWorker(store, null as never, null as never, null as never, audit, { enabled: false, pollMs: 10_000, livePollMs: 1000, autoSchedule: true, autoScheduleMin: 6, autoLeadMinutes: 30 }, service);
+
+  it('as soon as 6 students wait after the SQL round, they are put into a group 30 minutes from now', async () => {
+    waiting(6);
+    expect(await autoWorker().autoSchedule()).toBe(1);
+    const view = await service.overview(TENANT, gdRound.id);
+    expect(view.pool).toHaveLength(0);
+    expect(view.events).toHaveLength(1);
+    expect(view.events[0]!.name).toContain('(automatic)');
+    expect(new Date(view.events[0]!.startsAt).getTime()).toBe(now.getTime() + 30 * 60_000);
+    expect(view.events[0]!.batches.flatMap((b) => b.participants)).toHaveLength(6);
+    expect(audit.entries.map((e) => e.action)).toContain('gd.auto_scheduled');
+  });
+
+  it('fewer than 6 waiting: they keep waiting (nothing is scheduled)', async () => {
+    waiting(5);
+    expect(await autoWorker().autoSchedule()).toBe(0);
+    expect((await service.overview(TENANT, gdRound.id)).events).toHaveLength(0);
+  });
+
+  it('students already in a group are not scheduled again; the next 6 get their own group', async () => {
+    waiting(6);
+    const w = autoWorker();
+    await w.autoSchedule();
+    expect(await w.autoSchedule()).toBe(0);
+    waiting(6);
+    expect(await w.autoSchedule()).toBe(1);
+    expect((await service.overview(TENANT, gdRound.id)).events).toHaveLength(2);
+  });
+});
+
 describe('scheduling an event', () => {
   it('puts every waiting student into groups with slots, a room and a topic each', async () => {
     waiting(12);

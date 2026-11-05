@@ -1,9 +1,11 @@
-import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { GD_LIMITS } from '@hireflow/contracts';
 import { isFeatureOn } from '../../common/feature-flags';
 import { AuditService } from '../audit';
 import { GdLiveService } from './gd-live.service';
 import { GdMailService } from './gd-mail.service';
 import { GdResultsService } from './gd-results.service';
+import { GdService } from './gd.service';
 import { GdStore } from './gd.store';
 
 export const GD_WORKER_CONFIG = Symbol('GD_WORKER_CONFIG');
@@ -15,6 +17,14 @@ export interface GdWorkerConfig {
   pollMs: number;
   /** The live timeline: rooms opening / locking, phases (GD_LIVE_POLL_MS, default 1 s). */
   livePollMs: number;
+  /**
+   * No HR step: as soon as `autoScheduleMin` students wait in a GD round's pool, they are put into groups automatically
+   * (AUTO_GD_SCHEDULE, default on; AUTO_GD_MIN_STUDENTS, default 6). Fewer = they keep waiting.
+   */
+  autoSchedule?: boolean;
+  autoScheduleMin?: number;
+  /** Minutes from scheduling to the first group's start, so the invitation and the 15-min reminder go out (AUTO_GD_LEAD_MINUTES). */
+  autoLeadMinutes?: number;
 }
 
 const on = (v: string | undefined, dflt: boolean) => {
@@ -30,7 +40,13 @@ export const gdWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): GdW
   enabled: on(env.GD_PROCESSING, true) && isFeatureOn('group_discussion', env) && env.NODE_ENV !== 'test' && !env.VITEST,
   pollMs: int(env.GD_POLL_MS, 10_000, 1000, 600_000),
   livePollMs: int(env.GD_LIVE_POLL_MS, 1000, 250, 10_000),
+  autoSchedule: on(env.AUTO_GD_SCHEDULE, true),
+  autoScheduleMin: int(env.AUTO_GD_MIN_STUDENTS, 6, GD_LIMITS.groupSizeMin, GD_LIMITS.groupSizeMax),
+  autoLeadMinutes: int(env.AUTO_GD_LEAD_MINUTES, 30, GD_LIMITS.minLeadMinutes + 5, 7 * 24 * 60),
 });
+
+/** After an automatic scheduling attempt failed for a round (no topics, rounds not complete...), try again this much later. */
+const AUTO_RETRY_MS = 30 * 60_000;
 
 const NOT_READY_PAUSE_MS = 5 * 60_000;
 const RETENTION_EVERY_MS = 60 * 60_000;
@@ -56,6 +72,8 @@ export class GdWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private liveRunning = false;
   private pausedUntil = 0;
   private lastRetention = 0;
+  /** Rounds whose automatic scheduling failed: not tried again before this time. */
+  private readonly autoRetryAt = new Map<string, number>();
 
   constructor(
     @Inject(GdStore) private readonly store: GdStore,
@@ -64,6 +82,8 @@ export class GdWorker implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(GdResultsService) private readonly results: GdResultsService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(GD_WORKER_CONFIG) private readonly config: GdWorkerConfig,
+    /** Automatic scheduling (none = HR schedules every GD on the Group Discussion page). */
+    @Optional() @Inject(GdService) private readonly planner: GdService | null = null,
   ) {}
 
   onApplicationBootstrap() {
@@ -85,6 +105,7 @@ export class GdWorker implements OnApplicationBootstrap, OnModuleDestroy {
     this.running = true;
     try {
       await this.fillPools();
+      if (this.config.autoSchedule) await this.autoSchedule();
       await this.mail.queueDue();
       await this.mail.sendDue();
       await this.results.processNext();
@@ -110,6 +131,31 @@ export class GdWorker implements OnApplicationBootstrap, OnModuleDestroy {
     } finally {
       this.liveRunning = false;
     }
+  }
+
+  /**
+   * No HR click: every GD round with at least `autoScheduleMin` students waiting gets an event right away - the whole
+   * pool split into groups (HR's last settings for the round, else the defaults), first group `autoLeadMinutes` from
+   * now. The usual invitation (date, time, personal link) and reminder emails follow. Returns the rounds scheduled.
+   */
+  async autoSchedule(): Promise<number> {
+    if (!this.planner) return 0;
+    const min = this.config.autoScheduleMin ?? 6;
+    let scheduled = 0;
+    for (const r of await this.store.roundsWithWaiting(min)) {
+      const key = `${r.tenantId}|${r.roundId}`;
+      if ((this.autoRetryAt.get(key) ?? 0) > Date.now()) continue;
+      try {
+        const startsAt = await this.planner.scheduleAutomatically(r.tenantId, r.roundId, { minGroupSize: min, leadMinutes: this.config.autoLeadMinutes ?? 30 });
+        this.autoRetryAt.delete(key);
+        scheduled++;
+        await this.audit.record({ tenantId: r.tenantId, actorUserId: null, action: 'gd.auto_scheduled', subjectType: 'job_round', subjectId: r.roundId, metadata: { students: r.waiting, startsAt } });
+      } catch (err) {
+        this.autoRetryAt.set(key, Date.now() + AUTO_RETRY_MS);
+        this.logger.warn(`GD not scheduled automatically round=${r.roundId} (${err instanceof Error ? err.message : 'unknown'}) - HR can schedule it on the Group Discussion page`);
+      }
+    }
+    return scheduled;
   }
 
   /** Students who passed every round before a GD round (or finished AI screening when it is the first) wait in its pool. */

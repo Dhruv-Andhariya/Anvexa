@@ -10,6 +10,9 @@ import {
   type RoundOutcome,
   type SavedRound,
   type StudentAssessment,
+  changePassRuleRequestSchema,
+  passRuleProblems,
+  type PassRuleChangeResult,
 } from '@hireflow/contracts';
 import { apiError, parseBody } from '../../common/api-error';
 import { uuidv7 } from '../../common/uuidv7';
@@ -223,6 +226,76 @@ export class AssessmentsService {
         hasVoiceScreening: s.hasVoiceScreening,
         rounds,
       };
+    });
+  }
+
+  /**
+   * HR changes a round's passing criterion, also after students started: the questions stay frozen, only the rule
+   * changes, and every result of that round is graded again with it (HR's overrides are kept). Nothing is emailed and
+   * nobody is moved on or back automatically: students whose result changed are listed for HR.
+   * Refused (409) when a result cannot be graded with the new rule (e.g. "correct answers" for an interviewer score).
+   */
+  async changePassRule(tenantId: string, jobId: string, roundId: string, input: unknown, actor: Actor | null): Promise<PassRuleChangeResult> {
+    const req = parseBody(changePassRuleRequestSchema, input, 'INVALID_PASS_RULE', 'Check the passing criterion.');
+    return this.guard(async () => {
+      const config = await this.rounds.forRoundEngine(tenantId, jobId);
+      const round = config?.rounds.find((r) => r.id === roundId);
+      if (!config || !round) throw apiError(HttpStatus.NOT_FOUND, 'ROUND_NOT_FOUND', 'Round not found.');
+      const rule = { ...req.passRule, maxScore: req.passRule.mode === 'INTERVIEWER_SCORE' || req.passRule.mode === 'MARKS' ? req.passRule.maxScore : null };
+      const problems = passRuleProblems({ passRule: rule, questions: round.questions });
+      if (problems.length) {
+        const e = apiError(HttpStatus.BAD_REQUEST, 'INVALID_PASS_RULE', problems[0]!);
+        (e.getResponse() as Record<string, unknown>).issues = problems.map((message) => ({ path: 'passRule.value', message }));
+        throw e;
+      }
+      const next = { ...round, passRule: rule };
+      const [results, students] = await Promise.all([this.store.listResults(tenantId, { jobId }), this.store.listStudents(tenantId, jobId)]);
+      const mine = results.filter((r) => r.roundId === roundId);
+      // grade everyone first: if one result cannot be graded with the new rule, nothing changes
+      const regraded = mine.map((r) => {
+        try {
+          // the result before the change, copied: the store may update its row in place
+          return { r: { ...r, override: r.override ? { ...r.override } : null }, graded: gradeResult(next, { correctCount: r.correctCount, marks: r.marks, interviewerScore: r.interviewerScore, answers: r.answers }) };
+        } catch (err) {
+          if (err instanceof InvalidResultError) {
+            throw apiError(HttpStatus.CONFLICT, 'PASS_RULE_INCOMPATIBLE', `This criterion cannot grade the results already recorded in this round (${err.message}). Choose another one.`);
+          }
+          throw err;
+        }
+      });
+      await this.rounds.setPassRule(tenantId, jobId, roundId, rule, actor);
+      const nameOf = new Map(students.map((st) => [st.applicationId, st.name]));
+      const changed: PassRuleChangeResult['changed'] = [];
+      for (const { r, graded } of regraded) {
+        await this.store.upsertResult(tenantId, r.id, {
+          applicationId: r.applicationId,
+          jobId: r.jobId,
+          roundId: r.roundId,
+          passMode: rule.mode,
+          ...graded,
+          notes: r.notes,
+          startedAt: r.startedAt,
+          submittedAt: r.submittedAt,
+        });
+        if (graded.systemPassed !== r.systemPassed) {
+          changed.push({
+            applicationId: r.applicationId,
+            name: nameOf.get(r.applicationId) ?? 'Student',
+            before: r.systemPassed ? 'PASSED' : 'FAILED',
+            after: graded.systemPassed ? 'PASSED' : 'FAILED',
+            overridden: !!r.override,
+          });
+        }
+      }
+      await this.audit.record({
+        tenantId,
+        actorUserId: actor?.id ?? null,
+        action: 'assessment.regraded',
+        subjectType: 'job',
+        subjectId: jobId,
+        metadata: { roundId, mode: rule.mode, value: rule.value, maxScore: rule.maxScore, regraded: regraded.length, changed: changed.length },
+      });
+      return { roundId, passRule: rule, regraded: regraded.length, changed };
     });
   }
 

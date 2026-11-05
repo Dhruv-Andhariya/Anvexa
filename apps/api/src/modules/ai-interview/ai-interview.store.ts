@@ -249,6 +249,8 @@ export abstract class AiInterviewStore {
   abstract failReport(sessionId: string, error: string): Promise<void>;
   /** Decided by HR but not handed to the round engine yet (the process stopped in between). */
   abstract decidedNotRecorded(limit: number): Promise<SessionRow[]>;
+  /** Interviews that ended normally (not TERMINATED), have a finished report and no decision yet (automatic decisions). */
+  abstract undecidedWithReport(limit: number): Promise<SessionRow[]>;
 
   // ---- HR
   abstract invitesForApplication(tenantId: string, applicationId: string): Promise<InviteRow[]>;
@@ -735,6 +737,14 @@ export class PrismaAiInterviewStore extends AiInterviewStore {
 
   async decidedNotRecorded(limit: number) {
     return this.db.aiInterviewSession.findMany({ where: { decision: { not: null }, recordedAt: null }, orderBy: { decidedAt: 'asc' }, take: limit });
+  }
+
+  async undecidedWithReport(limit: number) {
+    return this.db.aiInterviewSession.findMany({
+      where: { status: { in: ['COMPLETED', 'INCOMPLETE'] }, decision: null, report: { status: 'DONE' } },
+      orderBy: { completedAt: 'asc' },
+      take: limit,
+    });
   }
 
   // ---------------------------------------------------------------- HR
