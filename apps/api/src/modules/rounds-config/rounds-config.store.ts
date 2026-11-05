@@ -56,6 +56,15 @@ export interface StoredRound {
   passValue: number | null;
   passMaxScore: number | null;
   questions: StoredQuestion[];
+  /** HR skipped the round for the whole job (null = it runs). Kept when HR saves the rounds again. */
+  skip?: RoundSkip | null;
+}
+
+export interface RoundSkip {
+  at: Date;
+  reason: string;
+  byId: string | null;
+  byName: string | null;
 }
 
 export interface StoredConfig {
@@ -96,6 +105,11 @@ export abstract class RoundsConfigStore {
   abstract replace(tenantId: string, jobId: string, status: StoredConfig['status'], rounds: StoredRound[], actorId: string | null): Promise<StoredConfig>;
   /** Sets locked_at once (keeps the first value). Returns it, or null when the job has no rounds. */
   abstract lock(tenantId: string, jobId: string, at: Date): Promise<Date | null>;
+  /**
+   * Skips one round of the job (skip set) or brings it back (null). Allowed while locked: nothing about the questions
+   * or pass rules changes. Returns false when the round is not this company's / job's.
+   */
+  abstract setSkip(tenantId: string, jobId: string, roundId: string, skip: Omit<RoundSkip, 'byName'> | null): Promise<boolean>;
 }
 
 const CONFIG_INCLUDE = {
@@ -130,13 +144,30 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
 
   async getConfig(tenantId: string, jobId: string) {
     const row = await this.db.jobRoundConfig.findFirst({ where: { tenantId, jobId }, include: CONFIG_INCLUDE });
-    return row ? toConfig(row) : null;
+    return row ? toConfig(row, await this.skippers([row])) : null;
   }
 
   async listConfigs(tenantId: string, jobIds: string[]) {
     if (!jobIds.length) return [];
     const rows = await this.db.jobRoundConfig.findMany({ where: { tenantId, jobId: { in: jobIds } }, include: CONFIG_INCLUDE });
-    return rows.map(toConfig);
+    const names = await this.skippers(rows);
+    return rows.map((r) => toConfig(r, names));
+  }
+
+  async setSkip(tenantId: string, jobId: string, roundId: string, skip: Omit<RoundSkip, 'byName'> | null) {
+    const r = await this.db.jobRound.updateMany({
+      where: { id: roundId, tenantId, jobId },
+      data: skip ? { skippedAt: skip.at, skipReason: skip.reason, skippedById: skip.byId } : { skippedAt: null, skipReason: null, skippedById: null },
+    });
+    return r.count > 0;
+  }
+
+  /** Names of the HR users who skipped rounds (one query; no rounds skipped = no query). */
+  private async skippers(rows: ConfigRow[]): Promise<Map<string, string>> {
+    const ids = [...new Set(rows.flatMap((c) => c.rounds.map((r) => r.skippedById).filter((id): id is string => !!id)))];
+    if (!ids.length) return new Map();
+    const users = await this.db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    return new Map(users.map((u) => [u.id, u.name]));
   }
 
   async replace(tenantId: string, jobId: string, status: StoredConfig['status'], rounds: StoredRound[], actorId: string | null) {
@@ -165,6 +196,10 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
             passMode: r.passMode,
             passValue: r.passValue,
             passMaxScore: r.passMaxScore,
+            // HR's skip survives a save of the rounds (same round id)
+            skippedAt: r.skip?.at ?? null,
+            skipReason: r.skip?.reason ?? null,
+            skippedById: r.skip?.byId ?? null,
           })),
         });
         const questions = rounds.flatMap((r) =>
@@ -180,7 +215,7 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
       }
       return tx.jobRoundConfig.findFirstOrThrow({ where: { tenantId, jobId }, include: CONFIG_INCLUDE });
     });
-    return toConfig(row);
+    return toConfig(row, await this.skippers([row]));
   }
 
   async lock(tenantId: string, jobId: string, at: Date) {
@@ -189,7 +224,7 @@ export class PrismaRoundsConfigStore extends RoundsConfigStore {
   }
 }
 
-function toConfig(row: ConfigRow): StoredConfig {
+function toConfig(row: ConfigRow, names: Map<string, string> = new Map()): StoredConfig {
   return {
     jobId: row.jobId,
     tenantId: row.tenantId,
@@ -222,6 +257,9 @@ function toConfig(row: ConfigRow): StoredConfig {
         coding: parseCodingSpec(q.codingSpec),
         sql: parseSqlSpec(q.sqlSpec),
       })),
+      skip: r.skippedAt
+        ? { at: r.skippedAt, reason: r.skipReason ?? '', byId: r.skippedById, byName: r.skippedById ? (names.get(r.skippedById) ?? null) : null }
+        : null,
     })),
   };
 }

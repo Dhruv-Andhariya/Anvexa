@@ -195,7 +195,7 @@ describe('after AI screening: the DSA invitation email', () => {
     expect(mailer.sent).toHaveLength(1);
     const { to, message } = mailer.sent[0]!;
     expect(to).toBe('asha@example.com');
-    expect(message.subject).toBe('Next Step: DSA Coding Round for AI Engineer at Pattern Labs');
+    expect(message.subject).toBe("Congratulations! You've Been Shortlisted for AI Engineer – Next Step: DSA Coding Round");
     const link = /https:\/\/candidates\.example\.com\/dsa\/([A-Za-z0-9_-]{43})/.exec(message.text);
     expect(link).not.toBeNull();
     expect(message.text).not.toContain('careers.example.com');
@@ -251,7 +251,7 @@ describe('DSA after the aptitude round: the DSA email goes only to students who 
     await w.discover();
     await w.sendInvites();
     expect(store.invites.map((i) => i.roundId)).toEqual([saved[0]!.id]);
-    expect(mailer.sent.map((m) => m.message.subject)).toEqual(['Next Step: Aptitude for AI Engineer at Pattern Labs']);
+    expect(mailer.sent.map((m) => m.message.subject)).toEqual(["Congratulations! You've Been Shortlisted for AI Engineer – Next Step: Aptitude"]);
   });
 
   it('FAILED aptitude: no DSA invitation is created or emailed; the student gets the rejection email', async () => {
@@ -274,8 +274,9 @@ describe('DSA after the aptitude round: the DSA email goes only to students who 
     const { w, mailer } = worker();
     await w.sendInvites();
     expect(mailer.sent).toHaveLength(1);
-    expect(mailer.sent[0]!.message.subject).toBe('Next Step: DSA Coding Round for AI Engineer at Pattern Labs');
-    expect(mailer.sent[0]!.message.text).toContain('Thank you for completing the Aptitude');
+    expect(mailer.sent[0]!.message.subject).toBe("Congratulations! You've Been Shortlisted for AI Engineer – Next Step: DSA Coding Round");
+    expect(mailer.sent[0]!.message.text).toContain('Based on your performance in the Aptitude');
+    expect(mailer.sent[0]!.message.text).toContain('you have been shortlisted for the next stage of our recruitment process: the DSA Coding Round');
     expect(mailer.sent[0]!.message.text).toMatch(/https:\/\/candidates\.example\.com\/dsa\/[A-Za-z0-9_-]{43}/);
   });
 

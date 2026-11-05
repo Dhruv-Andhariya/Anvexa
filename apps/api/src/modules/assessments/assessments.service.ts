@@ -279,6 +279,7 @@ function summary(r: SavedRound, modules: RoundModules): Omit<AssessmentRoundSumm
     runBy: runner.by,
     module: runner.by === 'MODULE' ? runner.module : null,
     moduleConnected: runner.by === 'MODULE' && modules.isConnected(runner.module),
+    skipped: r.skipped ?? null,
   };
 }
 

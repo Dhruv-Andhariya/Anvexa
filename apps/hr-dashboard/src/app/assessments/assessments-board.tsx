@@ -188,7 +188,13 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                 <p className="truncate text-sm font-medium">
                   {r.position}. {r.name}
                 </p>
-                <p className="text-xs text-muted">Pass: {r.passRuleText ?? '—'}</p>
+                {r.skipped ? (
+                  <p className="text-xs text-muted">
+                    <span className="rounded bg-accent-soft px-1.5 py-0.5 font-semibold text-accent">Skipped by HR</span> {r.skipped.reason}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted">Pass: {r.passRuleText ?? '—'}</p>
+                )}
                 {r.type === 'GROUP_DISCUSSION' && (
                   <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="text-xs font-medium text-accent hover:underline">
                     Manage groups →
@@ -267,6 +273,7 @@ function JobResults({ jobId, tab, onTab }: { jobId: string; tab: Tab; onTab: (t:
                     {data.rounds.map((r) => (
                       <th key={r.id} scope="col" className="px-3 py-2 font-medium">
                         {r.name}
+                        {r.skipped && <span className="block text-xs font-normal text-muted">Skipped</span>}
                       </th>
                     ))}
                     <th scope="col" className="px-3 py-2 font-medium">

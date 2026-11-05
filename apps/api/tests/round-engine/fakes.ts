@@ -238,6 +238,27 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     i.revokedAt = at;
     return true;
   }
+  /** GD places per round (the GD module's table): batchId null = in the pool. */
+  gdPlaces: { tenantId: string; applicationId: string; roundId: string; batchId: string | null }[] = [];
+  async waitingForSkippedRound(tenantId: string, roundId: string) {
+    const started = new Set(this.attempts.map((a) => a.inviteId));
+    return {
+      waiting: [
+        ...this.invites
+          .filter((i) => i.tenantId === tenantId && i.roundId === roundId && !i.revokedAt && !started.has(i.id))
+          .map((i) => ({ applicationId: i.applicationId, via: 'INVITE' as const })),
+        ...this.gdPlaces.filter((p) => p.tenantId === tenantId && p.roundId === roundId && !p.batchId).map((p) => ({ applicationId: p.applicationId, via: 'GD_POOL' as const })),
+      ],
+      inProgress:
+        this.attempts.filter((a) => a.tenantId === tenantId && a.roundId === roundId && a.status === 'IN_PROGRESS').length +
+        this.gdPlaces.filter((p) => p.tenantId === tenantId && p.roundId === roundId && p.batchId).length,
+    };
+  }
+  async leaveGdPool(tenantId: string, applicationId: string, roundId: string) {
+    const n = this.gdPlaces.length;
+    this.gdPlaces = this.gdPlaces.filter((p) => !(p.tenantId === tenantId && p.applicationId === applicationId && p.roundId === roundId && !p.batchId));
+    return this.gdPlaces.length < n;
+  }
   async requeueFailedInvite(tenantId: string, applicationId: string, roundId: string) {
     const i = this.invites.find((x) => x.tenantId === tenantId && x.applicationId === applicationId && x.roundId === roundId && x.emailStatus === 'FAILED');
     if (!i) return false;

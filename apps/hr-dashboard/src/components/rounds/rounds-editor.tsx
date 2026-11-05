@@ -20,6 +20,7 @@ export function RoundsEditor({
   validation,
   disabled,
   onChange,
+  onSkipped,
 }: {
   jobId: string;
   fixedSteps: string[];
@@ -27,6 +28,8 @@ export function RoundsEditor({
   validation: Validation | null;
   disabled: boolean;
   onChange: (rounds: RoundDraft[]) => void;
+  /** HR skipped / brought back a saved round (already saved on the server). */
+  onSkipped: (key: string, skipped: RoundDraft['skipped'], message: string) => void;
 }) {
   const [open, setOpen] = useState<string | null>(rounds.length === 1 ? rounds[0]!.key : null);
   const [addType, setAddType] = useState<RoundType>('APTITUDE');
@@ -65,6 +68,7 @@ export function RoundsEditor({
               onToggle={() => setOpen(open === r.key ? null : r.key)}
               onChange={(next) => onChange(rounds.map((x, j) => (j === i ? next : x)))}
               onMove={(to) => onChange(move(rounds, i, to))}
+              onSkipped={(skipped, message) => onSkipped(r.key, skipped, message)}
               onRemove={() => {
                 if (r.questions.length && !window.confirm(`Remove "${r.name || 'this round'}" and its ${r.questions.length} question(s)?`)) return;
                 onChange(rounds.filter((_, j) => j !== i));

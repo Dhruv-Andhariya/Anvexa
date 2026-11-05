@@ -169,16 +169,29 @@ export class PrismaGdStore extends GdStore {
         JOIN applications a ON a.job_id = r.job_id AND a.tenant_id = r.tenant_id
        WHERE r.type = 'GROUP_DISCUSSION'
          AND NOT EXISTS (SELECT 1 FROM gd_participants p WHERE p.application_id = a.id AND p.round_id = r.id)
+         -- HR skipped this GD round: nobody joins its pool
+         AND r.skipped_at IS NULL
+         -- the student has not moved past this round already (after "Undo skip" nobody who went on is pulled back)
+         AND NOT EXISTS (SELECT 1 FROM round_results lr JOIN job_rounds l ON l.id = lr.round_id
+                          WHERE lr.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM round_invites li JOIN job_rounds l ON l.id = li.round_id
+                          WHERE li.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM gd_participants lp JOIN job_rounds l ON l.id = lp.round_id
+                          WHERE lp.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)
          AND (
-           -- GD is the first round: AI screening completed (like the round engine's first online test)
-           (r.position = 1 AND EXISTS (
+           -- GD is the first round that runs (rounds HR skipped are passed over): AI screening completed
+           (NOT EXISTS (SELECT 1 FROM job_rounds e0 WHERE e0.job_id = r.job_id AND e0.tenant_id = r.tenant_id
+                           AND e0.position < r.position AND e0.skipped_at IS NULL)
+            AND EXISTS (
               SELECT 1 FROM screening_sessions s
                WHERE s.application_id = a.id AND s.tenant_id = a.tenant_id AND s.status = 'COMPLETED'))
            OR
-           -- later round: every earlier round has a result that counts as passed (HR override first)
-           (r.position > 1 AND NOT EXISTS (
+           -- later round: every earlier round that runs has a result that counts as passed (HR override first)
+           (EXISTS (SELECT 1 FROM job_rounds e0 WHERE e0.job_id = r.job_id AND e0.tenant_id = r.tenant_id
+                       AND e0.position < r.position AND e0.skipped_at IS NULL)
+            AND NOT EXISTS (
               SELECT 1 FROM job_rounds e
-               WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position
+               WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position AND e.skipped_at IS NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM round_results rr
                     WHERE rr.application_id = a.id AND rr.round_id = e.id

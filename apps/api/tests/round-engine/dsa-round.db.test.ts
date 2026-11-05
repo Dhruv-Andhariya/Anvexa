@@ -147,7 +147,7 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     const { token, mail } = await invited(s.email);
 
     // 1. the email: the DSA link, the DSA wording
-    expect(mail.message.subject).toBe('Next Step: DSA Coding Round for Backend Developer at Acme');
+    expect(mail.message.subject).toBe("Congratulations! You've Been Shortlisted for Backend Developer – Next Step: DSA Coding Round");
     expect(mail.message.text).toContain('3 coding problems · 60 minutes');
     expect(await db.roundInvite.count({ where: { applicationId: s.applicationId, emailStatus: 'SENT' } })).toBe(1);
 

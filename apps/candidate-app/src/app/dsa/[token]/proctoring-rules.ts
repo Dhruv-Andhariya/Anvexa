@@ -89,4 +89,10 @@ export const NOTICE_TEXT: Partial<Record<ProctorInputType, string>> = {
   CAMERA_OFF: 'Your webcam turned off. It must stay on for the whole assessment. This was recorded.',
   NO_FACE: 'Your face was not visible to the webcam. Stay in front of the camera. This was recorded.',
   MULTIPLE_FACES: 'More than one person was seen by the webcam. Only you may be in front of the camera. This was recorded.',
+  // AI camera alerts (camera-monitor.tsx): patterns, never a single glance
+  CAMERA_GAZE_AWAY: 'You looked away from the screen repeatedly or for a long time. Keep your eyes on the assessment. This was recorded.',
+  CAMERA_FACE_MISSING: 'Your face was not visible to the camera. Stay in front of it, with your face well lit. This was recorded.',
+  CAMERA_MULTIPLE_FACES: 'More than one face was in view. Only you may be in front of the camera. This was recorded.',
+  CAMERA_HEAD_MOVEMENT: 'Your head turned away very often. Keep facing the screen. This was recorded.',
+  CAMERA_STOPPED: 'Your camera stopped. It must stay on for the whole assessment. This was recorded.',
 };

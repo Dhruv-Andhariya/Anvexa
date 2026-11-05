@@ -1,6 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { dsaError } from '../dsa.dto';
-import { ALL_INPUT_TYPES, type ProctorInputType } from './proctoring.types';
+import { ALL_INPUT_TYPES, isCameraType, type ProctorInputType } from './proctoring.types';
 
 export const MAX_EVENTS_PER_REQUEST = 20;
 const MAX_DETAIL = 60;
@@ -18,7 +18,13 @@ export interface ProctorEventInput {
   /** Optional client time (epoch ms). The server clamps it into the attempt window. */
   at?: number;
   detail?: string;
+  /** AI camera alerts only: how long the behaviour lasted (capped at 30 minutes) and the model's confidence (0..1). */
+  durationMs?: number;
+  confidence?: number;
 }
+
+/** A camera alert's duration is capped here (the longest test is not longer). */
+export const MAX_CAMERA_DURATION_MS = 30 * 60_000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -68,7 +74,9 @@ export function parseProctorEvents(body: unknown): ProctorEventInput[] {
   }
   return events.map((raw, i) => {
     if (!isRecord(raw)) throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1} is not an object.`);
-    rejectUnknownKeys(raw, ['type', 'at', 'detail'], `Event ${i + 1}`);
+    // duration and confidence describe an AI camera alert; no other event carries them
+    const camera = typeof raw.type === 'string' && isCameraType(raw.type);
+    rejectUnknownKeys(raw, camera ? ['type', 'at', 'detail', 'durationMs', 'confidence'] : ['type', 'at', 'detail'], `Event ${i + 1}`);
     if (typeof raw.type !== 'string' || !ALL_INPUT_TYPES.includes(raw.type)) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_EVENT_TYPE', `Event ${i + 1} has an unknown type.`);
     }
@@ -83,6 +91,18 @@ export function parseProctorEvents(body: unknown): ProctorEventInput[] {
       if (typeof raw.detail !== 'string') throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1}: detail must be text.`);
       // Short label only (e.g. "Ctrl+Shift+I"): strip control characters, cap the length.
       out.detail = raw.detail.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MAX_DETAIL);
+    }
+    if (raw.durationMs !== undefined) {
+      if (typeof raw.durationMs !== 'number' || !Number.isFinite(raw.durationMs) || raw.durationMs < 0) {
+        throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1}: durationMs must be a number of 0 or more.`);
+      }
+      out.durationMs = Math.round(Math.min(raw.durationMs, MAX_CAMERA_DURATION_MS));
+    }
+    if (raw.confidence !== undefined) {
+      if (typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1) {
+        throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1}: confidence must be between 0 and 1.`);
+      }
+      out.confidence = Math.round(raw.confidence * 100) / 100;
     }
     return out;
   });

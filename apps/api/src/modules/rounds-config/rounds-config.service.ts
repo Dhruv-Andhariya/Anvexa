@@ -156,7 +156,8 @@ export class RoundsConfigService {
   async publicSteps(tenantId: string, jobId: string): Promise<{ complete: boolean; steps: string[] } | null> {
     try {
       const config = await this.store.getConfig(tenantId, jobId);
-      return { complete: config?.status === 'COMPLETE', steps: config?.rounds.map((r) => r.name) ?? [] };
+      // a round HR skipped is not part of the selection process students see
+      return { complete: config?.status === 'COMPLETE', steps: config?.rounds.filter((r) => !r.skip).map((r) => r.name) ?? [] };
     } catch (err) {
       if (!isMissingTable(err)) throw err;
       this.logger.warn('job_round_configs is missing (rounds migration not applied) - publish check skipped');
@@ -192,6 +193,33 @@ export class RoundsConfigService {
     return lockedAt;
   }
 
+  /**
+   * HR skips one round for the whole job (skip = { reason }) or brings it back (null). Works after the lock too: the
+   * questions and pass rules stay exactly as they were. Moving the students who were waiting for the round is the
+   * round engine's part (RoundSkipService); this only records the decision. Returns the round as it was before.
+   */
+  async setSkip(tenantId: string, jobId: string, roundId: string, skip: { reason: string } | null, actor: Actor | null): Promise<{ before: SavedRound; rounds: JobRounds }> {
+    return this.guard(async () => {
+      const job = await this.store.getJob(tenantId, jobId);
+      if (!job) throw jobNotFound();
+      const config = await this.store.getConfig(tenantId, jobId);
+      const round = config?.rounds.find((r) => r.id === roundId);
+      if (!config || !round) throw apiError(HttpStatus.NOT_FOUND, 'ROUND_NOT_FOUND', 'Round not found. Save the rounds first.');
+      if (skip && round.skip) throw apiError(HttpStatus.CONFLICT, 'ROUND_ALREADY_SKIPPED', 'This round is already skipped.');
+      if (!skip && !round.skip) throw apiError(HttpStatus.CONFLICT, 'ROUND_NOT_SKIPPED', 'This round is not skipped.');
+      await this.store.setSkip(tenantId, jobId, roundId, skip ? { at: new Date(), reason: skip.reason, byId: actor?.id ?? null } : null);
+      await this.audit.record({
+        tenantId,
+        actorUserId: actor?.id ?? null,
+        action: skip ? 'rounds.round_skipped' : 'rounds.round_unskipped',
+        subjectType: 'job',
+        subjectId: jobId,
+        metadata: { roundId, roundName: round.name, ...(skip ? { reason: skip.reason } : {}) },
+      });
+      return { before: toSavedRound(round), rounds: toView(jobId, job.title, await this.store.getConfig(tenantId, jobId)) };
+    });
+  }
+
   /** Configs of several jobs (assessments job list). */
   async listConfigs(tenantId: string, jobIds: string[]): Promise<StoredConfig[]> {
     return this.guard(() => this.store.listConfigs(tenantId, jobIds));
@@ -210,6 +238,7 @@ export class RoundsConfigService {
 /** Keeps the ids of rounds / questions that already belong to this job; everything else gets a new id. */
 function toStored(rounds: RoundConfig[], current: StoredConfig | null): StoredRound[] {
   const roundIds = new Set(current?.rounds.map((r) => r.id));
+  const skips = new Map(current?.rounds.map((r) => [r.id, r.skip ?? null]));
   const questionIds = new Set(current?.rounds.flatMap((r) => r.questions.map((q) => q.id)));
   const usedRounds = new Set<string>();
   const usedQuestions = new Set<string>();
@@ -218,8 +247,12 @@ function toStored(rounds: RoundConfig[], current: StoredConfig | null): StoredRo
     used.add(value);
     return value;
   };
-  return rounds.map((r, i) => ({
-    id: keep(r.id, roundIds, usedRounds),
+  return rounds.map((r, i) => {
+    const id = keep(r.id, roundIds, usedRounds);
+    return {
+    id,
+    // HR's skip stays with the round when the rounds are saved again
+    skip: skips.get(id) ?? null,
     position: i + 1,
     type: r.type,
     name: r.name,
@@ -244,7 +277,8 @@ function toStored(rounds: RoundConfig[], current: StoredConfig | null): StoredRo
       coding: q.kind === 'CODING' ? q.coding : null,
       sql: q.kind === 'CODING' ? q.sql : null,
     })),
-  }));
+    };
+  });
 }
 
 export function passRuleOf(r: Pick<StoredRound, 'passMode' | 'passValue' | 'passMaxScore'>): PassRule | null {
@@ -262,6 +296,7 @@ export function toSavedRound(r: StoredRound): SavedRound {
     passRule: passRuleOf(r),
     questions: r.questions.map((q) => ({ ...q })),
     totals: { questions: r.questions.length, marks: r.questions.reduce((sum, q) => sum + q.marks, 0) },
+    skipped: r.skip ? { at: r.skip.at.toISOString(), reason: r.skip.reason, byName: r.skip.byName } : null,
   };
 }
 

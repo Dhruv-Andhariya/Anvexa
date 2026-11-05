@@ -3,6 +3,10 @@ import {
   ASSESSMENT_CONSENT_VERSION,
   ASSESSMENT_LIMITS,
   AI_INTERVIEW_PROTECTION_LIMITS,
+  activeRounds,
+  isRoundSkipped,
+  skipRoundRequestSchema,
+  type SkipRoundResult,
   assessmentIntegrityDecisionRequestSchema,
   assessmentViolationAckRequestSchema,
   assessmentViolationRequestSchema,
@@ -20,6 +24,7 @@ import {
   type SaveAssessmentAnswersResult,
   type SavedRound,
 } from '@hireflow/contracts';
+import { parseBody } from '../../common/api-error';
 import { isFeatureOn } from '../../common/feature-flags';
 import { AssessmentsService } from '../assessments';
 import { AuditService } from '../audit';
@@ -28,10 +33,12 @@ import { RoundModules, RoundsConfigService, type RoundsForEngine } from '../roun
 import type { Actor } from '../tenants';
 import {
   CODING_CONSENT_VERSION,
+  cameraModeFromEnv,
   codingAnswered,
   codingMinutes,
   codingResultInput,
   emptyCodingState,
+  type CameraMode,
   type CodingFinishReason,
   type CodingState,
 } from './coding-round';
@@ -71,8 +78,11 @@ export interface RoundEngineConfig {
    * ASSESSMENT_PROTECTION, ASSESSMENT_MAX_WARNINGS, ASSESSMENT_TAB_MONITORING, ASSESSMENT_FULLSCREEN_REQUIRED, ASSESSMENT_FACE_POLICY.
    */
   protection?: AssessmentProtectionSettings | null;
-  /** DSA / SQL coding rounds: the webcam must be on (DSA_PROCTORING and DSA_PROCTOR_CAMERA, both default on). Email wording only. */
-  codingCameraRequired?: boolean;
+  /**
+   * DSA / SQL coding rounds watched by the AI camera (DSA_PROCTOR_CAMERA: all | sql | off; off when DSA_PROCTORING is
+   * off). Email wording only: the coding page enforces it. Missing = off.
+   */
+  codingCameraMode?: CameraMode;
 }
 
 const isOff = (v: string | undefined) => ['off', 'false', '0', 'no'].includes((v ?? '').trim().toLowerCase());
@@ -82,7 +92,7 @@ export const roundEngineConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): 
   return {
     cameraRequired,
     protection: assessmentProtectionFromEnv(env, cameraRequired),
-    codingCameraRequired: !isOff(env.DSA_PROCTORING) && !isOff(env.DSA_PROCTOR_CAMERA),
+    codingCameraMode: isOff(env.DSA_PROCTORING) ? 'off' : cameraModeFromEnv(env),
   };
 };
 
@@ -494,6 +504,60 @@ export class RoundEngineService {
     return step;
   }
 
+  /**
+   * HR skips one round of the job (e.g. only DSA, or only SQL, or the GD): body { reason }. From now on a student who
+   * passes the round before it is invited straight to the next round that runs; students already waiting for it move on
+   * at once. Works while students are in the middle of the rounds (the lock is about questions and pass marks).
+   */
+  async skipRound(tenantId: string, jobId: string, roundId: string, input: unknown, actor: Actor | null): Promise<SkipRoundResult> {
+    const req = parseBody(skipRoundRequestSchema, input, 'INVALID_SKIP', 'Write why this round is skipped.');
+    await this.rounds.setSkip(tenantId, jobId, roundId, { reason: req.reason }, actor);
+    const moved = await this.moveOnPastSkippedRound(tenantId, jobId, roundId, actor);
+    return { rounds: await this.rounds.get(tenantId, jobId), ...moved };
+  }
+
+  /**
+   * "Undo skip": the round runs again for every student who has not gone past it yet. Students who already moved on
+   * stay where they are (nobody is pulled back).
+   */
+  async unskipRound(tenantId: string, jobId: string, roundId: string, actor: Actor | null): Promise<SkipRoundResult> {
+    const { rounds } = await this.rounds.setSkip(tenantId, jobId, roundId, null, actor);
+    return { rounds, movedOn: 0, inProgress: 0 };
+  }
+
+  /**
+   * HR skipped `roundId` for the whole job (RoundsConfigService.setSkip): every student who was waiting for it moves on
+   * to the next round that runs, as if they had just passed the round before it. Waiting = an invitation they have not
+   * started (the link is withdrawn), or a place in the GD pool not yet in a group. Students in the middle of the round
+   * finish it and continue as usual. Safe to call twice (a moved student is no longer waiting).
+   */
+  async moveOnPastSkippedRound(tenantId: string, jobId: string, roundId: string, actor: Actor | null): Promise<{ movedOn: number; inProgress: number }> {
+    const config = await this.rounds.forRoundEngine(tenantId, jobId);
+    const round = config?.rounds.find((r) => r.id === roundId);
+    if (!config || !round || !isRoundSkipped(round)) return { movedOn: 0, inProgress: 0 };
+    const waiting = await this.store.waitingForSkippedRound(tenantId, roundId);
+    let movedOn = 0;
+    for (const w of waiting.waiting) {
+      const left =
+        w.via === 'INVITE'
+          ? await this.store.revokeInvite(tenantId, w.applicationId, roundId, actor?.id ?? null, this.now())
+          : await this.store.leaveGdPool(tenantId, w.applicationId, roundId);
+      if (!left) continue; // someone else moved them meanwhile
+      const step = await this.nextFor(tenantId, jobId, w.applicationId, config.rounds, round, true);
+      const applied = await this.applyStep(tenantId, w.applicationId, jobId, round.id, step);
+      await this.audit.record({
+        tenantId,
+        actorUserId: actor?.id ?? null,
+        action: 'assessment.progressed',
+        subjectType: 'application',
+        subjectId: w.applicationId,
+        metadata: { roundId: round.id, outcome: 'ROUND_SKIPPED', left: w.via, next: describeStep(step), ...applied },
+      });
+      movedOn++;
+    }
+    return { movedOn, inProgress: waiting.inProgress };
+  }
+
   /** The next step, with the pipeline's Stage 2 overall criterion applied after the last technical round. */
   private async nextFor(tenantId: string, jobId: string, applicationId: string, rounds: SavedRound[], round: SavedRound, passed: boolean): Promise<NextStep> {
     const step = this.next(rounds, round, passed);
@@ -517,7 +581,8 @@ export class RoundEngineService {
   /** Invites a candidate whose AI screening is complete to the job's first round (when it is an online test). */
   async inviteToFirstRound(row: { tenantId: string; applicationId: string; jobId: string; roundId: string }): Promise<boolean> {
     const config = await this.rounds.forRoundEngine(row.tenantId, row.jobId);
-    const first = config?.status === 'COMPLETE' ? [...config.rounds].sort((a, b) => a.position - b.position)[0] : undefined;
+    // the first round that runs (a round HR skipped is passed over)
+    const first = config?.status === 'COMPLETE' ? activeRounds(config.rounds)[0] : undefined;
     if (!first || first.id !== row.roundId || !roundKind(first)) return false;
     const queued = await this.store.queueInvite(row.tenantId, row.applicationId, row.jobId, first.id);
     if (queued) {

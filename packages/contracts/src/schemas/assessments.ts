@@ -89,6 +89,8 @@ export const assessmentRoundSummarySchema = z.object({
   questionCount: z.number().int(),
   totalMarks: z.number().int(),
   counts: z.object({ passed: z.number().int(), failed: z.number().int(), notAttempted: z.number().int() }),
+  /** HR skipped the round for the job: students go straight to the next round (Skip round on the Publish page). */
+  skipped: z.object({ at: z.string(), reason: z.string(), byName: z.string().nullable() }).nullable().optional(),
   /** ONLINE_TEST = the round engine runs it; MODULE = a round module (GD, DSA, SQL, AI interview); HR = by hand. */
   runBy: z.enum(['ONLINE_TEST', 'MODULE', 'HR']),
   module: roundModuleSchema.nullable(),

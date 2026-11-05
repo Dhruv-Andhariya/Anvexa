@@ -1,5 +1,6 @@
 import {
   ROUND_MODULE_OF,
+  activeRounds,
   isDsaRound,
   isOnlineRound,
   type AssessmentAnswer,
@@ -122,7 +123,8 @@ export function nextStep(
   opts: { groupDiscussion?: boolean; modules?: ReadonlySet<RoundModule> } = {},
 ): NextStep {
   if (!passed) return { kind: 'EMAIL', email: 'REJECTED', nextRoundName: null };
-  const next = [...rounds].sort((a, b) => a.position - b.position).find((r) => r.position > current.position);
+  // the next round that runs: a round HR skipped for the job is passed over (Aptitude -> [DSA skipped] -> SQL)
+  const next = activeRounds(rounds).find((r) => r.position > current.position);
   if (!next) return { kind: 'EMAIL', email: 'CLEARED_ALL', nextRoundName: null };
   const nextKind = roundKind(next);
   if (nextKind) return { kind: 'INVITE', round: next, roundKind: nextKind };

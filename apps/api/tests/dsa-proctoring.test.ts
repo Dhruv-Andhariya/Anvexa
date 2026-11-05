@@ -5,7 +5,8 @@ import type { CodeRunner, RunnerJob } from '../src/modules/dsa/execution/code-ru
 import { DISABLED_POLICY, policyFromEnv, type ProctorPolicy } from '../src/modules/dsa/proctoring/proctoring.policy';
 import { ProctoringService, inviteRefFor } from '../src/modules/dsa/proctoring/proctoring.service';
 import { InMemoryProctorStore } from '../src/modules/dsa/proctoring/proctoring.store';
-import { CONSENT_VERSION } from '../src/modules/dsa/proctoring/proctoring.types';
+// DSA and SQL attempts are camera-monitored by default (DSA_PROCTOR_CAMERA=all): the camera notice's version
+import { CAMERA_CONSENT_VERSION as CONSENT_VERSION } from '../src/modules/dsa/proctoring/proctoring.types';
 import { MockQuestionRepository } from '../src/modules/dsa/questions/mock-question.repository';
 import { MOCK_QUESTIONS } from '../src/modules/dsa/questions/mock-questions.data';
 import { DemoInvitationResolver } from '../src/modules/dsa/session/invitation.resolver';

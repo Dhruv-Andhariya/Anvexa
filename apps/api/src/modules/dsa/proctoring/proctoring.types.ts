@@ -5,8 +5,18 @@
  * so HR can show both on one timeline later. These events are observations, never proof of cheating.
  */
 
-/** Shown to the candidate before monitoring starts; bump when the notice changes. */
-export const CONSENT_VERSION = 'dsa-proctoring-v2'; // v2: webcam monitoring (camera on, face in view, one person)
+import { CAMERA_EVENT_TYPES, type CameraEventType } from '@hireflow/contracts';
+
+/** Shown to the candidate before monitoring starts (attempts without the camera); bump when the notice changes. */
+export const CONSENT_VERSION = 'dsa-proctoring-v2';
+/** The notice of a camera-monitored attempt (AI camera: gaze, face in view, one person). Bump when it changes. */
+export const CAMERA_CONSENT_VERSION = 'dsa-proctoring-camera-v3';
+
+/** AI camera alerts (contracts camera-proctoring.ts) and the older webcam events, still accepted from older pages. */
+export const LEGACY_CAMERA_TYPES = ['CAMERA_OFF', 'NO_FACE', 'MULTIPLE_FACES'] as const;
+export const isCameraType = (type: string): boolean =>
+  (CAMERA_EVENT_TYPES as readonly string[]).includes(type) || (LEGACY_CAMERA_TYPES as readonly string[]).includes(type);
+export type { CameraEventType };
 
 /** Things the page can report as a violation. */
 export const VIOLATION_TYPES = [
@@ -30,6 +40,8 @@ export const VIOLATION_TYPES = [
   'NO_FACE',
   /** Webcam: more than one face in view for several seconds. */
   'MULTIPLE_FACES',
+  /** AI camera alerts, already grouped on the device (a single glance never becomes one). */
+  ...CAMERA_EVENT_TYPES,
 ] as const;
 export type ViolationType = (typeof VIOLATION_TYPES)[number];
 
@@ -69,6 +81,8 @@ export interface ProctorEvent {
   durationMs: number | null;
   /** Short, sanitised label such as "Ctrl+Shift+I". Never free text from the page's content. */
   detail: string | null;
+  /** AI camera alerts: how sure the model was (0..1). Missing on older records. */
+  confidence?: number | null;
 }
 
 export interface ProctorSession {
@@ -81,6 +95,8 @@ export interface ProctorSession {
   fullscreenAtStart: boolean;
   /** Candidate said the webcam was on when consenting (a claim from the page). Missing on records made before v2. */
   cameraAtStart?: boolean;
+  /** This attempt is watched by the AI camera (decided from the round when the candidate consented). */
+  camera?: boolean;
   startedAt: number | null;
   endedAt: number | null;
   nextId: number;
@@ -112,6 +128,8 @@ export interface ProctoringSummary {
   cameraOffCount: number;
   noFaceCount: number;
   multipleFacesCount: number;
+  /** AI camera alerts by kind (suspicious patterns for HR to review, never proof). Older webcam events counted in. */
+  camera: { monitored: boolean; gazeAway: number; faceMissing: number; multipleFaces: number; headMovement: number; stopped: number };
   /** Allowed warnings (0 = no limit) and how many suspicious events have been used up. */
   strikesAllowed: number;
   strikesUsed: number;
@@ -151,6 +169,8 @@ export interface ClientProctoringConfig {
   requireFullscreen: boolean;
   /** The webcam must be on for the whole attempt; the page checks that a face (and only one) is in view. */
   requireCamera: boolean;
+  /** This attempt is watched by the AI camera (same as requireCamera; the name the SQL / DSA page reads). */
+  camera: boolean;
   fullscreenReentry: 'block' | 'warn';
   autoEnd: boolean;
   /** Suspicious events tolerated as warnings; the next one ends the assessment. 0 = no limit. */
@@ -167,9 +187,9 @@ export const MONITORED_DESCRIPTIONS = [
   'Developer-tools shortcuts such as F12',
 ];
 
-/** Added to the list when the webcam is required. */
+/** Added to the list when the attempt is camera-monitored. */
 export const CAMERA_MONITORED_DESCRIPTIONS = [
-  'Your webcam turning off, or its permission being withdrawn',
-  'No face in front of the camera for several seconds',
-  'More than one person in front of the camera',
+  'Your webcam must stay on for the whole test; turning it off or withdrawing its permission pauses the test',
+  'Repeated or long looks away from the screen, your face leaving the camera view, more than one face in view, and very frequent head turning (a single glance never counts)',
+  'These are suspicious patterns for the hiring team to review, never proof on their own. No video, image or face data leaves your computer: only short alerts such as "looked left 4 times in 60 s" are sent',
 ];

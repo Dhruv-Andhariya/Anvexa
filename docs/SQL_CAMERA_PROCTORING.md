@@ -1,10 +1,12 @@
-# AI camera monitoring (SQL rounds)
+# AI camera monitoring (SQL and DSA rounds)
 
-On SQL rounds, the coding page now also watches the webcam to notice suspicious patterns: repeated or long looks away
+On SQL and DSA rounds, the coding page watches the webcam to notice suspicious patterns: repeated or long looks away
 from the screen, the face leaving the camera's view, more than one face in view, very frequent head turning, and the
 camera turning off. It extends the existing proctoring (full screen, tabs, clipboard, screenshots). The SQL and DSA
-pages look the same; only a camera check before the start, a small self-view and "camera on" in the Monitored badge
-are added. DSA rounds stay camera-free unless `DSA_PROCTOR_CAMERA=all`.
+pages look the same; only a camera check before the start and a small self-view are added. `DSA_PROCTOR_CAMERA`:
+`all` (default) watches SQL and DSA rounds, `sql` only SQL rounds (DSA rounds camera-free), `off` none. It replaces
+the earlier face-count-only webcam check on DSA rounds; its events (`CAMERA_OFF`, `NO_FACE`, `MULTIPLE_FACES`) are
+still accepted from older pages and counted in the same camera totals.
 
 **What it is not:** a webcam cannot see a second laptop or phone outside its view. A repeated or long look away is a
 **suspicious pattern for HR to review, never proof of cheating**. The wording to candidates and HR says so.
@@ -70,7 +72,7 @@ order.
   - frequent head movement, leaving the view, two faces (and flicker that should not alert), darkness;
   - an off-centre camera (calibration), blinks, the cool-down, the camera stopping, and configurable thresholds.
 - `apps/api/tests/sql/sql-camera-proctoring.test.ts` covers:
-  - SQL rounds camera-monitored and DSA rounds not;
+  - SQL and DSA rounds camera-monitored by default, DSA rounds camera-free with `DSA_PROCTOR_CAMERA=sql`;
   - consent and camera required to start;
   - warning 1 (camera), warning 2 (full screen), and the 3rd (two faces) ending and grading the attempt;
   - the cool-down, the HR record (time, duration, confidence, warning number, review flag);

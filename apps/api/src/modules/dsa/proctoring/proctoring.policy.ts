@@ -8,10 +8,13 @@ import {
   type ProctoringSummary,
   type PublicPolicy,
   type Severity,
+  CAMERA_CONSENT_VERSION,
   CAMERA_MONITORED_DESCRIPTIONS,
   CONSENT_VERSION,
   MONITORED_DESCRIPTIONS,
+  isCameraType,
 } from './proctoring.types';
+import { cameraModeFromEnv, cameraMonitored, type CameraMode, type CodingKind } from '../../round-engine/coding-round';
 
 export const DSA_PROCTOR_POLICY = Symbol('DSA_PROCTOR_POLICY');
 
@@ -19,8 +22,15 @@ export const DSA_PROCTOR_POLICY = Symbol('DSA_PROCTOR_POLICY');
 export interface ProctorPolicy {
   enabled: boolean;
   requireFullscreen: boolean;
-  /** The webcam must stay on; the page reports CAMERA_OFF, NO_FACE and MULTIPLE_FACES. Default on. */
-  requireCamera: boolean;
+  /**
+   * Which coding attempts the AI camera watches (DSA_PROCTOR_CAMERA): all (default: SQL and DSA rounds), sql (SQL-only
+   * rounds), off. A watched attempt needs the webcam on to start; the page reports grouped alerts (CAMERA_*).
+   */
+  cameraMode: CameraMode;
+  /** Camera alerts use up the allowed warnings like any other violation (DSA_PROCTOR_CAMERA_STRIKES, default on). Off = review only. */
+  cameraStrikes: boolean;
+  /** The same camera alert again within this time is the same behaviour: ignored (server safety net; the page has its own). */
+  cameraCooldownMs: number;
   /** `block`: the page is unusable until full screen is re-entered. `warn`: a banner only. */
   fullscreenReentry: 'block' | 'warn';
   /** Weighted score (low 1, medium 3, high 5) at which the candidate gets a warning. */
@@ -61,7 +71,9 @@ export function policyFromEnv(env: NodeJS.ProcessEnv = process.env): ProctorPoli
   return {
     enabled: flag(env.DSA_PROCTORING, true),
     requireFullscreen: flag(env.DSA_PROCTOR_REQUIRE_FULLSCREEN, true),
-    requireCamera: flag(env.DSA_PROCTOR_CAMERA, true),
+    cameraMode: cameraModeFromEnv(env),
+    cameraStrikes: flag(env.DSA_PROCTOR_CAMERA_STRIKES, true),
+    cameraCooldownMs: num(env.DSA_PROCTOR_CAMERA_COOLDOWN_MS, 20_000),
     fullscreenReentry: env.DSA_PROCTOR_FULLSCREEN_REENTRY === 'warn' ? 'warn' : 'block',
     warnScore: num(env.DSA_PROCTOR_WARN_SCORE, 5),
     reviewScore: num(env.DSA_PROCTOR_REVIEW_SCORE, 12),
@@ -80,16 +92,22 @@ export function policyFromEnv(env: NodeJS.ProcessEnv = process.env): ProctorPoli
 /** Proctoring switched off (used when a DsaService is built without one, e.g. in older tests). */
 export const DISABLED_POLICY: ProctorPolicy = { ...policyFromEnv({}), enabled: false };
 
-export function clientConfig(policy: ProctorPolicy): ClientProctoringConfig {
+/** Is an attempt of this kind watched by the AI camera under the policy? */
+export const cameraFor = (policy: ProctorPolicy, kind: CodingKind): boolean => policy.enabled && cameraMonitored(kind, policy.cameraMode);
+
+/** `camera`: this attempt is camera-monitored (cameraFor). Its notice has its own consent version. */
+export function clientConfig(policy: ProctorPolicy, camera = false): ClientProctoringConfig {
+  const on = policy.enabled && camera;
   return {
     enabled: policy.enabled,
     requireFullscreen: policy.enabled && policy.requireFullscreen,
-    requireCamera: policy.enabled && policy.requireCamera,
+    requireCamera: on,
+    camera: on,
     fullscreenReentry: policy.fullscreenReentry,
     autoEnd: policy.enabled && ((policy.autoEnd && policy.disqualifyScore > 0) || policy.maxStrikes > 0),
     maxStrikes: policy.enabled ? policy.maxStrikes : 0,
-    consentVersion: CONSENT_VERSION,
-    monitored: policy.enabled && policy.requireCamera ? [...MONITORED_DESCRIPTIONS, ...CAMERA_MONITORED_DESCRIPTIONS] : MONITORED_DESCRIPTIONS,
+    consentVersion: on ? CAMERA_CONSENT_VERSION : CONSENT_VERSION,
+    monitored: on ? [...MONITORED_DESCRIPTIONS, ...CAMERA_MONITORED_DESCRIPTIONS] : MONITORED_DESCRIPTIONS,
   };
 }
 
@@ -118,15 +136,25 @@ export function severityOf(type: ProctorEventType, priorFullscreenExits: number,
     case 'SCREENSHOT_ATTEMPT':
     case 'CAMERA_OFF':
     case 'NO_FACE':
+    case 'CAMERA_STOPPED':
+    case 'CAMERA_FACE_MISSING':
+    case 'CAMERA_GAZE_AWAY':
       return 'medium';
     case 'MULTIPLE_FACES':
+    case 'CAMERA_MULTIPLE_FACES':
       return 'high';
+    case 'CAMERA_HEAD_MOVEMENT':
+      return 'low';
     default:
       return 'low';
   }
 }
 
-const isViolation = (e: ProctorEvent) => e.severity !== 'info';
+/**
+ * Counts as a violation (a warning used up, part of the score). Camera alerts count only while
+ * DSA_PROCTOR_CAMERA_STRIKES is on; otherwise they are kept for HR's review only.
+ */
+export const countsAsViolation = (e: ProctorEvent, policy: ProctorPolicy) => e.severity !== 'info' && (policy.cameraStrikes || !isCameraType(e.type));
 
 /** Time covered by at least one episode, overlaps counted once. Open episodes run until `nowMs`. */
 export function mergedOutsideMs(events: ProctorEvent[], nowMs: number): number {
@@ -151,15 +179,27 @@ export function mergedOutsideMs(events: ProctorEvent[], nowMs: number): number {
   return total;
 }
 
-export function scoreOf(events: ProctorEvent[]): number {
-  return events.filter(isViolation).reduce((sum, e) => sum + SEVERITY_WEIGHT[e.severity], 0);
+export function scoreOf(events: ProctorEvent[], policy?: ProctorPolicy): number {
+  const counted = policy ? events.filter((e) => countsAsViolation(e, policy)) : events.filter((e) => e.severity !== 'info');
+  return counted.reduce((sum, e) => sum + SEVERITY_WEIGHT[e.severity], 0);
 }
 
 export function summarize(session: ProctorSession, policy: ProctorPolicy, nowMs: number): ProctoringSummary {
   const events = session.events;
-  const violations = events.filter(isViolation);
+  const violations = events.filter((e) => countsAsViolation(e, policy));
   const count = (...types: ProctorEventType[]) => violations.filter((e) => types.includes(e.type)).length;
-  const score = scoreOf(events);
+  // camera alerts by kind, whether or not they used up a warning (older webcam events counted in)
+  const cameraCount = (...types: ProctorEventType[]) => events.filter((e) => types.includes(e.type)).length;
+  const camera = {
+    monitored: session.camera === true,
+    gazeAway: cameraCount('CAMERA_GAZE_AWAY'),
+    faceMissing: cameraCount('CAMERA_FACE_MISSING', 'NO_FACE'),
+    multipleFaces: cameraCount('CAMERA_MULTIPLE_FACES', 'MULTIPLE_FACES'),
+    headMovement: cameraCount('CAMERA_HEAD_MOVEMENT'),
+    stopped: cameraCount('CAMERA_STOPPED', 'CAMERA_OFF'),
+  };
+  const cameraAlerts = camera.gazeAway + camera.faceMissing + camera.multipleFaces + camera.headMovement + camera.stopped;
+  const score = scoreOf(events, policy);
   const fullscreenExitCount = count('FULLSCREEN_EXIT');
   const outside = mergedOutsideMs(events, session.endedAt ?? nowMs);
 
@@ -185,6 +225,11 @@ export function summarize(session: ProctorSession, policy: ProctorPolicy, nowMs:
     if (policy.reviewOutsideSeconds > 0 && outside >= policy.reviewOutsideSeconds * 1000) {
       status = 'review';
       reasons.push(`${Math.round(outside / 1000)} s outside the assessment (review at ${policy.reviewOutsideSeconds} s).`);
+    }
+    // any AI camera alert: a person should look (the camera sees patterns, it never proves anything)
+    if (cameraAlerts > 0) {
+      status = 'review';
+      reasons.push(`${cameraAlerts} AI camera alert${cameraAlerts === 1 ? '' : 's'} (suspicious patterns, not proof).`);
     }
     if (status === 'clean' && score >= policy.warnScore) {
       status = 'warning';
@@ -214,9 +259,10 @@ export function summarize(session: ProctorSession, policy: ProctorPolicy, nowMs:
     devToolsAttempts: count('DEVTOOLS_SHORTCUT'),
     otherRestrictedActions: count('SELECT_ALL', 'VIEW_SOURCE', 'SAVE_SHORTCUT', 'PRINT_SHORTCUT'),
     screenshotAttempts: count('SCREENSHOT_ATTEMPT'),
-    cameraOffCount: count('CAMERA_OFF'),
-    noFaceCount: count('NO_FACE'),
-    multipleFacesCount: count('MULTIPLE_FACES'),
+    cameraOffCount: camera.stopped,
+    noFaceCount: camera.faceMissing,
+    multipleFacesCount: camera.multipleFaces,
+    camera,
     strikesAllowed: policy.maxStrikes,
     strikesUsed: violations.length,
     totalTimeOutsideMs: outside,

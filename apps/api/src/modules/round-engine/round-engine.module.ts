@@ -9,6 +9,7 @@ import { HrRoundEngineController } from './hr-round-engine.controller';
 import { PublicAssessmentController } from './public-assessment.controller';
 import { ROUND_ENGINE_CLOCK, ROUND_ENGINE_CONFIG, RoundEngineService, roundEngineConfigFromEnv } from './round-engine.service';
 import { PrismaRoundEngineStore, RoundEngineStore } from './round-engine.store';
+import { RoundSkipController } from './round-skip.controller';
 import { ROUND_ENGINE_WORKER_CONFIG, RoundEngineWorker, roundEngineWorkerConfigFromEnv } from './round-engine.worker';
 
 /**
@@ -17,7 +18,7 @@ import { ROUND_ENGINE_WORKER_CONFIG, RoundEngineWorker, roundEngineWorkerConfigF
  */
 @Module({
   imports: [ApplicationsModule, TenantsModule, RoundsConfigModule, AssessmentsModule, PipelineModule],
-  controllers: [PublicAssessmentController, HrRoundEngineController],
+  controllers: [PublicAssessmentController, HrRoundEngineController, RoundSkipController],
   providers: [
     RoundEngineService,
     RoundEngineWorker,

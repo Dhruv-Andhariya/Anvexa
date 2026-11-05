@@ -1,5 +1,16 @@
 // The browser talks ONLY to the HireFlow API. The code runner (Piston) is reachable only from the backend.
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+import type { CameraEventType } from '@hireflow/contracts';
+
+/**
+ * Browser: same-origin /api/v1/dsa/*, forwarded to the API by next.config.ts, so the page works from its public link
+ * (tunnel or deployment) on the candidate's own computer - never the API's localhost address, which only exists on the
+ * machine running it. NEXT_PUBLIC_CANDIDATE_API_URL overrides this when the API has its own public URL.
+ * Server (rendering, if any): straight to the API, like the careers site.
+ */
+export const API_URL =
+  typeof window === 'undefined'
+    ? process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'
+    : process.env.NEXT_PUBLIC_CANDIDATE_API_URL || '/api/v1';
 
 // These types mirror apps/api/src/modules/dsa (dsa.service.ts, evaluator.ts, question.types.ts).
 export type Language = 'python' | 'java' | 'cpp' | 'sql';
@@ -84,6 +95,7 @@ export type ProctorInputType =
   | 'CAMERA_OFF'
   | 'NO_FACE'
   | 'MULTIPLE_FACES'
+  | CameraEventType
   | 'SESSION_RESUMED';
 
 export interface ProctorEventInput {
@@ -91,6 +103,9 @@ export interface ProctorEventInput {
   /** Server-adjusted time (epoch ms). The server clamps it into the attempt window. */
   at?: number;
   detail?: string;
+  /** AI camera alerts only: how long the behaviour lasted, and how sure the check was (0..1). */
+  durationMs?: number;
+  confidence?: number;
 }
 
 export interface ProctoringConfig {
@@ -98,6 +113,8 @@ export interface ProctoringConfig {
   requireFullscreen: boolean;
   /** The webcam must stay on; the page checks that one face is in view. Missing from older API versions. */
   requireCamera?: boolean;
+  /** This attempt is watched by the AI camera (gaze, face in view, one person). Missing from older API versions. */
+  camera?: boolean;
   fullscreenReentry: 'block' | 'warn';
   autoEnd: boolean;
   /** Suspicious events tolerated as warnings; the next one ends the assessment. 0 = no limit. */

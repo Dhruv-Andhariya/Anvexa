@@ -109,4 +109,21 @@ export function codingKindOf(round: Pick<SavedRound, 'questions'>): 'code' | 'sq
   return sql === 0 ? 'code' : sql === round.questions.length ? 'sql' : 'mixed';
 }
 
+export type CodingKind = ReturnType<typeof codingKindOf>;
+
+/**
+ * Which coding rounds the AI camera watches (DSA_PROCTOR_CAMERA): `all` (default: SQL and DSA rounds), `sql` (SQL-only
+ * rounds; DSA rounds without the camera), `off`. on / true count as all, false / 0 / no as off.
+ */
+export type CameraMode = 'all' | 'sql' | 'off';
+
+export function cameraModeFromEnv(env: NodeJS.ProcessEnv = process.env): CameraMode {
+  const v = (env.DSA_PROCTOR_CAMERA ?? '').trim().toLowerCase();
+  if (['off', 'false', '0', 'no'].includes(v)) return 'off';
+  return v === 'sql' ? 'sql' : 'all';
+}
+
+/** Is a coding attempt of this kind camera-monitored under `mode`? (`sql` mode: SQL-only rounds, not mixed ones.) */
+export const cameraMonitored = (kind: CodingKind, mode: CameraMode): boolean => mode === 'all' || (mode === 'sql' && kind === 'sql');
+
 export { isDsaRound };

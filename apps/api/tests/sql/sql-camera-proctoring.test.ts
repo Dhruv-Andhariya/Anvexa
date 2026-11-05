@@ -71,7 +71,8 @@ async function setup(policy: Partial<ProctorPolicy> = {}) {
   const t = newAssessmentToken();
   store.invites.push({ id: '0192f3a1-dddd-7000-8000-000000000001', tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: saved[0]!.id, tokenHash: t.tokenHash, expiresAt: new Date(T0 + 86_400_000), revokedAt: null, emailStatus: 'SENT', attempts: 1, sentAt: new Date(T0), lastError: null });
   token = t.token;
-  proctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true, ...policy }, () => now);
+  // two allowed warnings: the third violation ends the attempt (the rule this suite walks through)
+  proctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true, maxStrikes: 2, ...policy }, () => now);
   service = new DsaService(new RoundInvitationResolver(engine), new BankQuestionRepository(), new EngineSessionStore(engine), noPrograms, () => now, proctoring, sandbox);
 }
 
@@ -88,20 +89,28 @@ const send = async (sec: number, ...events: Record<string, unknown>[]) => {
 };
 
 describe('which attempts are camera-monitored', () => {
-  it('SQL rounds by default; DSA rounds never unless DSA_PROCTOR_CAMERA=all; off switches it off', () => {
-    expect(cameraModeFromEnv({})).toBe('sql');
+  it('SQL and DSA rounds by default; DSA_PROCTOR_CAMERA=sql keeps DSA rounds camera-free; off switches it off', () => {
+    expect(cameraModeFromEnv({})).toBe('all');
+    expect([cameraModeFromEnv({ DSA_PROCTOR_CAMERA: 'sql' }), cameraModeFromEnv({ DSA_PROCTOR_CAMERA: 'off' }), cameraModeFromEnv({ DSA_PROCTOR_CAMERA: 'on' })]).toEqual(['sql', 'off', 'all']);
     expect([cameraMonitored('sql', 'sql'), cameraMonitored('code', 'sql'), cameraMonitored('mixed', 'sql')]).toEqual([true, false, false]);
-    expect([cameraMonitored('code', 'all'), cameraMonitored('sql', 'off')]).toEqual([true, false]);
+    expect([cameraMonitored('code', 'all'), cameraMonitored('mixed', 'all'), cameraMonitored('sql', 'off')]).toEqual([true, true, false]);
   });
 
-  it('a SQL round asks for the camera (its own notice); a DSA round stays exactly as before', async () => {
+  it('a DSA round is camera-monitored by default too', async () => {
+    now = T0;
+    const dsaProctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true }, () => now);
+    const dsa = new DsaService(new DemoInvitationResolver(), new MockQuestionRepository(), new InMemorySessionStore(), noPrograms, () => now, dsaProctoring);
+    expect((await dsa.getState('demo-dsa-token')).proctoring).toMatchObject({ camera: true, requireCamera: true, consentVersion: CAMERA_CONSENT_VERSION });
+  });
+
+  it('a SQL round asks for the camera (its own notice); with DSA_PROCTOR_CAMERA=sql a DSA round has no camera', async () => {
     await setup();
     const sql = await service.getState(token);
     expect(sql.proctoring).toMatchObject({ camera: true, consentVersion: CAMERA_CONSENT_VERSION });
     expect(sql.proctoring.monitored.join(' ')).toMatch(/webcam must stay on/);
     expect(sql.proctoring.monitored.join(' ')).toMatch(/No video, image or face data leaves your computer/);
 
-    const dsaProctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true }, () => now);
+    const dsaProctoring = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true, cameraMode: 'sql' }, () => now);
     const dsa = new DsaService(new DemoInvitationResolver(), new MockQuestionRepository(), new InMemorySessionStore(), noPrograms, () => now, dsaProctoring);
     const state = await dsa.getState('demo-dsa-token');
     expect(state.proctoring).toMatchObject({ camera: false, consentVersion: CONSENT_VERSION });
@@ -120,6 +129,44 @@ describe('which attempts are camera-monitored', () => {
   it('with DSA_PROCTOR_CAMERA=off a SQL round is taken without the camera', async () => {
     await setup({ cameraMode: 'off' });
     expect((await service.getState(token)).proctoring).toMatchObject({ camera: false, consentVersion: CONSENT_VERSION });
+  });
+});
+
+describe('a DSA round with the camera (default DSA_PROCTOR_CAMERA=all)', () => {
+  const dsaSetup = () => {
+    now = T0;
+    const p = new ProctoringService(new InMemoryProctorStore(), { ...policyFromEnv({}), enabled: true, maxStrikes: 2 }, () => now);
+    return new DsaService(new DemoInvitationResolver(), new MockQuestionRepository(), new InMemorySessionStore(), noPrograms, () => now, p);
+  };
+  const T = 'demo-dsa-token';
+
+  it('cannot start without the camera, and starts with it', async () => {
+    const dsa = dsaSetup();
+    expect(code(await dsa.proctorStart(T, consent()).catch((e: unknown) => e))).toBe('CAMERA_REQUIRED');
+    expect(code(await dsa.proctorStart(T, { ...consent(true), consentVersion: CONSENT_VERSION }).catch((e: unknown) => e))).toBe('CONSENT_OUTDATED');
+    await dsa.proctorStart(T, consent(true));
+    expect((await dsa.start(T)).status).toBe('in_progress');
+  });
+
+  it('camera alerts are warnings on a DSA round too, and the third violation ends it', async () => {
+    const dsa = dsaSetup();
+    await dsa.proctorStart(T, consent(true));
+    await dsa.start(T);
+    now = T0 + 60_000;
+    expect(await dsa.proctorEvents(T, { events: [alert('CAMERA_GAZE_AWAY', 50)] })).toMatchObject({ accepted: 1, strikesUsed: 1, ended: false, level: 'warning' });
+    now = T0 + 120_000;
+    expect(await dsa.proctorEvents(T, { events: [alert('CAMERA_FACE_MISSING', 110)] })).toMatchObject({ strikesUsed: 2, ended: false, level: 'final_warning' });
+    now = T0 + 180_000;
+    expect(await dsa.proctorEvents(T, { events: [alert('CAMERA_MULTIPLE_FACES', 175)] })).toMatchObject({ ended: true });
+    expect((await dsa.getState(T)).status).toBe('finished');
+  });
+
+  it('the older webcam events (camera off, no face, two faces) still count on a DSA round', async () => {
+    const dsa = dsaSetup();
+    await dsa.proctorStart(T, consent(true));
+    await dsa.start(T);
+    now = T0 + 60_000;
+    expect(await dsa.proctorEvents(T, { events: [{ type: 'NO_FACE', at: T0 + 50_000 }] })).toMatchObject({ accepted: 1, strikesUsed: 1 });
   });
 });
 
@@ -195,7 +242,7 @@ describe('the invitation email says what the camera does', () => {
       timeLimitMinutes: 30, questionCount: 2, instructions: '', link: 'https://x.example/dsa/t', linkExpiresAt: new Date(T0), cameraRequired: false, coding: true, codingKind, codingCamera,
     }).text;
 
-  it('a camera-monitored SQL round asks for a webcam and says nothing is recorded; a DSA round still says no camera', () => {
+  it('a camera-monitored round asks for a webcam and says nothing is recorded; a round without the camera says no camera', () => {
     expect(mail('sql', true)).toMatch(/You will need a working webcam/);
     expect(mail('sql', true)).toMatch(/No video or image is recorded or sent/);
     expect(mail('sql', true)).not.toMatch(/No camera/);
