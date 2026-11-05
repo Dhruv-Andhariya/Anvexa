@@ -369,6 +369,22 @@ export class MemoryStore extends AiInterviewStore {
     if ('giveUp' in failure) Object.assign(i, { emailStatus: 'FAILED', lastError: failure.error });
     else Object.assign(i, { emailStatus: 'QUEUED', nextAttemptAt: failure.retryAt, lastError: failure.error, attempts: failure.countAttempt ? i.attempts : i.attempts - 1 });
   }
+  async invitesWithOtherLink(base: string, now: Date, limit: number) {
+    const open = (inviteId: string) => {
+      const s = [...this.sessions.values()].find((x) => x.inviteId === inviteId);
+      return !s || s.status === 'NOT_STARTED' || s.status === 'IN_PROGRESS' || s.status === 'PAUSED';
+    };
+    return [...this.invites.values()]
+      .filter((i) => i.emailStatus === 'SENT' && i.expiresAt && i.expiresAt > now && i.linkBase !== base && open(i.id))
+      .slice(0, limit)
+      .map((i) => ({ ...i }));
+  }
+  async requeueInvite(inviteId: string, now: Date) {
+    const i = this.invites.get(inviteId);
+    if (!i || i.emailStatus !== 'SENT') return false;
+    Object.assign(i, { emailStatus: 'QUEUED', nextAttemptAt: now, lastError: null, attempts: 0 });
+    return true;
+  }
   async idleSessions(before: Date, limit: number) {
     return [...this.sessions.values()].filter((s) => (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') && (s.lastActivityAt ?? new Date(0)) < before).slice(0, limit).map((s) => ({ ...s }));
   }

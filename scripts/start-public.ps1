@@ -11,6 +11,10 @@
 # Logs: %LOCALAPPDATA%\hireflow\logs.  Run at Windows login: scripts\register-autostart.ps1
 
 $ErrorActionPreference = 'Continue'
+# One run at a time (the 5-minute watchdog, VS Code's folder-open task and a manual run may overlap): two runs at once
+# could each start a tunnel and email different links.
+$mutex = New-Object System.Threading.Mutex($false, 'Local\HireFlowStartPublic')
+if (-not $mutex.WaitOne(0)) { Write-Host 'HireFlow start-public is already running - nothing to do'; exit 0 }
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root '.env'
 $logs = Join-Path $env:LOCALAPPDATA 'hireflow\logs'
@@ -135,6 +139,12 @@ if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new UR
 # 4. API + dashboards (pnpm is not on PATH on this laptop, so the pinned version runs through npx)
 if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (Listening 3001))) {
   if (Listening 4000) { 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
+  # The database client is generated from apps/api/prisma/schema: after a `git pull` with schema changes a stale
+  # client stops the API from compiling. Nothing holds the engine file now (the API is stopped), so regenerate it.
+  Push-Location (Join-Path $root 'apps\api')
+  npx -y pnpm@9.15.0 exec prisma generate *>> $log
+  if ($LASTEXITCODE -eq 0) { Say 'database client generated' } else { Say 'WARNING: prisma generate failed (see this log) - the API may not compile' }
+  Pop-Location
   # CAREERS_SITE_URL is the live tunnel here, so the API may rewrite old posts to it at start even when .env keeps
   # PUBLISHER_AUTO_REFRESH_LINKS=false (that guards plain `pnpm dev` with a localhost URL). The process env wins
   # over .env: process.loadEnvFile never overwrites a variable that is already set.

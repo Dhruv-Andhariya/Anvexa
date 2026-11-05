@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
+import { CurrentLinkCheck, LINK_STILL_OPENS, isTemporaryTunnel, linkStillOpens } from '../../common/public-link';
 import { uuidv7 } from '../../common/uuidv7';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
@@ -54,16 +55,8 @@ export const isPublicLink = (base: string): boolean => {
   }
 };
 
-export const LINK_STILL_OPENS = Symbol('LINK_STILL_OPENS');
-/** The site behind a screening link still answers (a replaced Cloudflare quick tunnel does not resolve any more). */
-export const linkStillOpens = async (base: string): Promise<boolean> => {
-  try {
-    const res = await fetch(new URL(base.replace('{token}', 'x')).origin, { redirect: 'manual', signal: AbortSignal.timeout(10_000) });
-    return res.status < 400;
-  } catch {
-    return false;
-  }
-};
+// shared with the AI interview invitations (common/public-link.ts); re-exported for existing imports
+export { LINK_STILL_OPENS, isTemporaryTunnel, linkStillOpens };
 
 /**
  * Sends the decision emails (queued automatically, or by HR) (candidate_emails QUEUED -> SENT / FAILED).
@@ -78,6 +71,9 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
   private sweepTimer: NodeJS.Timeout | undefined;
   private running = false;
   private pausedUntil = 0;
+  /** Whether the current screening link opens (temporary tunnels only, asked at most once a minute). */
+  private linkCheck: CurrentLinkCheck | null = null;
+  private warnedDeadLink = false;
 
   constructor(
     @Inject(PrismaService) private readonly db: PrismaService,
@@ -208,6 +204,23 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
     }
   }
 
+  /**
+   * The current screening link's site answers. Only temporary tunnel addresses are asked (cached for a minute); a
+   * deployed domain and local test links are trusted. A dead tunnel is logged once, so the reason is visible.
+   */
+  private async currentLinkOpens(): Promise<boolean> {
+    const base = this.screeningBaseUrl;
+    if (!base || this.allowLocalLinks || !isTemporaryTunnel(base)) return true;
+    this.linkCheck ??= new CurrentLinkCheck(this.stillOpens);
+    const opens = await this.linkCheck.opens(base);
+    if (!opens && !this.warnedDeadLink) {
+      this.warnedDeadLink = true;
+      this.logger.warn(`AI screening link ${new URL(base.replace('{token}', 'x')).origin} does not open (tunnel not running or replaced): shortlist emails are held until it does - run "pnpm start:public"`);
+    }
+    if (opens) this.warnedDeadLink = false;
+    return opens;
+  }
+
   /** This process can put a screening link a student can open into a shortlist email. */
   private canSendShortlists(): boolean {
     return !!this.screeningBaseUrl && (this.allowLocalLinks || isPublicLink(this.screeningBaseUrl));
@@ -260,6 +273,12 @@ export class DecisionEmailSender implements OnApplicationBootstrap, OnModuleDest
         if (!this.screeningBaseUrl) throw new WaitingForLinkError('Waiting for the AI screening link to be set up (CAREERS_SITE_URL or AI_SCREENING_URL).');
         if (!this.allowLocalLinks && !isPublicLink(this.screeningBaseUrl)) {
           throw new WaitingForLinkError('Waiting for a public AI screening link (start the public link or deploy the careers site); it is sent automatically then.');
+        }
+        // a quick tunnel that is not running (or was replaced) does not exist any more: never email a dead link
+        if (!(await this.currentLinkOpens())) {
+          throw new WaitingForLinkError(
+            'The AI screening link does not open right now (the public tunnel in CAREERS_SITE_URL is not running). Start it with "pnpm start:public"; the email is sent automatically once the link opens.',
+          );
         }
         const token = newScreeningToken();
         tokenHash = token.tokenHash;

@@ -18,6 +18,8 @@ export interface InterviewInviteEmailInput {
   instructions: string;
   link: string;
   linkExpiresAt: Date;
+  /** Sent again because the earlier link stopped working (the public address changed): say so, so the old email is ignored. */
+  linkReplaced?: boolean;
 }
 
 const escapeHtml = (s: string) =>
@@ -36,9 +38,12 @@ export function buildInterviewInviteEmail(i: InterviewInviteEmailInput): EmailMe
   const round = oneLine(i.roundName);
   const website = i.companyWebsite && /^https?:\/\//i.test(i.companyWebsite.trim()) ? oneLine(i.companyWebsite) : null;
   const instructions = i.instructions.trim().replace(/\s+/g, ' ').slice(0, 1000);
-  const subject = `Shortlisted: ${round} for ${job} at ${company}`;
+  const subject = i.linkReplaced ? `New link: ${round} for ${job} at ${company}` : `Shortlisted: ${round} for ${job} at ${company}`;
   const paragraphs = [
     `Dear ${name},`,
+    ...(i.linkReplaced
+      ? ['The link in our earlier email no longer works, so here is a new personal link. Please use only this one. If you already started, you continue where you left off.']
+      : []),
     `Congratulations! You have cleared the ${oneLine(i.clearedStep)} for the ${job} position at ${company}, and you are shortlisted for the next stage: the ${round}.`,
     `This is a spoken technical interview with an AI interviewer, about ${i.minutes} minutes long. It asks about the projects and skills in your resume, the technical skills of this role, and a few practical problems. You answer out loud; the interviewer listens and asks follow-up questions.`,
     ...(instructions ? [`Instructions from the hiring team: ${instructions}`] : []),

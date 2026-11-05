@@ -1,6 +1,19 @@
 {
   "version": "2.0.0",
   "tasks": [
+    {
+      // Opening this folder starts the whole stack + the public Cloudflare link (scripts/start-public.ps1).
+      // Safe on every open: a live tunnel is reused (same address); only a dead one is replaced, and then the API
+      // re-sends the AI screening email with the new link to students whose link stopped working.
+      // VS Code asks once to allow automatic tasks (Command Palette: "Tasks: Manage Automatic Tasks" -> Allow).
+      "label": "HireFlow: start public stack",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\scripts\\start-public.ps1"],
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "silent", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
     { "label": "infra: up", "type": "shell", "command": "docker compose -f infra/docker/docker-compose.yml up -d" },
     { "label": "infra: down", "type": "shell", "command": "docker compose -f infra/docker/docker-compose.yml down" },
     { "label": "check: everything", "type": "shell", "command": "pnpm check" }
