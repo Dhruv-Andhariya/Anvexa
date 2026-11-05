@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { isFeatureOn } from '../../common/feature-flags';
+import { CurrentLinkCheck, LINK_STILL_OPENS, isTemporaryTunnel, linkStillOpens } from '../../common/public-link';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundEngineService } from '../round-engine';
@@ -89,13 +90,47 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(AI_INTERVIEW_WORKER_CONFIG) private readonly config: AiInterviewWorkerConfig,
     @Optional() @Inject(AI_INTERVIEW_CLOCK) private readonly now: () => Date = () => new Date(),
+    /** Tests only: whether the site behind a link answers. */
+    @Optional() @Inject(LINK_STILL_OPENS) private readonly stillOpens: (base: string) => Promise<boolean> = linkStillOpens,
   ) {}
+
+  private readonly linkCheck = new CurrentLinkCheck((base) => this.stillOpens(base));
 
   onApplicationBootstrap() {
     if (!this.config.enabled) return;
     if (!this.config.baseUrl) this.logger.warn('interview link not set up (AI_INTERVIEW_URL / CAREERS_SITE_URL): invitations wait in the queue');
     this.timer = setInterval(() => void this.tick(), this.config.pollMs);
     this.timer.unref();
+    void this.resendDeadLinks();
+  }
+
+  /**
+   * The interview link follows CAREERS_SITE_URL, and a Cloudflare quick tunnel gets a new address on every restart:
+   * links already emailed then stop opening. At start, every student whose interview is not finished (not opened,
+   * started or paused) and whose emailed link no longer opens gets the invitation again with a fresh link; the
+   * interview itself continues where it stopped (it belongs to the invitation, not to the link). A link that still
+   * opens (e.g. a teammate's API on the shared database) is left alone. Never throws. Returns the invite ids queued.
+   */
+  async resendDeadLinks(): Promise<string[]> {
+    const base = this.config.baseUrl;
+    if (!base || (!this.config.allowLocalLinks && !isPublicLink(base))) return [];
+    const queued: string[] = [];
+    try {
+      const opens = new Map<string, Promise<boolean>>();
+      for (const invite of await this.store.invitesWithOtherLink(base, this.now(), 200)) {
+        if (invite.linkBase) {
+          if (!opens.has(invite.linkBase)) opens.set(invite.linkBase, this.stillOpens(invite.linkBase).catch(() => false));
+          if (await opens.get(invite.linkBase)) continue;
+        }
+        if (!(await this.store.requeueInvite(invite.id, this.now()))) continue; // another API queued it first
+        queued.push(invite.id);
+        await this.audit.record({ tenantId: invite.tenantId, actorUserId: null, action: 'ai_interview.link_replaced', subjectType: 'application', subjectId: invite.applicationId, metadata: { roundId: invite.roundId } });
+      }
+      if (queued.length) this.logger.log(`interview link address changed: invitation queued again for ${queued.length} student(s)`);
+    } catch (err) {
+      if (!isMissingTable(err)) this.logger.error(`interview link refresh failed (${err instanceof Error ? err.name : 'unknown'})`);
+    }
+    return queued;
   }
 
   onModuleDestroy() {
@@ -181,6 +216,10 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
       if (!this.config.allowLocalLinks && !isPublicLink(base)) {
         throw new WaitingForLinkError('Waiting for a public interview link (start the public link or deploy the site); it is sent automatically then.');
       }
+      // a quick tunnel that is not running (or was replaced) does not exist any more: never email a dead link
+      if (!this.config.allowLocalLinks && isTemporaryTunnel(base) && !(await this.linkCheck.opens(base))) {
+        throw new WaitingForLinkError('The interview link does not open right now (the public tunnel in CAREERS_SITE_URL is not running). Run "pnpm start:public"; it is sent automatically once the link opens.');
+      }
       const previous = ordered.filter((r) => r.position < round.position).at(-1);
       const token = newInterviewToken();
       const expiresAt = new Date(this.now().getTime() + this.config.linkDays * DAY_MS);
@@ -197,6 +236,7 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
         instructions: round.description,
         link: interviewLink(base, token.token),
         linkExpiresAt: expiresAt,
+        linkReplaced: row.sentAt !== null,
       });
       await this.mailer.send(ctx.email, message);
       delivered = true;

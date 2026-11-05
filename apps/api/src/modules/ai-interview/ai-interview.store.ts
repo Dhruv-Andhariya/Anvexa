@@ -232,6 +232,13 @@ export abstract class AiInterviewStore {
   abstract setInviteToken(inviteId: string, tokenHash: string, expiresAt: Date, linkBase: string): Promise<void>;
   abstract inviteSent(inviteId: string, sentAt: Date, expiresAt: Date): Promise<void>;
   abstract inviteFailed(inviteId: string, failure: SendFailure): Promise<void>;
+  /**
+   * Sent invitations whose link was built on another address than `base`, still valid, and whose interview is not
+   * finished (not opened, or started / paused): their link may have died with an old tunnel.
+   */
+  abstract invitesWithOtherLink(base: string, now: Date, limit: number): Promise<(InviteRow & { linkBase: string | null })[]>;
+  /** A SENT invitation goes back to the queue (a fresh link is made when it is sent); false when it was not SENT. */
+  abstract requeueInvite(inviteId: string, now: Date): Promise<boolean>;
   /** IN_PROGRESS / PAUSED sessions without activity since `before` (candidates for the time-out sweep). */
   abstract idleSessions(before: Date, limit: number): Promise<SessionRow[]>;
   /** Ended sessions whose report is missing, or failed and due for another try. */
@@ -640,6 +647,27 @@ export class PrismaAiInterviewStore extends AiInterviewStore {
         ...(failure.countAttempt ? {} : { attempts: { decrement: 1 } }),
       },
     });
+  }
+
+  async invitesWithOtherLink(base: string, now: Date, limit: number) {
+    const rows = await this.db.aiInterviewInvite.findMany({
+      where: {
+        emailStatus: 'SENT',
+        expiresAt: { gt: now },
+        OR: [{ linkBase: null }, { linkBase: { not: base } }],
+        AND: [{ OR: [{ session: { is: null } }, { session: { is: { status: { in: ['NOT_STARTED', 'IN_PROGRESS', 'PAUSED'] } } } }] }],
+      },
+      take: limit,
+    });
+    return rows.map((r) => ({ ...toInvite(r), linkBase: r.linkBase }));
+  }
+
+  async requeueInvite(inviteId: string, now: Date): Promise<boolean> {
+    const { count } = await this.db.aiInterviewInvite.updateMany({
+      where: { id: inviteId, emailStatus: 'SENT' },
+      data: { emailStatus: 'QUEUED', nextAttemptAt: now, lockedAt: null, lastError: null, attempts: 0 },
+    });
+    return count === 1;
   }
 
   async idleSessions(before: Date, limit: number) {

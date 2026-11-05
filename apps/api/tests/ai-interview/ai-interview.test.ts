@@ -424,3 +424,69 @@ describe('workflow: from the round before to the invitation', () => {
     expect(sessionOf()).toMatchObject({ status: 'COMPLETED', endedReason: 'TIME_UP' });
   });
 });
+
+describe('interview link follows the public address (quick tunnels change on restart)', () => {
+  const OLD = 'https://old-words-here.trycloudflare.com/interview/{token}';
+  const NEW = 'https://new-words-here.trycloudflare.com/interview/{token}';
+  const opensOnly = (live: string[]) => async (base: string) => live.some((l) => base.startsWith(l.split('{')[0]!.replace(/\/interview\/$/, '')));
+  function tunnelWorker(base: string, live: string[]) {
+    mailer = new FakeMailer();
+    return new AiInterviewWorker(
+      store,
+      service,
+      hr,
+      engine as unknown as RoundEngineService,
+      rounds as unknown as RoundsConfigService,
+      mailer as unknown as { enabled: boolean; send: (to: string, m: unknown) => Promise<void> } & { _?: MailError },
+      audit as unknown as AuditService,
+      config({ baseUrl: base }),
+      () => now,
+      opensOnly(live),
+    );
+  }
+  const firstInvite = () => [...store.invites.values()][0]!;
+
+  it('a dead old link: the student gets a NEW link by email and the same interview continues', async () => {
+    await started(); // the interview is running, opened with TOKEN
+    firstInvite().linkBase = OLD;
+    const loop = tunnelWorker(NEW, [NEW]);
+    expect(await loop.resendDeadLinks()).toHaveLength(1);
+    await loop.sendInvites();
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]!.subject).toContain('New link');
+    expect(mailer.sent[0]!.text).toContain('The link in our earlier email no longer works');
+    const fresh = /new-words-here\.trycloudflare\.com\/interview\/([A-Za-z0-9_-]+)/.exec(mailer.sent[0]!.text)![1]!;
+    expect((await service.view(fresh)).status).toBe('IN_PROGRESS'); // same interview, same place
+    expect((await errorOf(service.view(TOKEN))).status).toBe(404); // the old token was replaced
+    expect(audit.entries.some((e) => e.action === 'ai_interview.link_replaced')).toBe(true);
+  });
+
+  it('an old link that still opens (a teammate\'s live tunnel) is left alone', async () => {
+    await service.view(TOKEN);
+    firstInvite().linkBase = OLD;
+    expect(await tunnelWorker(NEW, [OLD, NEW]).resendDeadLinks()).toEqual([]);
+  });
+
+  it('a finished interview is never emailed again', async () => {
+    await started();
+    await service.end(TOKEN);
+    firstInvite().linkBase = OLD;
+    expect(await tunnelWorker(NEW, [NEW]).resendDeadLinks()).toEqual([]);
+  });
+
+  it('the current tunnel is down: the invitation waits (no dead link emailed) and goes once it opens', async () => {
+    store.invites.clear();
+    engine.waiting = [{ tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: ROUND }];
+    const down = tunnelWorker(NEW, []);
+    await down.discover();
+    await down.sendInvites();
+    expect(mailer.sent).toHaveLength(0);
+    expect(firstInvite()).toMatchObject({ emailStatus: 'QUEUED' });
+    expect(firstInvite().lastError).toContain('does not open');
+    firstInvite().nextAttemptAt = new Date(0);
+    const up = tunnelWorker(NEW, [NEW]);
+    await up.sendInvites();
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]!.subject).not.toContain('New link');
+  });
+});
