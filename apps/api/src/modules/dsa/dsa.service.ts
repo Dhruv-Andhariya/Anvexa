@@ -5,6 +5,7 @@ import { Evaluator, type CaseResult, type Evaluation, type Verdict } from './eva
 import { CODE_RUNNER, CodeRunnerBusyError, CodeRunnerUnavailableError, type CodeRunner } from './execution/code-runner';
 import { DSA_CLOCK } from './dsa.tokens';
 import { parseProctorEvents, parseProctorStart } from './proctoring/proctoring.dto';
+import { cameraFor } from './proctoring/proctoring.policy';
 import { ProctoringService, inviteRefFor, type RecordResult } from './proctoring/proctoring.service';
 import type { CandidateProctorState, ClientProctoringConfig } from './proctoring/proctoring.types';
 import { DSA_QUESTION_REPOSITORY, type QuestionRepository } from './questions/question.repository';
@@ -150,9 +151,16 @@ export class DsaService {
   /** Records consent. Happens before the assessment starts; idempotent. */
   async proctorStart(token: string, body: unknown): Promise<ClientProctoringConfig> {
     const dto = parseProctorStart(body);
-    const { session } = await this.load(token);
+    const { session, questions } = await this.load(token);
     if (session.status === 'finished') throw this.finishedError(session);
-    return this.proctoring.start(inviteRefFor(token), session.assessmentId, dto);
+    return this.proctoring.start(inviteRefFor(token), session.assessmentId, dto, this.cameraFor(questions));
+  }
+
+  /** Is this attempt watched by the AI camera? From the round's problems: SQL only, programs only or both. */
+  private cameraFor(questions: DsaQuestion[]): boolean {
+    const sql = questions.filter((q) => q.sql).length;
+    const kind = sql === 0 ? 'code' : sql === questions.length ? 'sql' : 'mixed';
+    return cameraFor(this.proctoring.policy, kind);
   }
 
   /** Stores browser integrity events. The candidate is whoever owns the token; nothing else is accepted. */
@@ -397,7 +405,7 @@ export class DsaService {
       remainingSeconds: this.remainingSeconds(session),
       progress: questions.map((q) => toPublicProgress(session.progress[q.id] ?? this.emptyProgress(q.id))),
       proctoring: {
-        ...this.proctoring.config(),
+        ...this.proctoring.config(this.cameraFor(questions)),
         started: await this.proctoring.isStarted(ref),
         ...(await this.proctoring.candidateStateFor(ref)),
       },

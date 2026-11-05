@@ -8,6 +8,7 @@ import { AiGeneratePanel } from './ai-generate-panel';
 import { InterviewProtectionSettings } from './interview-protection-settings';
 import { GdRubricSettings } from './gd-rubric-settings';
 import { QuestionEditor } from './question-editor';
+import { RoundSkipButton, SkippedNote } from './round-skip';
 
 const ROUND_TYPE_KEYS = Object.keys(ROUND_TYPES) as RoundType[];
 const KIND_KEYS = Object.keys(QUESTION_KINDS) as QuestionKind[];
@@ -25,6 +26,7 @@ export function RoundCard({
   onChange,
   onMove,
   onRemove,
+  onSkipped,
 }: {
   jobId: string;
   round: RoundDraft;
@@ -37,6 +39,8 @@ export function RoundCard({
   onChange: (r: RoundDraft) => void;
   onMove: (to: number) => void;
   onRemove: () => void;
+  /** Skip / Undo skip is saved on the server at once (not part of the unsaved edits). */
+  onSkipped: (skipped: RoundDraft['skipped'], message: string) => void;
 }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [addKind, setAddKind] = useState<QuestionKind>(ROUND_TYPES[round.type].kinds[0]!);
@@ -51,7 +55,7 @@ export function RoundCard({
     set({ passMode: mode, passMaxScore: mode === 'INTERVIEWER_SCORE' ? round.passMaxScore || '10' : '' });
 
   return (
-    <li className={`rounded-lg border bg-surface ${problemCount ? 'border-danger/50' : 'border-border'}`}>
+    <li className={`rounded-lg border bg-surface ${problemCount ? 'border-danger/50' : 'border-border'} ${round.skipped ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">{index + 3}</span>
         <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={`${id}-body`} className="min-w-0 flex-1 truncate text-left text-sm font-medium">
@@ -68,6 +72,16 @@ export function RoundCard({
         <Button variant="ghost" className="px-2 py-1" aria-label={`Move ${round.name || 'round'} down`} disabled={disabled || index === count - 1} onClick={() => onMove(index + 1)}>
           ↓
         </Button>
+        {/* a saved round can be skipped / brought back at any time, also after students started */}
+        {round.id && (
+          <RoundSkipButton
+            jobId={jobId}
+            roundId={round.id}
+            roundName={round.name}
+            skipped={round.skipped ?? null}
+            onChange={(skipped, message) => onSkipped(skipped, message)}
+          />
+        )}
         <Button variant="ghost" className="px-2 py-1 text-danger" aria-label={`Remove ${round.name || 'round'}`} disabled={disabled} onClick={onRemove}>
           Remove
         </Button>
@@ -75,6 +89,7 @@ export function RoundCard({
           {expanded ? '▴' : '▾'}
         </Button>
       </div>
+      {round.skipped && <SkippedNote skipped={round.skipped} />}
 
       {expanded && (
         <div id={`${id}-body`} className="flex flex-col gap-4 border-t border-border px-3 py-3">

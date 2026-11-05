@@ -62,6 +62,8 @@ export interface RoundDraft {
   passValue: string;
   passMaxScore: string;
   questions: QuestionDraft[];
+  /** HR skipped this saved round for the job (set by Skip / Undo skip, never sent with a save). */
+  skipped?: SavedRound['skipped'];
 }
 
 let seq = 0;
@@ -135,6 +137,7 @@ export function fromSaved(rounds: SavedRound[]): RoundDraft[] {
   return rounds.map((r) => ({
     key: r.id,
     id: r.id,
+    skipped: r.skipped ?? null,
     type: r.type,
     name: r.name,
     description: r.description,

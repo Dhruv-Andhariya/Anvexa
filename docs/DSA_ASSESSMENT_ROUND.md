@@ -58,7 +58,8 @@ The first student who starts locks the questions and the pass rule for the whole
 
 ## 3. What the student gets
 
-- **Email**: "Next Step: DSA Coding Round for <job> at <company>": number of problems, minutes, instructions from HR, the
+- **Email**: "Congratulations! You've Been Shortlisted for <job> – Next Step: DSA Coding Round" (the same "shortlisted"
+  email for every round the student moves on to, in the order HR set: aptitude -> DSA -> SQL -> ...): number of problems, minutes, instructions from HR, the
   personal link (valid 7 days from sending, configurable), the rules (laptop or desktop, full screen, Python / Java /
   C++, nothing to install, a working webcam that stays on (checked on the student's device, never recorded), no microphone or screen recording). It never contains marks or the pass mark.
 - **Page** (`/dsa/<token>`): start screen with the list of problems (titles, difficulty, marks, no statements); consent

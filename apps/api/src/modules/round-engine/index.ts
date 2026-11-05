@@ -4,7 +4,11 @@ export { RoundEngineService, type CodingRoundContext } from './round-engine.serv
 export { isOnlineRound, roundKind, type RoundKind } from './online-test';
 export {
   CODING_CONSENT_VERSION,
+  cameraModeFromEnv,
+  cameraMonitored,
   codingMinutes,
+  type CameraMode,
+  type CodingKind,
   emptyCodingState,
   parseCodingState,
   type CodingFinishReason,

@@ -1,9 +1,10 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { isRoundSkipped } from '@hireflow/contracts';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
 import { buildRoundClearedEmail, buildRoundInviteEmail, buildRoundRejectionEmail } from './emails';
-import { codingKindOf, codingMinutes, codingRoundsEnabled } from './coding-round';
+import { cameraMonitored, codingKindOf, codingMinutes, codingRoundsEnabled } from './coding-round';
 import { DEFAULT_LINK_DAYS, assessmentBaseUrlFromEnv, assessmentLink, dsaBaseUrlFromEnv, isPublicLink, newAssessmentToken } from './link';
 import { DEADLINE_GRACE_MS, roundKind } from './online-test';
 import { ROUND_ENGINE_CLOCK, ROUND_ENGINE_CONFIG, RoundEngineService, type RoundEngineConfig } from './round-engine.service';
@@ -177,7 +178,8 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
       if (!this.config.allowLocalLinks && !isPublicLink(base)) {
         throw new WaitingForLinkError('Waiting for a public assessment link (start the public link or deploy the site); it is sent automatically then.');
       }
-      const previous = ordered.filter((r) => r.position < round.position).at(-1);
+      // the round the student just cleared (a round HR skipped is not named: they never took it)
+      const previous = ordered.filter((r) => r.position < round.position && !isRoundSkipped(r)).at(-1);
 
       const token = newAssessmentToken();
       const expiresAt = new Date(this.now().getTime() + this.config.linkDays * DAY_MS);
@@ -195,7 +197,9 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
         instructions: round.description,
         link: assessmentLink(base, token.token),
         linkExpiresAt: expiresAt,
-        cameraRequired: coding ? this.engineConfig.codingCameraRequired === true : this.engineConfig.cameraRequired,
+        cameraRequired: coding ? false : this.engineConfig.cameraRequired,
+        // coding rounds: the AI camera watches this round (DSA_PROCTOR_CAMERA all | sql | off)
+        codingCamera: coding && cameraMonitored(codingKindOf(round), this.engineConfig.codingCameraMode ?? 'off'),
         maxWarnings: coding ? null : (this.engineConfig.protection?.maxWarnings ?? null),
         coding,
         ...(coding ? { codingKind: codingKindOf(round) } : {}),

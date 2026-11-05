@@ -168,7 +168,12 @@ export interface PipelineRound {
   id: string;
   position: number;
   type: RoundType;
+  /** HR skipped the round for the job: the pipeline rules leave it out (no result is ever expected in it). */
+  skipped?: unknown;
 }
+
+/** Rounds that count for the pipeline: skipped ones left out. */
+const counted = <R extends PipelineRound>(rounds: R[]): R[] => rounds.filter((r) => !r.skipped);
 export interface PipelineResult {
   outcome: RoundOutcome;
   score: number | null;
@@ -194,7 +199,7 @@ const round2 = (n: number) => Math.floor(n * 100 + 1e-9) / 100;
  * null when the job has no technical round.
  */
 export function stage2Verdict(rounds: PipelineRound[], resultOf: (roundId: string) => PipelineResult | undefined, settings: PipelineSettings): Stage2Verdict | null {
-  const tech = rounds.filter((r) => isTechnicalRound(r.type));
+  const tech = counted(rounds).filter((r) => isTechnicalRound(r.type));
   if (!tech.length) return null;
   const results = tech.map((r) => resultOf(r.id));
   const outcomes = results.map((r) => r?.outcome ?? 'NOT_ATTEMPTED');
@@ -236,7 +241,7 @@ export function pipelineStatusOf(
   settings: PipelineSettings,
   piCall?: 'SELECTED' | 'REJECTED' | null,
 ): PipelineStatus {
-  const ordered = [...rounds].sort((a, b) => a.position - b.position);
+  const ordered = counted(rounds).sort((a, b) => a.position - b.position);
   const verdict = stage2Verdict(ordered, resultOf, settings);
   const lastTech = [...ordered].reverse().find((r) => isTechnicalRound(r.type));
   let any = false;
@@ -260,7 +265,7 @@ export function pipelineStatusOf(
  * passed (every earlier round passing is checked by the caller, as before).
  */
 export function stage2GateAllows(rounds: PipelineRound[], target: Pick<PipelineRound, 'position'>, resultOf: (roundId: string) => PipelineResult | undefined, settings: PipelineSettings): boolean {
-  const tech = rounds.filter((r) => isTechnicalRound(r.type));
+  const tech = counted(rounds).filter((r) => isTechnicalRound(r.type));
   if (!tech.length) return true;
   const lastTechPosition = Math.max(...tech.map((r) => r.position));
   if (target.position <= lastTechPosition) return true;

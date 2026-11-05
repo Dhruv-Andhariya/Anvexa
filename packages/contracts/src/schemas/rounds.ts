@@ -341,8 +341,35 @@ export const savedRoundSchema = z.object({
     }),
   ),
   totals: z.object({ questions: z.number().int(), marks: z.number().int() }),
+  /**
+   * HR skipped this round for the whole job (null / missing = it runs). Students who pass the round before it get
+   * the next round that is not skipped; its questions and pass rule are kept, so "Undo skip" brings it back as it was.
+   */
+  skipped: z.object({ at: z.string(), reason: z.string(), byName: z.string().nullable() }).nullable().optional(),
 });
 export type SavedRound = z.infer<typeof savedRoundSchema>;
+
+/** A round HR skipped for the job (see savedRoundSchema.skipped). */
+export const isRoundSkipped = (r: { skipped?: unknown }): boolean => !!r.skipped;
+
+/** The rounds that run, in HR's order (skipped ones left out). */
+export const activeRounds = <R extends { position: number; skipped?: unknown }>(rounds: readonly R[]): R[] =>
+  [...rounds].filter((r) => !isRoundSkipped(r)).sort((a, b) => a.position - b.position);
+
+/** POST /api/v1/rounds/jobs/:jobId/rounds/:roundId/skip - HR's reason is required (audit log, Assessments page). */
+export const skipRoundRequestSchema = z.object({
+  reason: z.string().trim().min(3, 'Write why this round is skipped (at least 3 characters).').max(500),
+});
+export type SkipRoundRequest = z.infer<typeof skipRoundRequestSchema>;
+
+/** What a skip / undo changed, for HR's confirmation message. */
+export interface SkipRoundResult {
+  rounds: JobRounds;
+  /** Students moved on because they were waiting for the skipped round (unused link withdrawn / left the GD pool). */
+  movedOn: number;
+  /** Students in the middle of the skipped round: they finish it, then continue as usual. */
+  inProgress: number;
+}
 export type SavedQuestion = SavedRound['questions'][number];
 
 /** GET / PUT /api/v1/rounds/jobs/:jobId. HR only, same company. */

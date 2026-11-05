@@ -3,11 +3,13 @@ import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { dsaError } from '../dsa.dto';
 import { DSA_CLOCK } from '../dsa.tokens';
 import type { ProctorEventInput, ProctorStartDto } from './proctoring.dto';
-import { DISABLED_POLICY, DSA_PROCTOR_POLICY, clientConfig, severityOf, summarize, type ProctorPolicy } from './proctoring.policy';
+import { DISABLED_POLICY, DSA_PROCTOR_POLICY, clientConfig, countsAsViolation, severityOf, summarize, type ProctorPolicy } from './proctoring.policy';
 import { DSA_PROCTOR_STORE, InMemoryProctorStore, type ProctorStore } from './proctoring.store';
 import {
+  CAMERA_CONSENT_VERSION,
   CONSENT_VERSION,
   RETURN_CLOSES,
+  isCameraType,
   type CandidateProctorState,
   type ClientProctoringConfig,
   type ProctorEvent,
@@ -47,8 +49,9 @@ export class ProctoringService {
     return this.policy.enabled;
   }
 
-  config(): ClientProctoringConfig {
-    return clientConfig(this.policy);
+  /** `camera`: the attempt is watched by the AI camera (cameraFor(policy, kind of round)). */
+  config(camera = false): ClientProctoringConfig {
+    return clientConfig(this.policy, camera);
   }
 
   async isStarted(inviteRef: string): Promise<boolean> {
@@ -56,16 +59,19 @@ export class ProctoringService {
     return !!s?.consentAt;
   }
 
-  /** Records the candidate's consent. Idempotent: the first consent time is kept. */
-  async start(inviteRef: string, assessmentId: string, dto: ProctorStartDto): Promise<ClientProctoringConfig> {
+  /**
+   * Records the candidate's consent. Idempotent: the first consent time is kept. `camera`: the attempt is watched by
+   * the AI camera; the candidate then consents to the camera notice and must have the webcam on.
+   */
+  async start(inviteRef: string, assessmentId: string, dto: ProctorStartDto, camera = false): Promise<ClientProctoringConfig> {
     if (!this.policy.enabled) throw dsaError(HttpStatus.NOT_FOUND, 'PROCTORING_DISABLED', 'Proctoring is not enabled for this assessment.');
-    if (dto.consentVersion !== CONSENT_VERSION) {
+    if (dto.consentVersion !== (camera ? CAMERA_CONSENT_VERSION : CONSENT_VERSION)) {
       throw dsaError(HttpStatus.CONFLICT, 'CONSENT_OUTDATED', 'The monitoring notice has changed. Reload the page and read it again.');
     }
     if (this.policy.requireFullscreen && !dto.fullscreen) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'FULLSCREEN_REQUIRED', 'Full-screen mode must be on before the assessment can start.');
     }
-    if (this.policy.requireCamera && dto.camera !== true) {
+    if (camera && dto.camera !== true) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'CAMERA_REQUIRED', 'Your webcam must be on before the assessment can start. Allow the camera and try again.');
     }
     const session = await this.getOrCreate(inviteRef, assessmentId);
@@ -74,9 +80,10 @@ export class ProctoringService {
       session.consentAt = this.now();
       session.fullscreenAtStart = dto.fullscreen;
       session.cameraAtStart = dto.camera === true;
+      session.camera = camera;
       await this.store.save(session);
     }
-    return this.config();
+    return this.config(session.camera === true);
   }
 
   /** Called when the assessment actually starts, so event times can be bounded by it. */
@@ -137,15 +144,22 @@ export class ProctoringService {
 
   /** HR review of stored sessions (already filtered to one company and application by the caller). */
   reviewOf(session: ProctorSession, eventLimit: number): { summary: ProctoringSummary; events: ProctorEventView[] } {
-    const ordered = [...session.events].sort((a, b) => a.at - b.at || a.id - b.id);
-    return { summary: summarize(session, this.policy, this.now()), events: ordered.slice(0, eventLimit).map(toView) };
+    return { summary: summarize(session, this.policy, this.now()), events: this.views(session).slice(0, eventLimit) };
   }
 
   async events(inviteRef: string, limit: number, offset: number): Promise<{ total: number; events: ProctorEventView[] } | null> {
     const session = await this.store.get(inviteRef);
     if (!session) return null;
-    const ordered = [...session.events].sort((a, b) => a.at - b.at || a.id - b.id);
-    return { total: ordered.length, events: ordered.slice(offset, offset + limit).map(toView) };
+    const views = this.views(session);
+    return { total: views.length, events: views.slice(offset, offset + limit) };
+  }
+
+  /** Events in time order, each with the warning it used up (1, 2, ...) or null when it did not count. */
+  private views(session: ProctorSession): ProctorEventView[] {
+    let strike = 0;
+    return [...session.events]
+      .sort((a, b) => a.at - b.at || a.id - b.id)
+      .map((e) => toView(e, countsAsViolation(e, this.policy) ? ++strike : null));
   }
 
   /** Attempts whose status needs a person to look at them. */
@@ -218,6 +232,14 @@ export class ProctoringService {
 
     const type = input.type as ViolationType | 'SESSION_RESUMED';
     const recent = [...session.events].reverse().find((e) => e.type === type);
+    const camera = isCameraType(type);
+
+    if (camera) {
+      // a page cannot invent camera alerts for an attempt that is not camera-monitored
+      if (session.camera !== true) return false;
+      // the same behaviour reported again inside the cool-down is one alert, not a second warning
+      if (recent && Math.abs(at - recent.at) < p.cameraCooldownMs) return false;
+    }
 
     // The same action reported twice (a key event and a clipboard event, say) is one action.
     if (recent && Math.abs(at - recent.at) < p.dedupeMs && type !== 'SESSION_RESUMED') return false;
@@ -258,8 +280,9 @@ export class ProctoringService {
       severity: severityOf(type, prior, p),
       at,
       endedAt: null,
-      durationMs: null,
+      durationMs: camera ? (input.durationMs ?? null) : null,
       detail: input.detail && input.detail.length > 0 ? input.detail : null,
+      confidence: camera ? (input.confidence ?? null) : null,
     });
     return true;
   }
@@ -273,9 +296,15 @@ export interface ProctorEventView {
   endedAt: string | null;
   durationMs: number | null;
   detail: string | null;
+  /** An AI camera alert (a suspicious pattern for HR to review, never proof). */
+  camera: boolean;
+  /** Camera alerts: the model's confidence (0..1). */
+  confidence: number | null;
+  /** The allowed warning this event used up (1, 2, ...), or null when it did not count (info, review-only camera). */
+  strike: number | null;
 }
 
-function toView(e: ProctorEvent): ProctorEventView {
+function toView(e: ProctorEvent, strike: number | null): ProctorEventView {
   return {
     id: e.id,
     type: e.type,
@@ -284,5 +313,8 @@ function toView(e: ProctorEvent): ProctorEventView {
     endedAt: e.endedAt === null ? null : new Date(e.endedAt).toISOString(),
     durationMs: e.durationMs,
     detail: e.detail,
+    camera: isCameraType(e.type),
+    confidence: e.confidence ?? null,
+    strike,
   };
 }

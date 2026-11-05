@@ -78,6 +78,9 @@ importers:
 
   apps/candidate-app:
     dependencies:
+      '@hireflow/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@mediapipe/tasks-vision':
         specifier: 0.10.21
         version: 0.10.21

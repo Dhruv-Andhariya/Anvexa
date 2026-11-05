@@ -98,6 +98,10 @@ model JobRound {
   passValue        Int?           @map("pass_value")
   /// INTERVIEWER_SCORE: what the interviewer scores out of.
   passMaxScore     Int?           @map("pass_max_score")
+  /// HR skipped the round for the whole job (null = it runs): students go on to the next round that is not skipped.
+  skippedAt        DateTime?      @map("skipped_at")
+  skippedById      String?        @map("skipped_by_id") @db.Uuid
+  skipReason       String?        @map("skip_reason")
   createdAt        DateTime       @default(now()) @map("created_at")
 
   config                JobRoundConfig                @relation(fields: [jobId, tenantId], references: [jobId, tenantId], onDelete: Cascade)

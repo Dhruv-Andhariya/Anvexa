@@ -210,9 +210,40 @@ export abstract class RoundEngineStore {
     applicationId: string,
   ): Promise<{ invites: InviteRow[]; attempts: AttemptRow[]; events: EventRow[]; outcomeEmails: OutcomeEmailRow[]; incidents: IncidentRow[] } | null>;
   abstract revokeInvite(tenantId: string, applicationId: string, roundId: string, byId: string | null, at: Date): Promise<boolean>;
+
+  // ---- HR skipped a round (RoundEngineService.moveOnPastSkippedRound)
+  /**
+   * Students waiting for `roundId`: an invitation not withdrawn and never started (via INVITE), or a place in the GD
+   * pool, not yet in a group (via GD_POOL). inProgress = started attempts still running + students already in a GD group.
+   */
+  abstract waitingForSkippedRound(
+    tenantId: string,
+    roundId: string,
+  ): Promise<{ waiting: { applicationId: string; via: 'INVITE' | 'GD_POOL' }[]; inProgress: number }>;
+  /** Takes the student out of the round's GD pool (only while not in a group). True when they were in it. */
+  abstract leaveGdPool(tenantId: string, applicationId: string, roundId: string): Promise<boolean>;
   /** A FAILED invitation goes back to the queue (a new link is made when it is sent). */
   abstract requeueFailedInvite(tenantId: string, applicationId: string, roundId: string): Promise<boolean>;
 }
+
+/**
+ * Shared by the "who is waiting for this round" queries (round modules here, the GD pool in gd.store.ts); `r` is the
+ * round, `a` the application. The round must not be skipped, and the student must not have moved past it already
+ * (a result, invitation or GD place in a later round): after "Undo skip" nobody who went on is pulled back.
+ */
+export const skipAware = Prisma.sql`
+         AND r.skipped_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM round_results lr JOIN job_rounds l ON l.id = lr.round_id
+                          WHERE lr.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM round_invites li JOIN job_rounds l ON l.id = li.round_id
+                          WHERE li.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM gd_participants lp JOIN job_rounds l ON l.id = lp.round_id
+                          WHERE lp.application_id = a.id AND l.job_id = r.job_id AND l.position > r.position)`;
+
+/** An earlier round of the same job that runs (not skipped); `r` is the round. */
+export const earlierRunning = Prisma.sql`
+              SELECT 1 FROM job_rounds e0
+               WHERE e0.job_id = r.job_id AND e0.tenant_id = r.tenant_id AND e0.position < r.position AND e0.skipped_at IS NULL`;
 
 type InviteDb = Prisma.RoundInviteGetPayload<object>;
 type AttemptDb = Prisma.RoundAttemptGetPayload<object>;
@@ -428,16 +459,17 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
                   AND EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id)
                   AND NOT EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id AND q.kind NOT IN ('MCQ', 'TRUE_FALSE')))
          AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = a.id AND rr.round_id = r.id)
+         ${skipAware}
          AND (
-           -- first round: AI screening completed (like the first online test)
-           (r.position = 1 AND EXISTS (
+           -- first round that runs: AI screening completed (like the first online test)
+           (NOT EXISTS (${earlierRunning}) AND EXISTS (
               SELECT 1 FROM screening_sessions s
                WHERE s.application_id = a.id AND s.tenant_id = a.tenant_id AND s.status = 'COMPLETED'))
            OR
-           -- later round: every earlier round has a result that counts as passed (HR override first)
-           (r.position > 1 AND NOT EXISTS (
+           -- later round: every earlier round that runs has a result that counts as passed (HR override first)
+           (EXISTS (${earlierRunning}) AND NOT EXISTS (
               SELECT 1 FROM job_rounds e
-               WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position
+               WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position AND e.skipped_at IS NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM round_results rr
                     WHERE rr.application_id = a.id AND rr.round_id = e.id
@@ -454,7 +486,10 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
         FROM screening_sessions s
         JOIN applications a ON a.id = s.application_id AND a.tenant_id = s.tenant_id
         JOIN job_round_configs c ON c.job_id = a.job_id AND c.tenant_id = a.tenant_id AND c.status = 'COMPLETE'
-        JOIN job_rounds r ON r.job_id = a.job_id AND r.tenant_id = a.tenant_id AND r.position = 1
+        -- the job's first round that runs: rounds HR skipped are passed over
+        JOIN job_rounds r ON r.job_id = a.job_id AND r.tenant_id = a.tenant_id AND r.skipped_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM job_rounds e WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id
+                            AND e.position < r.position AND e.skipped_at IS NULL)
        WHERE s.status = 'COMPLETED'
          AND r.pass_mode IS NOT NULL AND r.pass_mode <> 'INTERVIEWER_SCORE'
          AND EXISTS (SELECT 1 FROM round_questions q WHERE q.round_id = r.id)
@@ -592,6 +627,27 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
 
   async revokeInvite(tenantId: string, applicationId: string, roundId: string, byId: string | null, at: Date) {
     const r = await this.db.roundInvite.updateMany({ where: { tenantId, applicationId, roundId, revokedAt: null }, data: { revokedAt: at, revokedById: byId } });
+    return r.count > 0;
+  }
+
+  async waitingForSkippedRound(tenantId: string, roundId: string) {
+    const [invites, pool, running, grouped] = await Promise.all([
+      this.db.roundInvite.findMany({ where: { tenantId, roundId, revokedAt: null, attempt: null }, select: { applicationId: true } }),
+      this.db.gdParticipant.findMany({ where: { tenantId, roundId, batchId: null }, select: { applicationId: true } }),
+      this.db.roundAttempt.count({ where: { tenantId, roundId, status: 'IN_PROGRESS' } }),
+      this.db.gdParticipant.count({ where: { tenantId, roundId, batchId: { not: null } } }),
+    ]);
+    return {
+      waiting: [
+        ...invites.map((i) => ({ applicationId: i.applicationId, via: 'INVITE' as const })),
+        ...pool.map((p) => ({ applicationId: p.applicationId, via: 'GD_POOL' as const })),
+      ],
+      inProgress: running + grouped,
+    };
+  }
+
+  async leaveGdPool(tenantId: string, applicationId: string, roundId: string) {
+    const r = await this.db.gdParticipant.deleteMany({ where: { tenantId, applicationId, roundId, batchId: null } });
     return r.count > 0;
   }
 

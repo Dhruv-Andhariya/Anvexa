@@ -220,7 +220,8 @@ export class AiInterviewWorker implements OnApplicationBootstrap, OnModuleDestro
       if (!this.config.allowLocalLinks && isTemporaryTunnel(base) && !(await this.linkCheck.opens(base))) {
         throw new WaitingForLinkError('The interview link does not open right now (the public tunnel in CAREERS_SITE_URL is not running). Run "pnpm start:public"; it is sent automatically once the link opens.');
       }
-      const previous = ordered.filter((r) => r.position < round.position).at(-1);
+      // the round the student just cleared (a round HR skipped is not named: they never took it)
+      const previous = ordered.filter((r) => r.position < round.position && !r.skipped).at(-1);
       const token = newInterviewToken();
       const expiresAt = new Date(this.now().getTime() + this.config.linkDays * DAY_MS);
       // a fresh link for every send attempt: an earlier attempt's link (never delivered) stops working

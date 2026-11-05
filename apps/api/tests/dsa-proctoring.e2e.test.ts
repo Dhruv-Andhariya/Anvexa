@@ -13,7 +13,8 @@ import { ProctoringController } from '../src/modules/dsa/proctoring/proctoring.c
 import { DSA_PROCTOR_POLICY, policyFromEnv } from '../src/modules/dsa/proctoring/proctoring.policy';
 import { ProctoringService, inviteRefFor } from '../src/modules/dsa/proctoring/proctoring.service';
 import { DSA_PROCTOR_STORE, InMemoryProctorStore } from '../src/modules/dsa/proctoring/proctoring.store';
-import { CONSENT_VERSION } from '../src/modules/dsa/proctoring/proctoring.types';
+// DSA and SQL attempts are camera-monitored by default (DSA_PROCTOR_CAMERA=all): the camera notice's version
+import { CAMERA_CONSENT_VERSION as CONSENT_VERSION } from '../src/modules/dsa/proctoring/proctoring.types';
 import { MockQuestionRepository } from '../src/modules/dsa/questions/mock-question.repository';
 import { DSA_QUESTION_REPOSITORY } from '../src/modules/dsa/questions/question.repository';
 import { DSA_INVITATION_RESOLVER, DemoInvitationResolver } from '../src/modules/dsa/session/invitation.resolver';

@@ -29,6 +29,8 @@ export interface InviteEmailInput extends CandidateEmailBase {
   coding?: boolean;
   /** Coding rounds: which kind of problems ('sql' = SQL queries only, 'code' = programs only, 'mixed' = both). */
   codingKind?: 'code' | 'sql' | 'mixed';
+  /** Coding rounds: the AI camera watches this round (DSA_PROCTOR_CAMERA); the email then asks for a webcam. */
+  codingCamera?: boolean;
   /** Online test protection: warnings allowed before the test ends (null / missing = protection off). */
   maxWarnings?: number | null;
 }
@@ -54,10 +56,12 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
   const round = oneLine(i.roundName);
   const duration = i.timeLimitMinutes ? `${i.timeLimitMinutes} minutes` : 'no fixed time limit';
   const instructions = i.instructions.trim().replace(/\s+/g, ' ').slice(0, 1000);
-  const subject = `Next Step: ${round} for ${v.job} at ${v.company}`;
+  // "shortlisted" after every cleared step (aptitude -> DSA -> SQL -> ..., in the order HR set), same tone as the ATS email
+  const subject = `Congratulations! You've Been Shortlisted for ${v.job} – Next Step: ${round}`;
   const paragraphs = [
     `Dear ${v.name},`,
-    `Thank you for completing the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}. We are pleased to invite you to the next stage of our recruitment process: the ${round}.`,
+    'Congratulations!',
+    `Based on your performance in the ${oneLine(i.clearedStep)} for the ${v.job} position at ${v.company}, you have been shortlisted for the next stage of our recruitment process: the ${round}.`,
     i.coding
       ? `Assessment: ${round} · ${i.questionCount} ${i.codingKind === 'sql' ? 'SQL' : 'coding'} problem${i.questionCount === 1 ? '' : 's'} · ${duration}.`
       : `Assessment: ${round} · ${i.questionCount} question${i.questionCount === 1 ? '' : 's'} · ${duration}.`,
@@ -66,8 +70,8 @@ export function buildRoundInviteEmail(i: InviteEmailInput): EmailMessage {
     `The link works until ${dateText(i.linkExpiresAt)}. Once you start, the timer keeps running even if you close the page, so please begin when you can finish in one sitting.`,
     i.coding
       ? `This is a proctored ${i.codingKind === 'sql' ? 'SQL' : 'coding'} test. Take it on a laptop or desktop; it runs in full-screen mode, and the page records events such as leaving full screen, switching tabs or copy and paste for the hiring team to review. ${CODING_ANSWERS[i.codingKind ?? 'code']} ${
-          i.cameraRequired
-            ? 'You will need a working webcam: it must stay on for the whole test, and the page checks that you, and only you, are in front of it. The video stays on your device and is not recorded or uploaded. No microphone or screen recording is used.'
+          i.codingCamera
+            ? 'You will need a working webcam: it must stay on for the whole test, and the page checks on your own computer that you, and only you, are in front of it and looking at the screen. No video or image is recorded or sent. No microphone or screen recording is used.'
             : 'No camera, microphone or screen recording is used.'
         }`
       : i.cameraRequired

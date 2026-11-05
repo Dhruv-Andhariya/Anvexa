@@ -51,6 +51,13 @@ export class MemoryRoundsConfigStore extends RoundsConfigStore {
     c.lockedAt ??= at;
     return c.lockedAt;
   }
+
+  async setSkip(tenantId: string, jobId: string, roundId: string, skip: { at: Date; reason: string; byId: string | null } | null) {
+    const r = this.configs.get(jobId)?.tenantId === tenantId ? this.configs.get(jobId)!.rounds.find((x) => x.id === roundId) : undefined;
+    if (!r) return false;
+    r.skip = skip ? { ...skip, byName: skip.byId === ACTOR.id ? ACTOR.name : null } : null;
+    return true;
+  }
 }
 
 export class FakeGenerator {

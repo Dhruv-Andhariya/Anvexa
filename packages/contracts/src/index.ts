@@ -9,6 +9,7 @@ export * from './schemas/screening';
 export * from './schemas/rounds';
 export * from './schemas/dsa-bank';
 export * from './schemas/sql-bank';
+export * from './schemas/camera-proctoring';
 export * from './schemas/assessments';
 export * from './schemas/round-engine';
 export * from './schemas/group-discussion';

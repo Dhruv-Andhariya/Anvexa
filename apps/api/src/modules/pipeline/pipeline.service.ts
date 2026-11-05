@@ -159,7 +159,8 @@ export class PipelineService {
    */
   async failsStage2Overall(tenantId: string, jobId: string, applicationId: string, rounds: SavedRound[], round: SavedRound): Promise<boolean> {
     if (!isTechnicalRound(round.type)) return false;
-    if (rounds.some((r) => isTechnicalRound(r.type) && r.position > round.position)) return false;
+    // a later technical round HR skipped does not count: this is then the last one that runs
+    if (rounds.some((r) => isTechnicalRound(r.type) && r.position > round.position && !r.skipped)) return false;
     const verdict = await this.stage2Of(tenantId, jobId, applicationId, rounds);
     return !!verdict && verdict.decided && !verdict.passed;
   }

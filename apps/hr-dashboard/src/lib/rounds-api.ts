@@ -11,6 +11,7 @@ import {
   type JobRounds,
   type OverrideRoundResultRequest,
   type SaveRoundsRequest,
+  type SkipRoundResult,
   type StudentAssessment,
 } from '@hireflow/contracts';
 import { call, type Options } from './publisher-api';
@@ -32,7 +33,23 @@ export const saveRounds = (jobId: string, req: SaveRoundsRequest, opts: Options 
 export const generateQuestions = (jobId: string, req: GenerateQuestionsRequest, opts: Options = {}): Promise<GenerateQuestionsResult> =>
   call('POST', `${rounds(jobId)}/generate`, req, (v) => generateQuestionsResultSchema.parse(v), opts);
 
-export const listAssessmentJobs = (opts: Options = {}): Promise<AssessmentJob[]> =>
+const skipResult = (v: unknown): SkipRoundResult => {
+  const o = (v ?? {}) as { rounds?: unknown; movedOn?: unknown; inProgress?: unknown };
+  return { rounds: jobRoundsSchema.parse(o.rounds), movedOn: Number(o.movedOn) || 0, inProgress: Number(o.inProgress) || 0 };
+};
+
+/**
+ * Skips one round for the whole job (works after students started too): students who pass the round before it get the
+ * next round that runs; students waiting for it move on at once.
+ */
+export const skipRound = (jobId: string, roundId: string, reason: string, opts: Options = {}): Promise<SkipRoundResult> =>
+  call('POST', `${rounds(jobId)}/rounds/${encodeURIComponent(roundId)}/skip`, { reason }, skipResult, opts);
+
+/** "Undo skip": the round runs again for students who have not gone past it yet. */
+export const unskipRound = (jobId: string, roundId: string, opts: Options = {}): Promise<SkipRoundResult> =>
+  call('POST', `${rounds(jobId)}/rounds/${encodeURIComponent(roundId)}/unskip`, {}, skipResult, opts);
+
+export const listAssessmentJobs =(opts: Options = {}): Promise<AssessmentJob[]> =>
   call('GET', '/assessments/jobs', undefined, (v) => assessmentJobSchema.array().parse(v), opts);
 
 export const getJobAssessments = (jobId: string, opts: Options = {}): Promise<JobAssessments> =>

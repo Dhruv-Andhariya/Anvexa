@@ -1,5 +1,6 @@
 'use client';
 
+import type { CameraAlert } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card } from '@/components/ui';
 import { ApiError, sendProctorEvents, type ProctorEventInput, type ProctorInputType, type ProctoringConfig } from '@/lib/dsa-api';
@@ -109,13 +110,13 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
   }, [token]);
 
   const emit = useCallback(
-    (type: ProctorInputType, detail?: string, at?: number) => {
+    (type: ProctorInputType, detail?: string, at?: number, extra?: Pick<ProctorEventInput, 'durationMs' | 'confidence'>) => {
       const now = Date.now();
       const key = type;
       if (now - (lastEmit.current[key] ?? 0) < CLIENT_DEDUPE_MS) return; // one action reported twice (key + clipboard event)
       lastEmit.current[key] = now;
       if (queue.current.length >= MAX_QUEUE) queue.current.shift();
-      queue.current.push({ type, at: at ?? serverNowRef.current(), ...(detail ? { detail } : {}) });
+      queue.current.push({ type, at: at ?? serverNowRef.current(), ...(detail ? { detail } : {}), ...(extra ?? {}) });
       const text = NOTICE_TEXT[type];
       if (text) setNotice({ id: ++noticeId.current, text });
       if (flushTimer.current === null) flushTimer.current = window.setTimeout(() => void flush(), FLUSH_DELAY_MS);
@@ -256,7 +257,15 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
     if (enabled) emit(type, detail);
   }, [enabled, emit]);
 
-  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled, report };
+  // AI camera alerts (camera-monitor.tsx): already grouped on the device; sent with their time, duration and confidence.
+  const reportCamera = useCallback(
+    (alert: CameraAlert) => {
+      if (enabled) emit(alert.type, alert.detail, alert.at, { durationMs: Math.round(alert.durationMs), confidence: alert.confidence });
+    },
+    [enabled, emit],
+  );
+
+  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled, report, reportCamera };
 }
 
 // ---------------------------------------------------------------- UI

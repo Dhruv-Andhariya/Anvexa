@@ -8,7 +8,8 @@ import type { CodeRunner } from '../../src/modules/dsa/execution/code-runner';
 import { policyFromEnv } from '../../src/modules/dsa/proctoring/proctoring.policy';
 import { ProctoringService } from '../../src/modules/dsa/proctoring/proctoring.service';
 import { InMemoryProctorStore } from '../../src/modules/dsa/proctoring/proctoring.store';
-import { CONSENT_VERSION } from '../../src/modules/dsa/proctoring/proctoring.types';
+// DSA and SQL attempts are camera-monitored by default (DSA_PROCTOR_CAMERA=all): the camera notice's version
+import { CAMERA_CONSENT_VERSION as CONSENT_VERSION } from '../../src/modules/dsa/proctoring/proctoring.types';
 import { BankQuestionRepository } from '../../src/modules/dsa/questions/bank-question.repository';
 import { EngineSessionStore } from '../../src/modules/dsa/session/engine-session.store';
 import { RoundInvitationResolver } from '../../src/modules/dsa/session/round-invitation.resolver';

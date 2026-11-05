@@ -3,7 +3,7 @@ import type { AssessmentState, FinalResult } from '@/lib/dsa-api';
 import { LANGUAGE_LABELS } from '@/lib/dsa-api';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { difficultyTone } from './problem-panel';
-import { CameraCheck, type Camera } from './webcam';
+import { CameraCheck, type CameraMonitor } from './camera-monitor';
 
 export function LoadingScreen() {
   return (
@@ -42,8 +42,8 @@ export function IntroScreen({
   starting: boolean;
   error: string;
   onStart: (consented: boolean) => void;
-  /** Present when the webcam is required. */
-  camera?: Camera;
+  /** Present when the attempt is watched by the AI camera. */
+  camera?: CameraMonitor;
 }) {
   const [consented, setConsented] = useState(false);
   const p = state.proctoring;
@@ -122,9 +122,9 @@ export function IntroScreen({
                 ? 'This assessment must be taken in full-screen mode. When you press Start, your browser will ask to go full screen. If you leave full screen, the assessment is blocked until you return, the timer keeps running, and the time away is recorded.'
                 : 'This assessment is monitored for integrity.'}
               {camera &&
-                ' Your webcam must stay on for the whole assessment, with your face clearly visible and nobody else in view. If the camera turns off, the assessment is blocked until you turn it back on.'}
+                ' Your webcam must stay on for the whole assessment, with your face clearly visible, looking at the screen, and nobody else in view. A single glance away never counts: only repeated or long looks away are noted. If the camera turns off, the assessment is blocked until you turn it back on.'}
             </p>
-            {camera && <CameraCheck camera={camera} />}
+            {camera && <CameraCheck cam={camera} />}
             <div>
               <p className="text-xs font-medium text-muted">Your browser reports these events to us</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
@@ -138,8 +138,8 @@ export function IntroScreen({
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
                 {camera ? (
                   <li>
-                    The webcam video stays on your device: it is checked there for a face, and is never recorded or uploaded. No microphone or screen
-                    recording.
+                    The webcam video stays on your computer: it is checked there, and no video, image or face data is recorded or uploaded (only short
+                    alerts such as &ldquo;looked left 4 times in 60 s&rdquo;). No microphone or screen recording.
                   </li>
                 ) : (
                   <li>No camera, microphone or screen recording.</li>
@@ -156,7 +156,7 @@ export function IntroScreen({
               <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
                 <span className="font-semibold">Warnings: </span>
                 you are allowed {p.maxStrikes} suspicious {p.maxStrikes === 1 ? 'action' : 'actions'} (for example a screenshot key, switching tabs, copying,
-                leaving full screen{camera ? ', the webcam turning off, your face not being visible, or another person in view' : ''}). Each one is recorded and shown to you as a warning. After that, the next suspicious action, including leaving full screen,
+                leaving full screen{camera ? ', the webcam turning off, repeatedly looking away, your face not being visible, or another person in view' : ''}). Each one is recorded and shown to you as a warning. After that, the next suspicious action, including leaving full screen,
                 ends your assessment immediately. Your answers submitted so far are kept.
               </p>
             )}
