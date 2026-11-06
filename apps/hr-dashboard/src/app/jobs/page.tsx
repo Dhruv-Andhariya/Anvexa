@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { JobsList } from './jobs-list';
 
-export const metadata: Metadata = { title: 'Jobs · ANVEXA' };
+export const metadata: Metadata = { title: 'Jobs · Anvexa' };
 
 export default function JobsPage() {
   return (

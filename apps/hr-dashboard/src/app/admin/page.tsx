@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { CompaniesAdmin } from './companies-admin';
 
-export const metadata: Metadata = { title: 'Companies · ANVEXA' };
+export const metadata: Metadata = { title: 'Companies · Anvexa' };
 
 export default function AdminPage() {
   return (

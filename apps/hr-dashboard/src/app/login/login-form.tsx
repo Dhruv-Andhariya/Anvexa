@@ -32,6 +32,11 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
   };
 
   const fail = (err: unknown) => {
+    // no account with this email: login fails and the person goes to sign-up (email filled in)
+    if (err instanceof ApiError && err.code === 'ACCOUNT_NOT_FOUND') {
+      router.replace(`/signup?reason=no_account&email=${encodeURIComponent(email.trim())}`);
+      return;
+    }
     setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     setBusy(false);
   };
@@ -169,7 +174,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
           {busy ? 'Logging in…' : 'Log in'}
         </Button>
         <p className="text-sm text-muted">
-          New company on ANVEXA?{' '}
+          New company on Anvexa?{' '}
           <Link href="/signup" className="font-medium text-accent hover:underline">
             Create an account
           </Link>

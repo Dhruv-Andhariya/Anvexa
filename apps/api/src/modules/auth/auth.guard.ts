@@ -49,7 +49,7 @@ export class AuthGuard implements CanActivate {
           throw apiError(HttpStatus.FORBIDDEN, 'NO_COMPANY', 'Your account is not an active member of a company.');
         }
         if (auth.company.status !== 'ACTIVE') {
-          throw apiError(HttpStatus.FORBIDDEN, 'COMPANY_SUSPENDED', 'This company account is suspended. Contact ANVEXA support.');
+          throw apiError(HttpStatus.FORBIDDEN, 'COMPANY_SUSPENDED', 'This company account is suspended. Contact Anvexa support.');
         }
         if (!can(auth.company.role, access.permission)) throw forbidden();
         return true;

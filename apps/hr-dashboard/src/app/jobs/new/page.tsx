@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { NewJob } from './new-job';
 
-export const metadata: Metadata = { title: 'New job · ANVEXA' };
+export const metadata: Metadata = { title: 'New job · Anvexa' };
 
 export default function NewJobPage() {
   return (
@@ -10,7 +10,7 @@ export default function NewJobPage() {
         <p className="text-sm font-medium text-accent">Step 2</p>
         <h1 className="text-2xl font-semibold tracking-tight">Create a job</h1>
         <p className="mt-1 text-sm text-muted">
-          Enter the job requirements. ANVEXA combines them with your company profile and drafts a job description for
+          Enter the job requirements. Anvexa combines them with your company profile and drafts a job description for
           you to review and approve.
         </p>
       </div>

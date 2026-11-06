@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { StudentReview } from './student-review';
 
-export const metadata: Metadata = { title: 'Student review · ANVEXA' };
+export const metadata: Metadata = { title: 'Student review · Anvexa' };
 
 export default async function StudentReviewPage({ params }: { params: Promise<{ applicationId: string }> }) {
   const { applicationId } = await params;

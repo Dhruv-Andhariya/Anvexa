@@ -144,10 +144,18 @@ class CompanyProfile(BaseModel):
     benefits: list[_text(BENEFIT_MAX, 1)] = Field(default_factory=list, max_length=BENEFITS_MAX)
 
 
+CORRECTION_MAX = 400
+CORRECTIONS_MAX = 12
+
+
 class JdGenerateRequest(JobForm):
-    """POST /v1/jd/generate body: the job form plus (optionally) the company profile."""
+    """POST /v1/jd/generate body: the job form plus (optionally) the company profile.
+    `corrections`: problems the API's fact check found in the previous draft (sent with one regeneration)."""
 
     company: CompanyProfile | None = None
+    corrections: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=CORRECTION_MAX)]
+    ] = Field(default_factory=list, max_length=CORRECTIONS_MAX)
 
 
 class JdContent(BaseModel):

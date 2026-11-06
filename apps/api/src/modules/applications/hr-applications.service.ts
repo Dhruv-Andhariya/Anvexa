@@ -59,6 +59,7 @@ export class HrApplicationsService {
         graduationYear: a.graduationYear,
         scoreType: a.scoreType,
         scoreValue: a.scoreValue.toNumber(),
+        experienceYears: a.experienceYears?.toNumber() ?? null,
         linkedinUrl: a.linkedinUrl,
         githubUrl: a.githubUrl,
         portfolioUrl: a.portfolioUrl,

@@ -4,7 +4,10 @@ import {
   companyProfileSchema,
   editJdRequestSchema,
   editedJdSchema,
+  isCorrectable,
   jobFormSchema,
+  reviewJd,
+  reviewScore,
   screeningSettingsSchema,
   type CompanyProfile,
   type DeleteJobResult,
@@ -34,6 +37,13 @@ function withCompanyLink(content: JdContent, company: { website?: unknown } | nu
 
 /** POST /jobs may carry HR's private screening rules next to the form fields (never stored in the form). */
 const createScreeningSchema = z.object({ screening: screeningSettingsSchema.optional() });
+
+/**
+ * The whole "Generate" request (first draft + corrected draft) should finish within ~75s: the public Cloudflare
+ * tunnel drops requests after 100s. A corrected draft is only asked for if at least 20s of that remain.
+ */
+const CORRECTION_DEADLINE_MS = Number(process.env.JD_CORRECTION_DEADLINE_MS) || 75_000;
+const CORRECTION_MIN_MS = 20_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -119,7 +129,7 @@ export class JobsService {
     const company: CompanyProfile = profile.data;
 
     const actor = await this.tenant.currentActor();
-    const generated = await this.worker.generateJd(job.form, company);
+    const { generated, issues, corrected } = await this.generateChecked(job.form, company);
     const ok = await this.repo.appendVersion(tenantId, jobId, job.currentJdVersionId, {
       source: 'AI',
       content: withCompanyLink(generated.content, company),
@@ -129,8 +139,39 @@ export class JobsService {
       createdBy: actor.id,
     });
     if (!ok) throw stale();
-    await this.log(tenantId, actor.id, 'jd.generated', jobId, { model: generated.model, promptVersion: generated.promptVersion });
+    await this.log(tenantId, actor.id, 'jd.generated', jobId, {
+      model: generated.model,
+      promptVersion: generated.promptVersion,
+      corrected, // a second, corrected draft was requested
+      reviewIssues: issues.map((i) => i.code), // what the fact check still flags (HR sees the details on the job page)
+    });
     return this.load(tenantId, jobId);
+  }
+
+  /**
+   * Generate, fact-check against HR's input (reviewJd), and if the draft invented facts or reads wrong for the
+   * seniority, ask for ONE corrected draft and keep the better of the two. The corrected draft only runs if there is
+   * time left, and its failure never loses the first draft. Nothing is silently edited: what remains is shown to HR.
+   */
+  private async generateChecked(form: JobForm, company: CompanyProfile) {
+    const started = Date.now();
+    const first = await this.worker.generateJd(form, company);
+    const firstIssues = reviewJd(form, first.content, company);
+    const corrections = firstIssues.filter(isCorrectable).map((i) => i.message);
+    const remainingMs = CORRECTION_DEADLINE_MS - (Date.now() - started);
+    if (!corrections.length || remainingMs < CORRECTION_MIN_MS) {
+      return { generated: first, issues: firstIssues, corrected: false };
+    }
+    try {
+      const second = await this.worker.generateJd(form, company, { corrections, timeoutMs: remainingMs });
+      const secondIssues = reviewJd(form, second.content, company);
+      return reviewScore(secondIssues) <= reviewScore(firstIssues)
+        ? { generated: second, issues: secondIssues, corrected: true }
+        : { generated: first, issues: firstIssues, corrected: true };
+    } catch (err) {
+      this.logger.warn(`corrected JD draft failed, keeping the first (${err instanceof Error ? err.name : 'unknown'})`);
+      return { generated: first, issues: firstIssues, corrected: false };
+    }
   }
 
   /** Step 4: HR edits the JD. The edit is saved as a new version; the AI version stays in the history.

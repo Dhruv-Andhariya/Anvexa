@@ -21,12 +21,14 @@ import { rememberPhoneProof } from '@/lib/phone-proof';
 interface Props {
   companySlug: string;
   jobSlug: string;
+  /** The experience range HR entered for this job (shown under the experience field). */
+  experience?: { min: number; max: number };
 }
 
 const T = CONTENT.form;
 
 /** M08 apply form. Plain inputs + one fetch per step: small bundle, works on slow phones. */
-export function ApplyForm({ companySlug, jobSlug }: Props) {
+export function ApplyForm({ companySlug, jobSlug, experience }: Props) {
   const [draft, setDraft] = useState<ApplyDraft>(emptyApplyDraft);
   const [errors, setErrors] = useState<ApplyErrors>({});
   const [resume, setResume] = useState<File | null>(null);
@@ -219,6 +221,24 @@ export function ApplyForm({ companySlug, jobSlug }: Props) {
           </Field>
           {text('scoreValue', T.labels.scoreValue, { inputMode: 'decimal' })}
         </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-4">
+        <legend className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted">{T.sections.experience}</legend>
+        {text('experienceYears', T.labels.experienceYears, {
+          inputMode: 'decimal',
+          hint: (
+            <>
+              {T.hints.experienceYears}
+              {experience && (
+                <>
+                  {' '}
+                  <span className="font-medium text-foreground">{T.hints.experienceRequired(experience.min, experience.max)}</span>
+                </>
+              )}
+            </>
+          ),
+        })}
       </fieldset>
 
       <fieldset className="flex flex-col gap-4">

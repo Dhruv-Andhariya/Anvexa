@@ -21,6 +21,12 @@ import { SessionsService } from './sessions.service';
 import { hashToken } from './tokens';
 
 const invalidCredentials = () => apiError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+/**
+ * No account with this email: the login page sends the person to sign-up. (Sign-up already answers EMAIL_TAKEN for a
+ * known email, so this tells nothing new; login stays rate limited per IP and per IP+email.)
+ */
+const accountNotFound = () =>
+  apiError(HttpStatus.UNAUTHORIZED, 'ACCOUNT_NOT_FOUND', 'There is no Anvexa account with this email. Create an account first.');
 const invalidInvitation = () =>
   apiError(HttpStatus.NOT_FOUND, 'INVITATION_INVALID', 'This invitation link is invalid, expired, or was already used.');
 
@@ -62,8 +68,8 @@ export class AuthService {
     // always run scrypt so response time does not reveal whether the email exists
     const ok = await verifyPassword(password, user?.passwordHash ?? (await dummyPasswordHash()));
     if (!user || !ok || !user.isActive) {
-      await this.audit.record({ tenantId: null, actorUserId: user?.id ?? null, action: 'auth.login_failed', metadata: { email, ip } });
-      throw invalidCredentials();
+      await this.audit.record({ tenantId: null, actorUserId: user?.id ?? null, action: 'auth.login_failed', metadata: { email, ip, ...(user ? {} : { reason: 'no_account' }) } });
+      throw user ? invalidCredentials() : accountNotFound();
     }
 
     this.loginPerAccount.reset(accountKey);

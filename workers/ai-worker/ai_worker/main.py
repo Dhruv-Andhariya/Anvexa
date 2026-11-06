@@ -70,7 +70,7 @@ from .speech import SpeechProvider, build_speech_provider
 load_env()  # repo-root .env, regardless of the working directory the worker starts in
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="ANVEXA worker", version="0.1.0")
+app = FastAPI(title="Anvexa worker", version="0.1.0")
 
 
 @app.exception_handler(LLMError)
@@ -167,6 +167,7 @@ def generate_jd(  # M02 - body: JobForm fields + optional "company" (the saved C
         prompt,
         company=job_form.company,
         budget_seconds=get_settings().jd_generation_budget_seconds,
+        corrections=job_form.corrections,
     )
     response.headers["X-LLM-Model"] = result.model
     response.headers["X-Prompt-Version"] = result.prompt_version

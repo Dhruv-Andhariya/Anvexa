@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jdProblems, jdToText, tidyJd, versionLabel } from '../src/lib/jd';
+import { jdProblems, jdToText, jobMeta, tidyJd, versionLabel } from '../src/lib/jd';
 
 const JD = {
   title: 'Junior Backend Developer',
@@ -16,16 +16,26 @@ describe('jd helpers', () => {
     expect(jdToText(JD)).toBe(
       [
         'Junior Backend Developer',
-        'You will build backend services.',
+        'About the Role\nYou will build backend services.',
         'Key Responsibilities\n- Build REST APIs.',
-        'Required Qualifications and Skills\n- Node.js',
+        'What We’re Looking For\n- Node.js',
       ].join('\n\n'),
     );
   });
 
+  it('puts the job facts from the form under the title', () => {
+    const form = {
+      title: 'Junior Backend Developer', experienceMin: 0, experienceMax: 2, mustHaveSkills: ['Node.js', 'SQL', 'REST'],
+      niceToHaveSkills: [], currency: 'INR', salaryType: 'CTC' as const, locations: ['Pune', 'Remote India'],
+      workMode: 'HYBRID' as const, employmentType: 'FULL_TIME' as const, openings: 3,
+    };
+    expect(jdToText(JD, form).split('\n\n')[0]).toBe('Junior Backend Developer\nPune, Remote India · Hybrid · Full-time · 0–2 years · 3 openings');
+    expect(jobMeta({ ...form, experienceMax: 0, openings: 1 })).toEqual(['Pune, Remote India', 'Hybrid', 'Full-time', 'Freshers']);
+  });
+
   it('puts the company section right after the summary', () => {
     const text = jdToText({ ...JD, aboutCompany: ' Acme builds dashboards. ' });
-    expect(text.split('\n\n').slice(1, 3)).toEqual(['You will build backend services.', 'About the Company\nAcme builds dashboards.']);
+    expect(text.split('\n\n').slice(1, 3)).toEqual(['About the Role\nYou will build backend services.', 'About the Company\nAcme builds dashboards.']);
   });
 
   it('ends with the company website when the JD has one, and keeps it when tidying', () => {
@@ -49,7 +59,7 @@ describe('jd helpers', () => {
     expect(jdProblems(JD)).toEqual([]);
     expect(jdProblems({ ...JD, summary: ' ', requirements: [' '] })).toEqual([
       'Add a job summary.',
-      'Add at least one item under “Required Qualifications and Skills”.',
+      'Add at least one item under “What We’re Looking For”.',
     ]);
   });
 

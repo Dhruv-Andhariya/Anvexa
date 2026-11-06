@@ -247,7 +247,7 @@ describe.skipIf(!DB)('M06-M09 flow (real database)', () => {
       JSON.stringify({
         name: 'Asha Patel', email: `asha.${RUN}@example.com`, phone, city: 'Ahmedabad',
         college: 'LD College of Engineering', degree: 'B.E.', branch: 'Computer', graduationYear: 2026,
-        scoreType: 'CGPA', scoreValue: 8.4, consents: { dataProcessing: true, aiEvaluation: true }, otpToken, source: 'linkedin',
+        scoreType: 'CGPA', scoreValue: 8.4, experienceYears: 1.5, consents: { dataProcessing: true, aiEvaluation: true }, otpToken, source: 'linkedin',
         ...overrides,
       }),
     );

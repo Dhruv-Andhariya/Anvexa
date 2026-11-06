@@ -20,7 +20,7 @@ model SqlQuestion {
   /// The problem as it runs (contracts sqlProblemSpecSchema): schema SQL, starter and reference query, order rule,
   /// time limit, the tables, and every dataset with its sample rows (sample datasets only) and expected result.
   problem     Json
-  /// Starter questions shipped with ANVEXA ("starter:<n>"), so adding them twice does nothing. null = HR's own.
+  /// Starter questions shipped with Anvexa ("starter:<n>"), so adding them twice does nothing. null = HR's own.
   seedKey     String?                 @map("seed_key")
   createdById String?                 @map("created_by_id") @db.Uuid
   updatedById String?                 @map("updated_by_id") @db.Uuid

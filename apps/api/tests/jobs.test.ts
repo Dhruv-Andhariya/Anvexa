@@ -198,6 +198,49 @@ describe('step 3 - generate JD', () => {
     expect(again.body.versions[0].content).not.toHaveProperty('companyUrl');
   });
 
+  it('a draft that invents facts is sent back once with corrections, and the corrected draft is stored', async () => {
+    const invented = { ...JD, responsibilities: ['Build REST APIs on AWS with Docker.'], requirements: ['5+ years of experience.', 'Node.js', 'SQL'] };
+    const worker = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json(200, invented, { 'x-prompt-version': 'jd_generate.v4' }))
+      .mockResolvedValueOnce(json(200, JD, { 'x-prompt-version': 'jd_generate.v4' }));
+    const { call, jobId, audit } = await withJob(worker);
+
+    const res = await call('POST', `/jobs/${jobId}/jd/generate`);
+    expect(res.status).toBe(200);
+    expect(worker).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(worker.mock.calls[0]![1]!.body))).not.toHaveProperty('corrections');
+    const corrections: string[] = JSON.parse(String(worker.mock.calls[1]![1]!.body)).corrections;
+    expect(corrections.join(' ')).toMatch(/AWS and Docker/);
+    expect(corrections.join(' ')).toMatch(/"5\+ years".*0-2 years/);
+    expect(res.body.versions).toHaveLength(1); // only the kept draft becomes a version
+    expect(res.body.versions[0].content).toMatchObject(JD);
+    expect(audit.entries.find((e) => e.action === 'jd.generated')?.metadata).toMatchObject({ corrected: true, reviewIssues: [] });
+  });
+
+  it('keeps the first draft when the corrected one is worse or fails, and never loops', async () => {
+    const invented = { ...JD, responsibilities: ['Build REST APIs on AWS.'] };
+    const worse = { ...JD, responsibilities: ['Build REST APIs on AWS, Docker and Kubernetes.'] };
+    const worker = vi.fn<typeof fetch>().mockResolvedValueOnce(json(200, invented)).mockResolvedValueOnce(json(200, worse));
+    const { call, jobId } = await withJob(worker);
+    const res = await call('POST', `/jobs/${jobId}/jd/generate`);
+    expect(worker).toHaveBeenCalledTimes(2);
+    expect(res.body.versions[0].content.responsibilities).toEqual(invented.responsibilities);
+
+    worker.mockReset();
+    worker.mockResolvedValueOnce(json(200, invented)).mockRejectedValueOnce(new TypeError('fetch failed'));
+    const again = await call('POST', `/jobs/${jobId}/jd/generate`);
+    expect(again.status).toBe(200); // the failed correction does not fail the generation
+    expect(again.body.versions[0].content.responsibilities).toEqual(invented.responsibilities);
+  });
+
+  it('a clean draft is not regenerated', async () => {
+    const worker = workerOk();
+    const { call, jobId } = await withJob(worker);
+    await call('POST', `/jobs/${jobId}/jd/generate`);
+    expect(worker).toHaveBeenCalledTimes(1);
+  });
+
   it('regenerating keeps every earlier version', async () => {
     const { call, jobId } = await withJob();
     await call('POST', `/jobs/${jobId}/jd/generate`);

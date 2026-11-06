@@ -2,7 +2,7 @@
 Templates use string.Template ($name) so JSON braces in values are safe."""
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from string import Template
@@ -10,6 +10,7 @@ from string import Template
 import yaml
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+_KNOWN_KEYS = {"task", "version", "temperature", "system", "user"}
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,8 @@ class PromptSpec:
     temperature: float
     system: str
     user_template: str
+    # any other top-level keys of the YAML (e.g. per-seniority text blocks a generator picks from)
+    extras: dict = field(default_factory=dict)
 
     def render(self, **values: str) -> str:
         return Template(self.user_template).substitute(**values)
@@ -33,6 +36,7 @@ def load_prompt(path: Path) -> PromptSpec:
         temperature=float(data.get("temperature", 0.7)),
         system=str(data["system"]).strip(),
         user_template=str(data["user"]).strip(),
+        extras={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
     )
 
 

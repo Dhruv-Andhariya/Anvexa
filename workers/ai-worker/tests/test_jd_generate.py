@@ -36,7 +36,7 @@ def test_success_returns_validated_jd_with_trace_headers(fake_llm):
     assert res.status_code == 200
     assert res.json() == VALID_JD
     assert res.headers["X-LLM-Model"] == "fake-model"
-    assert res.headers["X-Prompt-Version"] == "jd_generate.v3"
+    assert res.headers["X-Prompt-Version"] == "jd_generate.v4"
     assert len(fake_llm.calls) == 1
 
 

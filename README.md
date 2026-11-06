@@ -1,4 +1,4 @@
-# ANVEXA
+# Anvexa
 
 AI-powered hiring platform: from "HR has an opening" to "candidate sits in the final interview".
 
@@ -69,7 +69,7 @@ HR signs up ─► registers company ─► creates job ─► AI writes JD ─�
 
 ### 3. Jobs & AI JD — `jobs` + `workers/ai-worker` (M01–M04, M31)
 - HR fills the **job form** (title, skills, location, salary, type, deadline…).
-- **AI generates the JD** with Google Gemini (prompt `prompts/jd_generate.v3.yaml`) using the job form + company profile.
+- **AI generates the JD** with Google Gemini (prompt `prompts/jd_generate.v4.yaml`) using the job form + company profile, written for the role's seniority and fact-checked against what HR entered (`packages/contracts/src/schemas/jd-review.ts`).
 - Every generation or HR edit is a **new JD version** (history kept, restore possible).
 - **Validator** checks the JD is complete before approval / publishing.
 - HR **approves** a version, which locks the job.

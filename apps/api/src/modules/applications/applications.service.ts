@@ -289,6 +289,7 @@ export class ApplicationsService {
           graduationYear: form.graduationYear,
           scoreType: form.scoreType,
           scoreValue: new Prisma.Decimal(form.scoreValue),
+          experienceYears: new Prisma.Decimal(form.experienceYears),
           linkedinUrl: form.linkedinUrl ?? null,
           githubUrl: form.githubUrl ?? null,
           portfolioUrl: form.portfolioUrl ?? null,

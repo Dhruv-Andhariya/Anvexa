@@ -13,7 +13,7 @@ export function buildPasswordResetEmail(i: { name: string; link: string; validMi
   const text = [
     `Hi ${name},`,
     '',
-    'Someone asked to reset the password of your ANVEXA account. To choose a new password, open this link:',
+    'Someone asked to reset the password of your Anvexa account. To choose a new password, open this link:',
     '',
     i.link,
     '',
@@ -23,11 +23,11 @@ export function buildPasswordResetEmail(i: { name: string; link: string; validMi
   const html = `<!doctype html>
 <html lang="en"><body style="font-family:Arial,Helvetica,sans-serif;color:#1f2933;line-height:1.5;max-width:560px;margin:0 auto;padding:16px">
 <p>Hi ${escapeHtml(name)},</p>
-<p>Someone asked to reset the password of your ANVEXA account. To choose a new password, click the button below.</p>
+<p>Someone asked to reset the password of your Anvexa account. To choose a new password, click the button below.</p>
 <p><a href="${escapeHtml(i.link)}" style="display:inline-block;background:#4f6bed;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Reset password</a></p>
 <p style="font-size:13px;color:#52606d">Or open this link: ${escapeHtml(i.link)}</p>
 <p>The link works once and expires in ${i.validMinutes} minutes. Using it logs you out on every device.</p>
 <p>If you did not ask for this, ignore this email - your password stays the same.</p>
 </body></html>`;
-  return { subject: 'Reset your ANVEXA password', text, html };
+  return { subject: 'Reset your Anvexa password', text, html };
 }

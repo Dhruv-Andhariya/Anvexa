@@ -32,15 +32,19 @@ export class AiWorkerClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  /** Step 3: the worker receives BOTH inputs - the job form and the saved company profile. */
-  async generateJd(form: JobForm, company: CompanyProfile): Promise<GeneratedJd> {
+  /**
+   * Step 3: the worker receives BOTH inputs - the job form and the saved company profile.
+   * `corrections`: fact-check problems of the previous draft, for one corrective regeneration (see JobsService).
+   * `timeoutMs`: a shorter wait than the default, so a second draft cannot push the whole request past its limit.
+   */
+  async generateJd(form: JobForm, company: CompanyProfile, opts: { corrections?: string[]; timeoutMs?: number } = {}): Promise<GeneratedJd> {
     let res: Response;
     try {
       res = await this.fetchImpl(new URL('/v1/jd/generate', this.options.baseUrl), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...form, company }),
-        signal: AbortSignal.timeout(this.options.timeoutMs),
+        body: JSON.stringify({ ...form, company, ...(opts.corrections?.length ? { corrections: opts.corrections } : {}) }),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? this.options.timeoutMs),
       });
     } catch (err) {
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {

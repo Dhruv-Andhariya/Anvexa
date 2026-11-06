@@ -49,7 +49,22 @@ export const googleOAuthConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): 
 });
 
 /** Short reason codes; the dashboard turns them into messages. Never contain secrets. */
-export type GoogleOAuthFailure = 'not_configured' | 'cancelled' | 'expired' | 'unreachable' | 'rejected' | 'unverified_email' | 'account_disabled' | 'account_mismatch';
+export type GoogleOAuthFailure =
+  | 'not_configured'
+  | 'cancelled'
+  | 'expired'
+  | 'unreachable'
+  | 'rejected'
+  | 'unverified_email'
+  | 'account_disabled'
+  | 'account_mismatch'
+  /** "Log in with Google" by a Google account that has no Anvexa account: nothing is created, the browser goes to sign-up. */
+  | 'no_account';
+
+/** Which page started the Google sign-in: only "signup" may create a new account. */
+export type GoogleMode = 'login' | 'signup';
+/** Anything but an explicit "signup" is a login (also old state cookies without a mode): never creates an account. */
+export const googleMode = (v: unknown): GoogleMode => (v === 'signup' ? 'signup' : 'login');
 
 export class GoogleOAuthError extends Error {
   constructor(readonly reason: GoogleOAuthFailure) {
@@ -173,7 +188,7 @@ export class GoogleOAuthClient {
     if (verified !== true) throw new GoogleOAuthError('unverified_email');
     const lower = email.trim().toLowerCase();
     const display = typeof name === 'string' && name.trim().length >= 2 ? name.trim().slice(0, 100) : lower.split('@')[0]!.slice(0, 100);
-    return { sub, email: lower, name: display.length >= 2 ? display : 'ANVEXA user' };
+    return { sub, email: lower, name: display.length >= 2 ? display : 'Anvexa user' };
   }
 }
 
@@ -183,12 +198,16 @@ export const GOOGLE_STATE_COOKIE = 'hireflow_google_oauth';
 const COOKIE_PATH = '/api/v1/auth/google';
 const STATE_MAX_AGE_S = 600;
 
-/** A fresh state + PKCE verifier, and the cookie that remembers them (and where to go afterwards) for 10 minutes. */
-export function newGoogleState(next: string | undefined, httpsRequest: boolean, flow?: GoogleFlow) {
+/**
+ * A fresh state + PKCE verifier, and the cookie that remembers them (where to go afterwards, the dashboard address and
+ * whether this is a login or a sign-up) for 10 minutes.
+ */
+export function newGoogleState(next: string | undefined, httpsRequest: boolean, flow?: GoogleFlow, mode: GoogleMode = 'login') {
   const state = randomBytes(24).toString('base64url');
   const verifier = randomBytes(32).toString('base64url');
   const b64 = (s: string) => Buffer.from(s).toString('base64url');
-  const value = [state, verifier, b64(next ?? ''), ...(flow ? [b64(flow.dashboardUrl), b64(flow.redirectUri)] : [])].join('.');
+  // fixed positions: state.verifier.next.dashboard.redirect.mode (dashboard / redirect empty when there is no flow)
+  const value = [state, verifier, b64(next ?? ''), flow ? b64(flow.dashboardUrl) : '', flow ? b64(flow.redirectUri) : '', mode].join('.');
   return { state, verifier, cookie: stateCookie(value, STATE_MAX_AGE_S, httpsRequest) };
 }
 
@@ -198,15 +217,20 @@ export const clearGoogleStateCookie = (httpsRequest: boolean) => stateCookie('',
 export function readGoogleState(
   cookieValue: string | undefined,
   state: string | undefined,
-): { verifier: string; next?: string; flow?: Partial<GoogleFlow> } | null {
+): { verifier: string; next?: string; flow?: Partial<GoogleFlow>; mode: GoogleMode } | null {
   if (!cookieValue || !state) return null;
-  const [stored, verifier, next, dash, redirect] = cookieValue.split('.');
+  const [stored, verifier, next, dash, redirect, mode] = cookieValue.split('.');
   if (!stored || !verifier) return null;
   const a = Buffer.from(stored);
   const b = Buffer.from(state);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   const text = (s: string | undefined) => (s ? Buffer.from(s, 'base64url').toString('utf8') : undefined);
-  return { verifier, next: safeNextPath(text(next)), flow: dash && redirect ? { dashboardUrl: text(dash), redirectUri: text(redirect) } : undefined };
+  return {
+    verifier,
+    next: safeNextPath(text(next)),
+    flow: dash && redirect ? { dashboardUrl: text(dash), redirectUri: text(redirect) } : undefined,
+    mode: googleMode(mode),
+  };
 }
 
 /** Only same-site dashboard paths (no open redirect). */

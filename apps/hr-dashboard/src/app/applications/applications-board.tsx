@@ -238,6 +238,7 @@ function ApplicationCard({ app, jobId }: { app: HrApplication; jobId: string }) 
           <span className="text-muted">
             {' '}
             · {app.scoreType === 'CGPA' ? `CGPA ${app.scoreValue}` : `${app.scoreValue}%`}
+            {app.experienceYears !== null && ` · ${app.experienceYears === 0 ? 'Fresher' : `${app.experienceYears} yrs experience`}`}
           </span>
         </p>
         <p className="text-muted">

@@ -118,6 +118,18 @@ export const screeningCountsSchema = z.object({
 });
 export type ScreeningCounts = z.infer<typeof screeningCountsSchema>;
 
+/**
+ * Why the system rejected an application without screening its resume:
+ * EXPERIENCE_BELOW_REQUIRED = the years of experience the student entered are below the job's minimum.
+ */
+export const AUTO_REJECTION_REASONS = ['EXPERIENCE_BELOW_REQUIRED'] as const;
+export const autoRejectionReasonSchema = z.enum(AUTO_REJECTION_REASONS);
+export type AutoRejectionReason = z.infer<typeof autoRejectionReasonSchema>;
+
+/** The automatic experience rule: years entered below the job's minimum = rejected. Older applications (null) are not checked. */
+export const isBelowRequiredExperience = (experienceYears: number | null | undefined, experienceMin: number) =>
+  typeof experienceYears === 'number' && experienceYears < experienceMin;
+
 /** One candidate on the HR "Shortlisted Students" page. HR only (same company). */
 export const screenedCandidateSchema = z.object({
   applicationId: z.string(),
@@ -129,6 +141,8 @@ export const screenedCandidateSchema = z.object({
   degree: z.string(),
   branch: z.string(),
   graduationYear: z.number().int(),
+  /** Years of work experience the student entered (null = applied before the field existed). */
+  experienceYears: z.number().nullable().default(null),
   appliedAt: z.string(),
   links: z.object({ linkedinUrl: z.string().nullable(), githubUrl: z.string().nullable(), portfolioUrl: z.string().nullable(), projectUrl: z.string().nullable() }),
   resume: z.object({ fileName: z.string(), mimeType: z.string(), sizeBytes: z.number().int() }).nullable(),
@@ -146,6 +160,10 @@ export const screenedCandidateSchema = z.object({
   hrDecision: screeningDecisionSchema.nullable(),
   /** What counts: HR's decision, else the ATS suggestion. */
   decision: screeningDecisionSchema.nullable(),
+  /** Set when the system rejected without AI screening (no score then). */
+  autoRejectionReason: autoRejectionReasonSchema.nullable().default(null),
+  /** The job's minimum experience in years, shown next to an experience rejection. */
+  requiredExperienceMin: z.number().nullable().default(null),
   hrDecidedAt: z.string().nullable(),
   scoredAt: z.string().nullable(),
   /** The one decision email (null = none sent or asked for). */

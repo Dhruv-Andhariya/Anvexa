@@ -1,4 +1,4 @@
-"""The AI moderator: a LiveKit Agents worker (agent name "gd-moderator", dispatched by the ANVEXA API when a group's
+"""The AI moderator: a LiveKit Agents worker (agent name "gd-moderator", dispatched by the Anvexa API when a group's
 room locks). It joins the group's room as its own tile, follows the live state in the room metadata, and speaks with
 Piper (free, offline text-to-speech). The timeline itself lives in the API, so the GD keeps its timer and banner even
 if the bot drops.

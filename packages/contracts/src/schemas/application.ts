@@ -10,7 +10,7 @@ export const RESUME_LIMITS = {
   mimeTypes: ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
 } as const;
 
-export const APPLY_FORM_LIMITS = { nameMax: 100, textMax: 120, urlMax: 300 } as const;
+export const APPLY_FORM_LIMITS = { nameMax: 100, textMax: 120, urlMax: 300, experienceMax: 50 } as const;
 
 /** Current consent policy version. Bump when the consent text on the apply page changes. */
 export const CONSENT_POLICY_VERSION = '2026-10-v1';
@@ -54,6 +54,18 @@ export const applyFormSchema = z
     scoreValue: z.preprocess(
       (v) => (typeof v === 'string' ? (v.trim() === '' ? undefined : Number(v)) : v),
       z.number({ required_error: 'Required', invalid_type_error: 'Enter a number' }).min(0),
+    ),
+    /**
+     * Total work experience in years (0 for a fresher; halves allowed, e.g. 1.5). Below the job's minimum experience
+     * the application is rejected automatically (AtsProcessor), before any AI screening.
+     */
+    experienceYears: z.preprocess(
+      (v) => (typeof v === 'string' ? (v.trim() === '' ? undefined : Number(v)) : v),
+      z
+        .number({ required_error: 'Required', invalid_type_error: 'Enter a number' })
+        .min(0, 'Enter 0 or more')
+        .max(APPLY_FORM_LIMITS.experienceMax, `Enter at most ${APPLY_FORM_LIMITS.experienceMax} years`)
+        .refine((n) => Number.isInteger(n * 2), 'Use whole or half years, e.g. 2 or 2.5'),
     ),
     linkedinUrl: optionalUrl,
     githubUrl: optionalUrl,
@@ -132,6 +144,8 @@ export const hrApplicationSchema = z.object({
   graduationYear: z.number(),
   scoreType: z.enum(['CGPA', 'PERCENTAGE']),
   scoreValue: z.number(),
+  /** Years of work experience the student entered. null = applied before the field existed. */
+  experienceYears: z.number().nullable().default(null),
   linkedinUrl: z.string().nullable(),
   githubUrl: z.string().nullable(),
   portfolioUrl: z.string().nullable(),

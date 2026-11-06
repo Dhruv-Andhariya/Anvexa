@@ -3,7 +3,16 @@ import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { AuditService } from '../audit';
-import { GOOGLE_OAUTH_CONFIG, GoogleOAuthClient, GoogleOAuthError, newGoogleState, readGoogleState, type GoogleIdentity, type GoogleOAuthConfig } from './google-oauth';
+import {
+  GOOGLE_OAUTH_CONFIG,
+  GoogleOAuthClient,
+  GoogleOAuthError,
+  newGoogleState,
+  readGoogleState,
+  type GoogleIdentity,
+  type GoogleMode,
+  type GoogleOAuthConfig,
+} from './google-oauth';
 import { hashPassword } from './password';
 import { RateLimiter } from './rate-limit';
 import { SessionsService } from './sessions.service';
@@ -11,10 +20,11 @@ import { SessionsService } from './sessions.service';
 const MINUTES_15 = 15 * 60 * 1000;
 
 /**
- * "Continue with Google" on the login and sign-up pages. One flow for both:
+ * "Continue with Google" on the login and sign-up pages:
  *  - a Google account seen before (users.google_sub) logs in;
  *  - else an account with the same (Google-verified) email is linked to it and logs in;
- *  - else a new account is created (no company yet, never Platform Admin) - like POST /auth/signup.
+ *  - else, from the SIGN-UP page only, a new account is created (no company yet, never Platform Admin) - like
+ *    POST /auth/signup. From the login page nothing is created: the browser goes to /signup?oauth_error=no_account.
  * Google already verified the email and runs its own 2-step verification, so no emailed code is asked for.
  */
 @Injectable()
@@ -37,7 +47,7 @@ export class GoogleAuthService {
   }
 
   /** Redirect to Google's account chooser; the cookie remembers state, PKCE verifier and where to go afterwards. */
-  start(next: string | undefined, ip: string, httpsRequest: boolean, forwardedHost?: string): { redirectTo: string; cookie?: string } {
+  start(next: string | undefined, ip: string, httpsRequest: boolean, forwardedHost?: string, mode: GoogleMode = 'login'): { redirectTo: string; cookie?: string } {
     const flow = this.google.flowFor(forwardedHost);
     if (!this.google.configured) return { redirectTo: this.failed('not_configured', flow.dashboardUrl) };
     try {
@@ -46,7 +56,8 @@ export class GoogleAuthService {
       return { redirectTo: this.failed('rejected', flow.dashboardUrl) };
     }
     // the cookie also remembers which dashboard address this sign-in belongs to (Google's return address + landing)
-    const { state, verifier, cookie } = newGoogleState(next, httpsRequest, flow);
+    // and whether it started on the login or the sign-up page
+    const { state, verifier, cookie } = newGoogleState(next, httpsRequest, flow, mode);
     return { redirectTo: this.google.authorizeUrl(state, verifier, flow.redirectUri), cookie };
   }
 
@@ -64,7 +75,7 @@ export class GoogleAuthService {
       if (q.error) throw new GoogleOAuthError('cancelled');
       if (!st || !q.code) throw new GoogleOAuthError('expired');
       const identity = await this.google.identity(q.code, st.verifier, Date.now(), flow?.redirectUri);
-      const userId = await this.userFor(identity, ip);
+      const userId = await this.userFor(identity, ip, st.mode);
 
       const session = await this.sessions.create(userId);
       await this.prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
@@ -79,7 +90,7 @@ export class GoogleAuthService {
     }
   }
 
-  private async userFor(g: GoogleIdentity, ip: string): Promise<string> {
+  private async userFor(g: GoogleIdentity, ip: string, mode: GoogleMode): Promise<string> {
     const known = await this.prisma.user.findUnique({ where: { googleSub: g.sub } });
     if (known) {
       if (!known.isActive) throw new GoogleOAuthError('account_disabled');
@@ -96,7 +107,13 @@ export class GoogleAuthService {
       return sameEmail.id;
     }
 
-    // New account. It gets a random password nobody knows; "Forgot password?" can set a real one later.
+    // No Anvexa account for this Google account: a login never creates one - the person signs up first
+    if (mode !== 'signup') {
+      await this.audit.record({ tenantId: null, actorUserId: null, action: 'auth.login_failed', metadata: { ip, method: 'google', reason: 'no_account' } });
+      throw new GoogleOAuthError('no_account');
+    }
+
+    // New account (sign-up page). It gets a random password nobody knows; "Forgot password?" can set a real one later.
     const passwordHash = await hashPassword(randomBytes(32).toString('base64url'));
     try {
       // only these fields are ever written: never isPlatformAdmin, never a membership
@@ -121,7 +138,9 @@ export class GoogleAuthService {
     return s.company ? '/jobs' : s.user.isPlatformAdmin ? '/admin' : s.companies.length ? '/jobs' : '/register-company';
   }
 
+  /** The page that shows the error: /login, except "no account" which goes to the sign-up page. */
   private failed(reason: string, dashboardUrl: string = this.google.dashboardUrl): string {
-    return `${dashboardUrl}/login?oauth_error=${encodeURIComponent(reason)}`;
+    const page = reason === 'no_account' ? '/signup' : '/login';
+    return `${dashboardUrl}${page}?oauth_error=${encodeURIComponent(reason)}`;
   }
 }

@@ -1,7 +1,7 @@
 import type { SqlQuestionInput } from '@hireflow/contracts';
 
 /**
- * The starter SQL questions ANVEXA ships: 5 easy, 5 medium, 5 hard, on business data. HR adds them to the company's
+ * The starter SQL questions Anvexa ships: 5 easy, 5 medium, 5 hard, on business data. HR adds them to the company's
  * bank from the SQL questions page (or `pnpm --filter @hireflow/api sql:seed`); they are then ordinary bank questions
  * in the database that HR can edit, deactivate or delete.
  *

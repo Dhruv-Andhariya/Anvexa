@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { SqlBankBoard } from './sql-bank-board';
 
-export const metadata: Metadata = { title: 'SQL questions · ANVEXA' };
+export const metadata: Metadata = { title: 'SQL questions · Anvexa' };
 
 export default function SqlQuestionsPage() {
   return (

@@ -1,4 +1,4 @@
-# Keeps the ANVEXA public link alive without anyone watching (Task Scheduler, no admin needed):
+# Keeps the Anvexa public link alive without anyone watching (Task Scheduler, no admin needed):
 #   - at Windows login, and
 #   - every 5 minutes (watchdog): scripts\start-public.ps1 reuses a live tunnel (nothing changes, ~10 s), and replaces
 #     a dead one (laptop slept, internet dropped). Then CAREERS_SITE_URL is updated, the API restarts, and it emails
@@ -14,5 +14,5 @@ $every5 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -Repetitio
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
   -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 Register-ScheduledTask -TaskName 'ANVEXA public apply link' -Action $action -Trigger @($atLogon, $every5) -Settings $settings `
-  -Description 'Starts Docker, the ANVEXA apps and the Cloudflare tunnel at login, and every 5 minutes replaces a dead tunnel (students then get the new link by email).' -Force | Out-Null
+  -Description 'Starts Docker, the Anvexa apps and the Cloudflare tunnel at login, and every 5 minutes replaces a dead tunnel (students then get the new link by email).' -Force | Out-Null
 "Registered: ANVEXA public apply link (at login + every 5 minutes)"

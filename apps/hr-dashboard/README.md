@@ -21,7 +21,7 @@ pnpm --filter hr-dashboard test
 The full walkthrough is in [docs/JD_WORKFLOW.md](../../docs/JD_WORKFLOW.md).
 
 - Form validation uses the shared schemas from `@hireflow/contracts` (`jobFormSchema`, `companyProfileSchema`).
-- The browser calls only the ANVEXA API (`NEXT_PUBLIC_API_URL`, default `http://localhost:4000/api/v1`).
+- The browser calls only the Anvexa API (`NEXT_PUBLIC_API_URL`, default `http://localhost:4000/api/v1`).
   No AI credentials exist in this app.
 - Auth: `src/components/session.tsx` loads `/auth/me`, sends logged-out users to `/login` and hides pages the role
   cannot use. This is only for display: the API enforces every permission and picks the company from the session.

@@ -78,17 +78,17 @@ export function buildGdReminderEmail(i: GdEmailBase & { roundName: string; start
 
 export function buildGdHrLinkEmail(i: { hrName: string; companyName: string; jobTitle: string; roundName: string; groupNumber: number; students: number; startsAt: Date; link: string }): EmailMessage {
   const company = oneLine(i.companyName);
-  const v = { name: oneLine(i.hrName), job: oneLine(i.jobTitle), company, team: 'ANVEXA', website: null };
+  const v = { name: oneLine(i.hrName), job: oneLine(i.jobTitle), company, team: 'Anvexa', website: null };
   return render(
     `HR link: ${oneLine(i.roundName)} group ${i.groupNumber} - ${v.job} (${istText(i.startsAt)})`,
     [
       `Dear ${v.name},`,
       `Group ${i.groupNumber} of the ${oneLine(i.roundName)} for ${v.job} starts at ${istText(i.startsAt)} with ${i.students} student${i.students === 1 ? '' : 's'}.`,
-      `Open the live page (log in with your ANVEXA account): ${i.link}`,
+      `Open the live page (log in with your Anvexa account): ${i.link}`,
       'You join with your camera and mic off; students see your HR tile. Turn them on any time, or use "Speak to group" to talk to everyone (the discussion timer pauses while you speak), "Talk privately" on a student\'s tile for a one-to-one talk, and admit or move students who missed the start.',
     ],
     v,
-    'This is an automated ANVEXA email.',
+    'This is an automated Anvexa email.',
     i.link,
   );
 }
@@ -125,7 +125,7 @@ export function buildGdResultEmail(i: GdEmailBase & { roundName: string; selecte
 }
 
 function render(subject: string, paragraphs: string[], v: ReturnType<typeof values>, footer: string, link?: string): EmailMessage {
-  const signature = ['Best regards,', v.team, ...(v.team === 'ANVEXA' ? [] : [v.company]), ...(v.website ? [v.website] : [])];
+  const signature = ['Best regards,', v.team, ...(v.team === 'Anvexa' ? [] : [v.company]), ...(v.website ? [v.website] : [])];
   const text = [...paragraphs.flatMap((p) => [p, '']), ...signature, '', footer].join('\n');
   const linkify = (escaped: string) => (link ? escaped.replace(escapeHtml(link), `<a href="${escapeHtml(link)}">${escapeHtml(link)}</a>`) : escaped);
   const html = `<!doctype html>

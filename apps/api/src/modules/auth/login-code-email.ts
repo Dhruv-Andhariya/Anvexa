@@ -13,7 +13,7 @@ export function buildLoginCodeEmail(i: { name: string; code: string; validMinute
   const text = [
     `Hi ${name},`,
     '',
-    `Your ANVEXA login code is: ${i.code}`,
+    `Your Anvexa login code is: ${i.code}`,
     '',
     `It works once and expires in ${i.validMinutes} minutes.`,
     'If you did not just try to log in, someone knows your password: change it now with "Forgot password?" on the login page.',
@@ -21,12 +21,12 @@ export function buildLoginCodeEmail(i: { name: string; code: string; validMinute
   const html = `<!doctype html>
 <html lang="en"><body style="font-family:Arial,Helvetica,sans-serif;color:#1f2933;line-height:1.5;max-width:560px;margin:0 auto;padding:16px">
 <p>Hi ${escapeHtml(name)},</p>
-<p>Your ANVEXA login code is:</p>
+<p>Your Anvexa login code is:</p>
 <p style="font-size:28px;font-weight:bold;letter-spacing:6px;font-family:Consolas,monospace">${escapeHtml(i.code)}</p>
 <p>It works once and expires in ${i.validMinutes} minutes.</p>
 <p>If you did not just try to log in, someone knows your password: change it now with "Forgot password?" on the login page.</p>
 </body></html>`;
-  return { subject: `${i.code} is your ANVEXA login code`, text, html };
+  return { subject: `${i.code} is your Anvexa login code`, text, html };
 }
 
 /** "Verify your email" (sign-up). Contains only the name typed on the form, the code and when it expires. */
@@ -35,18 +35,18 @@ export function buildSignupCodeEmail(i: { name: string; code: string; validMinut
   const text = [
     `Hi ${name},`,
     '',
-    `Your code to create your ANVEXA account is: ${i.code}`,
+    `Your code to create your Anvexa account is: ${i.code}`,
     '',
     `It works once and expires in ${i.validMinutes} minutes.`,
-    'If you did not try to create a ANVEXA account, ignore this email - no account is created without this code.',
+    'If you did not try to create an Anvexa account, ignore this email - no account is created without this code.',
   ].join('\n');
   const html = `<!doctype html>
 <html lang="en"><body style="font-family:Arial,Helvetica,sans-serif;color:#1f2933;line-height:1.5;max-width:560px;margin:0 auto;padding:16px">
 <p>Hi ${escapeHtml(name)},</p>
-<p>Your code to create your ANVEXA account is:</p>
+<p>Your code to create your Anvexa account is:</p>
 <p style="font-size:28px;font-weight:bold;letter-spacing:6px;font-family:Consolas,monospace">${escapeHtml(i.code)}</p>
 <p>It works once and expires in ${i.validMinutes} minutes.</p>
-<p>If you did not try to create a ANVEXA account, ignore this email - no account is created without this code.</p>
+<p>If you did not try to create an Anvexa account, ignore this email - no account is created without this code.</p>
 </body></html>`;
-  return { subject: `${i.code} is your ANVEXA sign-up code`, text, html };
+  return { subject: `${i.code} is your Anvexa sign-up code`, text, html };
 }

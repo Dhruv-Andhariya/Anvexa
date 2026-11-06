@@ -48,11 +48,11 @@ PLATFORM_ADMIN_EMAIL=you@example.com PLATFORM_ADMIN_NAME="Your Name" PLATFORM_AD
 |---|---|---|---|
 | POST | `/api/v1/auth/signup` | public, rate-limited (10/IP/hour) | `{ name, email, password }` → session cookie + `Session` (no company). `409 EMAIL_TAKEN`. With email verification on → `{ codeRequired, challenge, emailHint, expiresAt }`, a code emailed, **no account yet** |
 | POST | `/api/v1/auth/signup/verify` | public, rate-limited | `{ challenge, code }` → creates the account, session cookie + `Session`. 5 tries per code, 10-minute expiry, single use |
-| POST | `/api/v1/auth/login` | public, rate-limited | `{ email, password }` → session cookie + `Session`; with 2FA on → `{ codeRequired, challenge, emailHint, expiresAt }` and a 6-digit code emailed (no cookie yet) |
+| POST | `/api/v1/auth/login` | public, rate-limited | `{ email, password }` → session cookie + `Session`; with 2FA on → `{ codeRequired, challenge, emailHint, expiresAt }` and a 6-digit code emailed (no cookie yet). Unknown email → `401 ACCOUNT_NOT_FOUND` (the login page sends the person to `/signup`); wrong password → `401 INVALID_CREDENTIALS` |
 | POST | `/api/v1/auth/login/verify` | public, rate-limited | `{ challenge, code }` → session cookie + `Session`. 5 tries per code, 10-minute expiry, single use |
 | GET | `/api/v1/auth/providers` | public | `{ google }`: which "Continue with ..." buttons to show |
-| GET | `/api/v1/auth/google/start?next=` | public (browser navigation) | redirect to Google (state + PKCE in a 10-minute cookie) |
-| GET | `/api/v1/auth/google/callback` | public (browser navigation) | logs in / links / creates the account, sets the session cookie, redirects to the dashboard (`/login?oauth_error=` on failure) |
+| GET | `/api/v1/auth/google/start?next=&mode=login\|signup` | public (browser navigation) | redirect to Google (state + PKCE + mode in a 10-minute cookie). No / other mode = `login` |
+| GET | `/api/v1/auth/google/callback` | public (browser navigation) | logs in / links / (sign-up page only) creates the account, sets the session cookie, redirects to the dashboard (`/login?oauth_error=` on failure; `/signup?oauth_error=no_account` when a login finds no account) |
 | POST | `/api/v1/auth/logout` | public | deletes the session, clears the cookie |
 | GET | `/api/v1/auth/me` | logged in | `Session`: user, current company + role, all companies |
 | POST | `/api/v1/auth/company` | logged in | `{ companyId }`: switch company (active membership required) |
@@ -73,8 +73,10 @@ PLATFORM_ADMIN_EMAIL=you@example.com PLATFORM_ADMIN_NAME="Your Name" PLATFORM_AD
 - Sign-up email verification (`SIGNUP_VERIFY_EMAIL=email`, default on in production): the form's details wait in
   `signup_challenges` (password already scrypt-hashed) and the user row is created only with the right emailed code.
 - Continue with Google (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, see `google-oauth.ts`): known Google id
-  (`users.google_sub`) logs in; else the account with the same Google-verified email is linked; else a new account is
-  created (random password - "Forgot password?" sets one). No emailed code: Google verified the email and runs its own
+  (`users.google_sub`) logs in; else the account with the same Google-verified email is linked; else - only when the
+  button was on the SIGN-UP page (`mode=signup`) - a new account is created (random password - "Forgot password?" sets
+  one). From the login page nothing is created: the browser goes to `/signup?oauth_error=no_account` (audit
+  `auth.login_failed`, reason `no_account`). No emailed code: Google verified the email and runs its own
   2-step verification. An email already linked to a different Google account is refused, never re-linked.
 - Session cookie: `HttpOnly`, `SameSite=Lax`, and `Secure` for every HTTPS request and always in production
   (`COOKIE_SECURE=false` only affects plain-HTTP local dev).

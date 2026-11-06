@@ -94,7 +94,7 @@ export async function importCodingProblems(jobId: string, file: File): Promise<C
       credentials: 'include',
     });
   } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the ANVEXA API. Check that it is running and try again.');
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the Anvexa API. Check that it is running and try again.');
   }
   const json = (await res.json().catch(() => undefined)) as { code?: string; message?: string } | undefined;
   if (!res.ok) {

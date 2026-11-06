@@ -27,6 +27,7 @@ const appRow = {
   graduationYear: 2026,
   scoreType: 'CGPA',
   scoreValue: { toNumber: () => 8.4 },
+  experienceYears: { toNumber: () => 2.5 },
   linkedinUrl: null,
   githubUrl: 'https://github.com/asha',
   portfolioUrl: null,
@@ -68,7 +69,7 @@ describe('HrApplicationsService.listForJob', () => {
     expect(db.application.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { tenantId: TENANT, jobId: JOB } }));
     expect(res.jobTitle).toBe('Junior Backend Developer');
     expect(res.applications).toEqual([
-      expect.objectContaining({ applicationId: APP, name: 'Asha Patel', email: 'asha@example.com', scoreValue: 8.4, githubUrl: 'https://github.com/asha' }),
+      expect.objectContaining({ applicationId: APP, name: 'Asha Patel', email: 'asha@example.com', scoreValue: 8.4, experienceYears: 2.5, githubUrl: 'https://github.com/asha' }),
     ]);
   });
 
