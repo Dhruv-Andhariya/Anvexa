@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { PublishBoard } from './publish-board';
 
-export const metadata: Metadata = { title: 'Publish jobs · HireFlow AI' };
+export const metadata: Metadata = { title: 'Publish jobs · ANVEXA' };
 
 export default function PublishPage() {
   return (

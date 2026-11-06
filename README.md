@@ -1,9 +1,9 @@
-# HireFlow AI
+# ANVEXA
 
 AI-powered hiring platform: from "HR has an opening" to "candidate sits in the final interview".
 
 - **Start here:** [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md) — setup, who owns what, git workflow
-- **Full project documentation:** [`docs/HireFlow_AI_Documentation.md`](docs/HireFlow_AI_Documentation.md)
+- **Full project documentation:** [`docs/ANVEXA_Documentation.md`](docs/ANVEXA_Documentation.md)
 - **Publish & apply guide (M06–M09):** [`docs/M06_M09_PUBLISH_AND_APPLY.md`](docs/M06_M09_PUBLISH_AND_APPLY.md)
 - **Assessment rounds guide (M05, HR side + round engine wiring):** [`docs/ASSESSMENT_ROUNDS.md`](docs/ASSESSMENT_ROUNDS.md)
 - **DSA coding round (HR setup, invitation, coding page, results):** [`docs/DSA_ASSESSMENT_ROUND.md`](docs/DSA_ASSESSMENT_ROUND.md)

@@ -70,7 +70,7 @@ from .speech import SpeechProvider, build_speech_provider
 load_env()  # repo-root .env, regardless of the working directory the worker starts in
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="HireFlow AI worker", version="0.1.0")
+app = FastAPI(title="ANVEXA worker", version="0.1.0")
 
 
 @app.exception_handler(LLMError)

@@ -1,4 +1,4 @@
-# HireFlow AI — Team Guide (3 interns)
+# ANVEXA — Team Guide (3 interns)
 
 How three people build different modules in parallel, push/pull through GitHub, and have everything work on all three laptops.
 

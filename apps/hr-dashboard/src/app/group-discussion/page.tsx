@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { GdBoard } from './gd-board';
 
-export const metadata: Metadata = { title: 'Group Discussion · HireFlow AI' };
+export const metadata: Metadata = { title: 'Group Discussion · ANVEXA' };
 
 export default function GroupDiscussionPage() {
   return (

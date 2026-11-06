@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { CompaniesAdmin } from './companies-admin';
 
-export const metadata: Metadata = { title: 'Companies · HireFlow AI' };
+export const metadata: Metadata = { title: 'Companies · ANVEXA' };
 
 export default function AdminPage() {
   return (

@@ -2,7 +2,7 @@ import { CONSENT_POLICY_VERSION } from '@hireflow/contracts';
 
 /** Every piece of user-facing text on the careers site lives here, so wording changes never touch components. */
 export const CONTENT = {
-  siteName: 'HireFlow Careers',
+  siteName: 'ANVEXA Careers',
   jobPage: {
     applyNow: 'Apply now',
     closed: "We're sorry, this job is no longer open.",
@@ -82,7 +82,7 @@ export const CONTENT = {
     },
     consent: {
       dataProcessing:
-        'I agree that this company and HireFlow may store and use my details and resume to process this job application.',
+        'I agree that this company and ANVEXA may store and use my details and resume to process this job application.',
       aiEvaluation: 'I understand my resume and answers will be checked by AI first, and people make the final decision.',
       recordings: 'I agree that later test rounds may record audio/video for evaluation (optional - you can decide later).',
       policy: `Consent policy version ${CONSENT_POLICY_VERSION}. You can ask us to delete your data at any time.`,

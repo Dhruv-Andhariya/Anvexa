@@ -49,6 +49,6 @@ export const GOOGLE_ERRORS: Record<string, string> = {
   unreachable: 'Could not reach Google. Please try again.',
   rejected: 'Google sign-in did not work. Please try again.',
   unverified_email: 'Your Google account email is not verified, so it cannot be used here.',
-  account_disabled: 'This HireFlow account is disabled. Contact your Company Admin.',
+  account_disabled: 'This ANVEXA account is disabled. Contact your Company Admin.',
   account_mismatch: 'This email is already linked to a different Google account. Log in with your password instead.',
 };

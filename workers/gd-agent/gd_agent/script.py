@@ -1,6 +1,6 @@
 """What the AI moderator says, as pure functions (no audio, no LiveKit): tested on their own.
 
-The HireFlow API owns the timeline and pushes it as the room metadata (GdLiveState). The bot compares the previous and
+The ANVEXA API owns the timeline and pushes it as the room metadata (GdLiveState). The bot compares the previous and
 the new state and speaks: greeting + rules, the topic, the start of the discussion, each student's summary turn, the
 hand-over to HR, the goodbye. During the discussion it only speaks after a silence, never while HR is speaking.
 """

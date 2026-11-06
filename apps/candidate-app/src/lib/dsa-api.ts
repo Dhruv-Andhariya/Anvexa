@@ -1,4 +1,4 @@
-// The browser talks ONLY to the HireFlow API. The code runner (Piston) is reachable only from the backend.
+// The browser talks ONLY to the ANVEXA API. The code runner (Piston) is reachable only from the backend.
 import type { CameraEventType } from '@hireflow/contracts';
 
 /**
@@ -222,7 +222,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
     res = await fetch(`${API_URL}${path}`, {
       method,
       headers: {
-        // The HireFlow API refuses every write without this header (CSRF check), even on public routes.
+        // The ANVEXA API refuses every write without this header (CSRF check), even on public routes.
         ...(method === 'GET' ? {} : { 'X-Requested-With': 'hireflow' }),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },

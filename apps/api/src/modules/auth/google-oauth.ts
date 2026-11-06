@@ -173,7 +173,7 @@ export class GoogleOAuthClient {
     if (verified !== true) throw new GoogleOAuthError('unverified_email');
     const lower = email.trim().toLowerCase();
     const display = typeof name === 'string' && name.trim().length >= 2 ? name.trim().slice(0, 100) : lower.split('@')[0]!.slice(0, 100);
-    return { sub, email: lower, name: display.length >= 2 ? display : 'HireFlow user' };
+    return { sub, email: lower, name: display.length >= 2 ? display : 'ANVEXA user' };
   }
 }
 

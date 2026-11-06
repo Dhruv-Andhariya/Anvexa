@@ -1,7 +1,7 @@
 import { applicationReceiptSchema, myDataSchema, publicJobSchema, type ApplicationReceipt, type MyData, type PublicJob } from '@hireflow/contracts';
 
 /**
- * The browser and the server both talk ONLY to the HireFlow API.
+ * The browser and the server both talk ONLY to the ANVEXA API.
  * - Server (page rendering): straight to the API (API_INTERNAL_URL, default localhost:4000).
  * - Browser (apply form, OTP, my-data): same-origin /api/v1/public/*, proxied to the API by next.config.ts, so the
  *   careers site works from its public URL without the API's HR routes being reachable through it.

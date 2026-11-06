@@ -7,7 +7,7 @@ import type { ChannelAdapter, ChannelContext, PublishedRef } from './channel-ada
  */
 export class CareersSiteAdapter implements ChannelAdapter {
   readonly key = 'careers';
-  readonly label = 'HireFlow careers page';
+  readonly label = 'ANVEXA careers page';
   readonly showsLatestVersion = true;
 
   render(ctx: ChannelContext): string {

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { ResultsBoard } from './results-board';
 
-export const metadata: Metadata = { title: 'Group discussion results · HireFlow AI' };
+export const metadata: Metadata = { title: 'Group discussion results · ANVEXA' };
 
 export default async function GdResultsPage({ params }: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await params;

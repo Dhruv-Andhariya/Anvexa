@@ -11,14 +11,14 @@ Candidates and teammates install **nothing**: no Piston, Docker, Python, Java or
 Candidate's browser ──HTTPS──▶ Cloudflare tunnel / your domain ──▶ candidate-app (Next.js, :3001)
                                                                        │  only /api/v1/dsa/* is forwarded
                                                                        ▼
-                                                              HireFlow API (NestJS, :4100)
+                                                              ANVEXA API (NestJS, :4100)
                                                                        │  server-side only, 127.0.0.1
                                                                        ▼
                                                         Piston (Docker, 127.0.0.1:2000) ── sandbox per run
 ```
 
 - **All code runs on the hosting PC.** The browser sends the source to the API; the API wraps it, runs it in Piston and returns verdicts. Python, Java and C++ toolchains exist only inside the Piston container.
-- **Piston is never public.** It has no login, so it is published on `127.0.0.1` only and sits on Docker's default network, not on HireFlow's (`hireflow_default`), so it cannot reach Postgres or Redis. Only the API talks to it.
+- **Piston is never public.** It has no login, so it is published on `127.0.0.1` only and sits on Docker's default network, not on ANVEXA's (`hireflow_default`), so it cannot reach Postgres or Redis. Only the API talks to it.
 - **The public site forwards `/api/v1/dsa/*` and nothing else.** Probed through the public URL: `/api/v2/runtimes` (Piston), `/api/v1/dsa-admin/*`, `/api/v1/health` and `/api/v1/auth/me` all answer 404.
 - **Hidden test cases never leave the server.** Verified again on this setup (network payloads scanned in the browser tests).
 - **Execution is bounded**: a global concurrency limiter (default 3 runs at once), a per-submission cap (2), a queue with a timeout and a maximum length, per-run CPU, wall-time and memory limits, no network inside the sandbox, capped output size.
@@ -49,7 +49,7 @@ The PC must stay on, awake and online from the first candidate's start until the
 
 Run from the repository root in PowerShell.
 
-1. **Piston.** Idempotent: starts Docker Desktop if needed, creates or starts the container, checks that it is localhost-only and off the HireFlow network, installs missing languages, then runs a real Python, Java and C++ program in the sandbox. It refuses to continue if any check fails.
+1. **Piston.** Idempotent: starts Docker Desktop if needed, creates or starts the container, checks that it is localhost-only and off the ANVEXA network, installs missing languages, then runs a real Python, Java and C++ program in the sandbox. It refuses to continue if any check fails.
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File infra\piston\start-piston.ps1
@@ -195,7 +195,7 @@ Planning rule of thumb for this hardware: a class of about 20 students is fine i
 | API answers 429 `BUSY` | That candidate's previous run is still executing (one at a time per candidate). Wait for it. |
 | Java or C++ runs end with exit 137 | Out of memory. Close other programs, or raise Docker Desktop's memory (Settings → Resources, or `.wslconfig`). |
 | Start script says the port is published beyond localhost | Run with `-Recreate`. Do not edit the `-p` mapping. |
-| Start script says Piston is on the HireFlow network | Run with `-Recreate`; do not attach it to `hireflow_default`. |
+| Start script says Piston is on the ANVEXA network | Run with `-Recreate`; do not attach it to `hireflow_default`. |
 | Public link shows an old or dead page after a restart | The quick-tunnel URL changed. Send the new one, or move to a named tunnel. |
 | Page loads, API calls fail with 500 after about 30 s | The candidate app was built without the proxy setting, or `API_INTERNAL_URL` was wrong at build time. Rebuild with §3 step 3. |
 | Friendly "invalid link" page for a token that should work | The API was restarted without the same `DSA_DEMO_TOKENS`, or `NODE_ENV=production` without `DSA_ALLOW_DEMO_TOKENS=on`. |

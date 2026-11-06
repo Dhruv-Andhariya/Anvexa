@@ -87,7 +87,7 @@ export function AcceptInvitation({ token }: { token: string }) {
           </p>
         </div>
         {invite.existingUser ? (
-          <p className="text-sm text-muted">You already have a HireFlow account. Enter its password to join this company.</p>
+          <p className="text-sm text-muted">You already have a ANVEXA account. Enter its password to join this company.</p>
         ) : (
           <Field id="name" label="Your name" required error={errors.name}>
             <input id="name" autoComplete="name" maxLength={100} className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />

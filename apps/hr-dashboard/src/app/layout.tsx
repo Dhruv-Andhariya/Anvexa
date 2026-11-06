@@ -3,7 +3,7 @@ import { SessionProvider } from '@/components/session';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'HireFlow AI — HR Dashboard',
+  title: 'ANVEXA — HR Dashboard',
   description: 'Set up your company, create jobs, and generate and approve job descriptions with AI.',
 };
 

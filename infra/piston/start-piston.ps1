@@ -6,7 +6,7 @@
 
   What it guarantees (and refuses to continue without):
     * Piston is published on 127.0.0.1 ONLY. It has no login, so it must never be reachable from the network.
-    * It sits on Docker's default network, NOT on HireFlow's (hireflow_default), so it cannot see the databases.
+    * It sits on Docker's default network, NOT on ANVEXA's (hireflow_default), so it cannot see the databases.
     * Packages live in a named Docker volume, not in a folder on C:\.
     * Python, Java and C++ are installed, and a real program in each language runs in the sandbox.
   Needs: Docker Desktop (WSL2 backend, which provides cgroup v2). Docs: docs\dsa-piston-hosting.md
@@ -72,7 +72,7 @@ Say "Piston API answers on $Url"
 $published = (docker port $Name) -join ' '
 if ($published -notmatch '127\.0\.0\.1:' -or $published -match '0\.0\.0\.0:|\[::\]:') { Fail "Piston is published beyond localhost ($published). Run again with -Recreate." }
 $nets = (docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' $Name)
-if ($nets -match 'hireflow_default') { Fail 'Piston is attached to the HireFlow network. Run again with -Recreate.' }
+if ($nets -match 'hireflow_default') { Fail 'Piston is attached to the ANVEXA network. Run again with -Recreate.' }
 Say "published only on localhost ($published); networks: $nets"
 
 # 5. Languages

@@ -7,8 +7,8 @@ const base = { companyName: 'Acme Tech', inviterName: 'Priya Shah', role: 'HR_ME
 describe('buildInvitationEmail', () => {
   it('names the company, the inviter and the role, and carries the link', () => {
     const mail = buildInvitationEmail(base);
-    expect(mail.subject).toBe('Join Acme Tech on HireFlow');
-    expect(mail.text).toContain('Priya Shah invited you to join Acme Tech on HireFlow as HR Member');
+    expect(mail.subject).toBe('Join Acme Tech on ANVEXA');
+    expect(mail.text).toContain('Priya Shah invited you to join Acme Tech on ANVEXA as HR Member');
     expect(mail.text).toContain(LINK);
     expect(mail.html).toContain(`href="${LINK}"`);
     expect(mail.text).toContain('30 Oct 2026');

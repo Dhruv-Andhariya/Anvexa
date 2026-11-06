@@ -137,7 +137,7 @@ function psql(sql) {
 }
 
 async function main() {
-  console.log(c.b('HireFlow demo - M06 publisher, M07 channels, M08 apply page, M09 intake'));
+  console.log(c.b('ANVEXA demo - M06 publisher, M07 channels, M08 apply page, M09 intake'));
   note(`API ${API}`);
 
   step('API is up');

@@ -38,7 +38,7 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
         <div className="flex flex-col gap-4" role="status">
           <h1 className="text-xl font-semibold tracking-tight">Check your email</h1>
           <p className="text-sm">
-            If <span className="font-medium">{sentTo}</span> has a HireFlow account, we have sent it a link to reset the
+            If <span className="font-medium">{sentTo}</span> has a ANVEXA account, we have sent it a link to reset the
             password. The link works once and expires in 1 hour.
           </p>
           <p className="text-sm text-muted">No email after a few minutes? Check the spam folder, or try again.</p>

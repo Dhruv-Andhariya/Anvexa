@@ -89,7 +89,7 @@ export function JobsList() {
           <p className="text-sm font-medium text-accent">Step 1 of 4</p>
           <h2 className="text-lg font-semibold">Set up your company profile first</h2>
           <p className="max-w-xl text-sm text-muted">
-            HireFlow writes every job description from two inputs: your company profile and the job requirements. Save
+            ANVEXA writes every job description from two inputs: your company profile and the job requirements. Save
             the company profile once and it is loaded automatically for every job.
           </p>
           {isCompanyAdmin(session) ? (
@@ -105,7 +105,7 @@ export function JobsList() {
       {state.kind === 'ready' && state.profile && state.jobs.length === 0 && (
         <Card className="flex flex-col items-center gap-2 py-12 text-center">
           <p className="font-medium">No jobs yet</p>
-          <p className="max-w-sm text-sm text-muted">Create a job and HireFlow will draft its job description for you to review and approve.</p>
+          <p className="max-w-sm text-sm text-muted">Create a job and ANVEXA will draft its job description for you to review and approve.</p>
           <Link href="/jobs/new" className={`${linkButton} mt-2`}>
             Create your first job
           </Link>

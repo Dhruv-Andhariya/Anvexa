@@ -17,7 +17,7 @@ def test_prompts_dir_defaults_to_repo_prompts(monkeypatch):
 def test_env_file_loads_without_overriding_real_env(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env"
     env_file.write_text("HF_TEST_FROM_FILE=file\nHF_TEST_PRESET=file\n", encoding="utf-8")
-    monkeypatch.setenv("HIREFLOW_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ANVEXA_ENV_FILE", str(env_file))
     monkeypatch.setenv("HF_TEST_PRESET", "process")
     monkeypatch.delenv("HF_TEST_FROM_FILE", raising=False)
     config.load_env.cache_clear()

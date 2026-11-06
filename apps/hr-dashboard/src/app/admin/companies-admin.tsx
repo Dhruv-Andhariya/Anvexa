@@ -8,7 +8,7 @@ import { ApiError, listCompanies } from '@/lib/api';
 
 const message = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 
-/** Every company registered on HireFlow. Companies register themselves; the Platform Admin oversees them. */
+/** Every company registered on ANVEXA. Companies register themselves; the Platform Admin oversees them. */
 export function CompaniesAdmin() {
   const [companies, setCompanies] = useState<CompanySummary[] | null>(null);
   const [loadError, setLoadError] = useState('');

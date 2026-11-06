@@ -48,7 +48,7 @@ const providersSchema: Schema<{ google: boolean }> = {
 /** For 204 responses. */
 const noBody: Schema<void> = { safeParse: () => ({ success: true, data: undefined }) };
 
-// Browser talks ONLY to the HireFlow API. Gemini credentials live in the AI worker, never here.
+// Browser talks ONLY to the ANVEXA API. Gemini credentials live in the AI worker, never here.
 // Auth is an httpOnly session cookie set by the API: this code never sees or stores a token.
 // Same-origin by default: next.config.ts forwards /api/v1 to the API (works on localhost and through a tunnel).
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
@@ -86,7 +86,7 @@ const FRIENDLY: Record<string, string> = {
   TOO_MANY_ATTEMPTS: 'Too many attempts. Wait a few minutes and try again.',
   UNAUTHENTICATED: 'Your session has ended. Please log in again.',
   FORBIDDEN: 'You do not have permission to do this.',
-  COMPANY_SUSPENDED: 'This company account is suspended. Contact HireFlow support.',
+  COMPANY_SUSPENDED: 'This company account is suspended. Contact ANVEXA support.',
   CSRF_CHECK_FAILED: 'Request blocked. Reload the page and try again.',
   STALE_JD_VERSION: 'This job description was changed in another tab or window. Reload to see the latest version.',
   JOB_APPROVED: 'This job is already approved and locked.',
@@ -121,7 +121,7 @@ async function request<T>(
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') throw err;
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the HireFlow API. Check that it is running and try again.');
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the ANVEXA API. Check that it is running and try again.');
   }
 
   if (res.status === 204) return undefined as T;
