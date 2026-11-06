@@ -17,6 +17,7 @@ const filled: ApplyDraft = {
   branch: 'Computer',
   graduationYear: '2026',
   scoreValue: '8.4',
+  experienceYears: '2',
   consentDataProcessing: true,
   consentAiEvaluation: true,
 };
@@ -30,7 +31,19 @@ describe('validateApplyDraft', () => {
         phone: '+919876543210',
         source: 'linkedin',
         graduationYear: 2026,
+        experienceYears: 2,
       });
+  });
+
+  it('asks for years of experience: 0 for a fresher, half years allowed, never blank', () => {
+    const ok = (v: string) => validateApplyDraft({ ...filled, experienceYears: v }, 'signed-token-123');
+    expect(ok('0')).toMatchObject({ ok: true, form: { experienceYears: 0 } });
+    expect(ok('1.5')).toMatchObject({ ok: true, form: { experienceYears: 1.5 } });
+    expect(ok('')).toEqual({ ok: false, errors: { experienceYears: 'Enter your years of experience (0 if you are a fresher)' } });
+    expect(ok('two')).toEqual({ ok: false, errors: { experienceYears: 'Enter a number' } });
+    expect(ok('-1')).toEqual({ ok: false, errors: { experienceYears: 'Enter 0 or more' } });
+    expect(ok('1.25')).toEqual({ ok: false, errors: { experienceYears: 'Use whole or half years, e.g. 2 or 2.5' } });
+    expect(ok('51')).toEqual({ ok: false, errors: { experienceYears: 'Enter at most 50 years' } });
   });
 
   it('asks to verify the phone first', () => {

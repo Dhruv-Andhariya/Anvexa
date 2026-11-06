@@ -1,4 +1,4 @@
-"""HTTP side of the GD worker, called by the ANVEXA API after a group discussion:
+"""HTTP side of the GD worker, called by the Anvexa API after a group discussion:
 
   POST /gd/transcribe  { chunk_paths, mime_type }  -> { language, segments: [{ start, end, text }] }  (seconds)
   POST /gd/evaluate    { student_id, ..., asked_by_hr } -> { result: <rubric JSON>, model }
@@ -24,7 +24,7 @@ from .mix import MixFailed, Track, mix
 from .transcribe import UnsafePath, safe_chunk_paths, transcribe
 
 log = logging.getLogger("gd_agent.api")
-app = FastAPI(title="ANVEXA GD worker", version="0.1.0")
+app = FastAPI(title="Anvexa GD worker", version="0.1.0")
 # one transcription at a time: Whisper on a laptop CPU uses all cores and a lot of memory
 _whisper_lock = threading.Lock()
 

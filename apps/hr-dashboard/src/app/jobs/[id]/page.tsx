@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { JobReview } from './job-review';
 
-export const metadata: Metadata = { title: 'Review job · ANVEXA' };
+export const metadata: Metadata = { title: 'Review job · Anvexa' };
 
 export default async function JobPage({
   params,

@@ -138,7 +138,7 @@ describe('Gmail', () => {
     const m = mailerFromEnv({ GMAIL_USER: 'hr.team@gmail.com', GMAIL_APP_PASSWORD: 'abcd efgh ijkl mnop', SMTP_URL: 'smtp://localhost:1025' });
     expect(m).toBeInstanceOf(SmtpMailer);
     expect(opts(m)).toMatchObject({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: 'hr.team@gmail.com', pass: 'abcdefghijklmnop' } });
-    expect(from(m)).toBe('ANVEXA <hr.team@gmail.com>');
+    expect(from(m)).toBe('Anvexa <hr.team@gmail.com>');
   });
 
   it('respects MAIL_FROM, and needs BOTH Gmail values (else falls back to SMTP_URL / off)', () => {
@@ -164,7 +164,7 @@ describe('mail errors', () => {
   });
 
   it('a mail server that cannot be reached becomes a MailError, not a crash', async () => {
-    const mailer = new SmtpMailer('smtp://127.0.0.1:1', 'ANVEXA <a@b.c>', 2_000);
+    const mailer = new SmtpMailer('smtp://127.0.0.1:1', 'Anvexa <a@b.c>', 2_000);
     const err = await mailer.send('student@example.com', buildConfirmationEmail(input)).catch((e) => e);
     expect(err).toBeInstanceOf(MailError);
     expect(err.reason).toMatch(/could not reach the mail server/);

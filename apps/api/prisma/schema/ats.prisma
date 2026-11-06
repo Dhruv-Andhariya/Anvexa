@@ -62,6 +62,9 @@ model AtsEvaluation {
   minAtsScore    Int?               @map("min_ats_score")
   /// What the ATS suggests. HR's own decision (below) always wins.
   systemDecision ScreeningDecision? @map("system_decision")
+  /// Set when the system rejected WITHOUT screening the resume (no score, no AI call). "EXPERIENCE_BELOW_REQUIRED":
+  /// the student's years of experience are below the job's minimum. Null for every normally screened resume.
+  autoRejectionReason String?       @map("auto_rejection_reason")
   hrDecision     ScreeningDecision? @map("hr_decision")
   hrDecidedById  String?            @map("hr_decided_by_id") @db.Uuid
   hrDecidedAt    DateTime?          @map("hr_decided_at")

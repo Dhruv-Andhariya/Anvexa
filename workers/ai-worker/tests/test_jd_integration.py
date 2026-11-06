@@ -47,4 +47,4 @@ def test_real_generation_follows_the_form():
     for skill in ["node.js", "postgresql", "rest"]:
         assert skill in required
     assert "docker" not in required  # preferred skill must not be promoted to required
-    assert res.headers["X-Prompt-Version"] == "jd_generate.v3"
+    assert res.headers["X-Prompt-Version"] == "jd_generate.v4"

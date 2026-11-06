@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
-import { jdContentSchema, jobFormSchema, type ScreeningDecision } from '@hireflow/contracts';
+import { isBelowRequiredExperience, jdContentSchema, jobFormSchema, type ScreeningDecision } from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
 import { isFeatureOn } from '../../common/feature-flags';
 import { PrismaService } from '../../common/prisma.service';
@@ -155,6 +155,7 @@ export class AtsProcessor implements OnApplicationBootstrap, OnModuleDestroy {
 
   private async process(row: Claimed): Promise<void> {
     try {
+      if (await this.rejectIfBelowExperience(row)) return;
       const input = await this.load(row);
       const result = await this.worker.screen(input);
       const minAtsScore = await this.settings.minScore(row.tenant_id, row.job_id);
@@ -205,6 +206,52 @@ export class AtsProcessor implements OnApplicationBootstrap, OnModuleDestroy {
     } catch (err) {
       await this.failed(row, err);
     }
+  }
+
+  /**
+   * The apply form asks for years of experience. Below the job's minimum (HR's job form) the application is rejected
+   * at once: NOT_SHORTLISTED with reason EXPERIENCE_BELOW_REQUIRED, no score, and no AI call (saves quota). The
+   * rejection email is queued exactly like a resume below the minimum ATS score. HR can still shortlist the student.
+   * Applications without the field (older ones) and jobs open to freshers are never rejected by this rule.
+   * Returns true when it handled the row.
+   */
+  private async rejectIfBelowExperience(row: Claimed): Promise<boolean> {
+    const [app, job] = await Promise.all([
+      this.db.application.findFirst({ where: { id: row.application_id, tenantId: row.tenant_id }, select: { experienceYears: true } }),
+      this.db.job.findFirst({ where: { id: row.job_id, tenantId: row.tenant_id }, select: { formData: true } }),
+    ]);
+    const form = jobFormSchema.safeParse(job?.formData);
+    const years = app?.experienceYears?.toNumber() ?? null;
+    if (!form.success || !isBelowRequiredExperience(years, form.data.experienceMin)) return false;
+
+    const minAtsScore = await this.settings.minScore(row.tenant_id, row.job_id);
+    const autoRejected = await this.db.$transaction(async (tx) => {
+      const { count } = await tx.atsEvaluation.updateMany({
+        where: { id: row.id, status: 'PROCESSING' },
+        data: {
+          status: 'SCORED',
+          score: null,
+          minAtsScore,
+          systemDecision: 'NOT_SHORTLISTED',
+          autoRejectionReason: 'EXPERIENCE_BELOW_REQUIRED',
+          scoredAt: new Date(),
+          lockedAt: null,
+          lastError: null,
+        },
+      });
+      if (!count) return null; // erased (DPDP) or taken over meanwhile
+      return this.autoReject ? (await queueAutoRejections(tx, row.tenant_id, { applicationIds: [row.application_id] })).length > 0 : false;
+    });
+    if (autoRejected === null) return true;
+    await this.audit.record({
+      tenantId: row.tenant_id,
+      actorUserId: null,
+      action: 'ats.auto_rejected',
+      subjectType: 'application',
+      subjectId: row.application_id,
+      metadata: { reason: 'EXPERIENCE_BELOW_REQUIRED', experienceYears: years, experienceMin: form.data.experienceMin, autoRejected },
+    });
+    return true;
   }
 
   /** The resume file + the approved JD version and job form the student applied to. */

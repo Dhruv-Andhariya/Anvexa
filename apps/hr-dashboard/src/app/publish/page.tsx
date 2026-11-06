@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { PublishBoard } from './publish-board';
 
-export const metadata: Metadata = { title: 'Publish jobs · ANVEXA' };
+export const metadata: Metadata = { title: 'Publish jobs · Anvexa' };
 
 export default function PublishPage() {
   return (

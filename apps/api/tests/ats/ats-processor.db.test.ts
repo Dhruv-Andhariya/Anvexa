@@ -63,6 +63,45 @@ describe.skipIf(!DB)('ATS background screening (real database)', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('experience below the job minimum is rejected at once - no AI call - and gets the rejection email', async () => {
+    const job = await seedJob(db, tenantId, { title: 'AI Engineer', experience: [2, 4], minAtsScore: 60 });
+    const junior = await seedApplication(db, tenantId, job, { experienceYears: 1.5 });
+    const enough = await seedApplication(db, tenantId, job, { experienceYears: 2 });
+    const more = await seedApplication(db, tenantId, job, { experienceYears: 6 }); // above the range is not rejected
+    const older = await seedApplication(db, tenantId, job, { experienceYears: null }); // applied before the field existed
+    const { worker, calls } = fakeWorker(async () => screenResult(80));
+    const prisma = db as unknown as PrismaService;
+    const withEmails = new AtsProcessor(prisma, worker, { get: vi.fn() } as never, new ScreeningSettingsService(prisma, audit as never, undefined, false), audit as never, { ...CONFIG, onlyTenantId: tenantId }, true, false);
+
+    expect(await withEmails.tick()).toBe(4);
+    expect(await evaluation(junior.applicationId)).toMatchObject({
+      status: 'SCORED', score: null, systemDecision: 'NOT_SHORTLISTED', autoRejectionReason: 'EXPERIENCE_BELOW_REQUIRED', minAtsScore: 60, model: null,
+    });
+    for (const a of [enough, more, older]) {
+      expect(await evaluation(a.applicationId)).toMatchObject({ status: 'SCORED', score: 80, systemDecision: 'SHORTLISTED', autoRejectionReason: null });
+    }
+    expect(calls).toHaveLength(3); // the rejected resume never reached the AI worker
+    const emails = await db.candidateEmail.findMany({ where: { tenantId } });
+    expect(emails).toEqual([expect.objectContaining({ applicationId: junior.applicationId, kind: 'REJECTION', status: 'QUEUED' })]);
+    expect(audit.entries.find((e) => e.action === 'ats.auto_rejected')).toMatchObject({
+      subjectId: junior.applicationId,
+      metadata: { reason: 'EXPERIENCE_BELOW_REQUIRED', experienceYears: 1.5, experienceMin: 2, autoRejected: true },
+    });
+
+    // a later change of the minimum ATS score does not flip the experience rejection (it has no score)
+    await new ScreeningSettingsService(prisma, audit as never, undefined, false).save(tenantId, job.jobId, { minAtsScore: 10 }, null);
+    expect(await evaluation(junior.applicationId)).toMatchObject({ systemDecision: 'NOT_SHORTLISTED' });
+  });
+
+  it('a job open to freshers rejects nobody for experience', async () => {
+    const job = await seedJob(db, tenantId, { experience: [0, 1] });
+    const fresher = await seedApplication(db, tenantId, job, { experienceYears: 0 });
+    const { worker, calls } = fakeWorker(async () => screenResult(80));
+    await processor(worker).tick();
+    expect(await evaluation(fresher.applicationId)).toMatchObject({ score: 80, autoRejectionReason: null });
+    expect(calls).toHaveLength(1);
+  });
+
   it('screens against the JD version the student applied to, with the resume bytes', async () => {
     const job = await seedJob(db, tenantId);
     const app = await seedApplication(db, tenantId, job, { resume: Buffer.from('%PDF-1.4 my resume') });

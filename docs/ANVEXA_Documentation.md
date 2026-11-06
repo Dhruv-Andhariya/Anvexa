@@ -1,4 +1,4 @@
-# ANVEXA — Complete Build Documentation
+# Anvexa — Complete Build Documentation
 
 > An AI-powered hiring platform that takes a job from "HR has an opening" to "candidate sits in the final interview" with almost no manual work in between.
 
@@ -6,7 +6,7 @@
 **Audience:** founders, developers, designers, QA, and anyone joining the project
 **How to read this:** Sections 1–4 explain *what* we are building and *why* in plain language. Sections 5–9 explain *how* it is built. Sections 10–19 are reference material you come back to while coding.
 
-> **Note on the name:** "ANVEXA" is a working name used throughout this document. Replace it with your product name.
+> **Note on the name:** "Anvexa" is a working name used throughout this document. Replace it with your product name.
 
 ---
 
@@ -67,9 +67,9 @@ Hiring today, especially for campus and entry-level roles in India, is slow, exp
 
 ## 2. Our solution
 
-ANVEXA automates every stage of hiring **before** the final personal interview (PI), and keeps the final decision with humans.
+Anvexa automates every stage of hiring **before** the final personal interview (PI), and keeps the final decision with humans.
 
-| Stage | Manual today | With ANVEXA |
+| Stage | Manual today | With Anvexa |
 |---|---|---|
 | Writing the JD | HR writes from scratch | HR fills a short form; AI writes the JD; AI checks it for mistakes and bias |
 | Posting | Copy-paste to each site | One click posts to every channel at the same time |

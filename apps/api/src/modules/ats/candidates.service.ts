@@ -1,7 +1,9 @@
 import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import {
   atsPartSchema,
+  autoRejectionReasonSchema,
   candidateViewSchema,
+  jobFormSchema,
   parsedResumeSchema,
   type CandidateView,
   type JobCandidates,
@@ -92,9 +94,11 @@ export class CandidatesService {
     return this.guard(async () => {
       const job = await this.db.job.findFirst({
         where: { id: jobId, tenantId },
-        select: { title: true, screeningSettings: { select: { minAtsScore: true } } },
+        select: { title: true, formData: true, screeningSettings: { select: { minAtsScore: true } } },
       });
       if (!job) throw apiError(HttpStatus.NOT_FOUND, 'JOB_NOT_FOUND', 'Job not found.');
+      const form = jobFormSchema.safeParse(job.formData);
+      const requiredExperienceMin = form.success ? form.data.experienceMin : null;
       const rows = await this.db.application.findMany({
         where: { tenantId, jobId },
         orderBy: { createdAt: 'desc' },
@@ -103,7 +107,7 @@ export class CandidatesService {
       const buckets = rows.map((r) => bucketOf(r.atsEvaluation));
       const shown = rows
         .filter((_, i) => view === 'all' || buckets[i] === view)
-        .map(toCandidate)
+        .map((r) => toCandidate(r, requiredExperienceMin))
         // best first where there is a score; newest application first otherwise (the order of the query)
         .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
       return {
@@ -140,7 +144,7 @@ const CANDIDATE_INCLUDE = {
 
 type Row = Prisma.ApplicationGetPayload<{ include: typeof CANDIDATE_INCLUDE }>;
 
-function toCandidate(r: Row): ScreenedCandidate {
+function toCandidate(r: Row, requiredExperienceMin: number | null): ScreenedCandidate {
   const e = r.atsEvaluation;
   const breakdown = atsPartSchema.array().safeParse(e?.breakdown);
   const profile = parsedResumeSchema.safeParse(e?.parsedProfile);
@@ -154,6 +158,7 @@ function toCandidate(r: Row): ScreenedCandidate {
     degree: r.degree,
     branch: r.branch,
     graduationYear: r.graduationYear,
+    experienceYears: r.experienceYears?.toNumber() ?? null,
     appliedAt: r.createdAt.toISOString(),
     links: { linkedinUrl: r.linkedinUrl, githubUrl: r.githubUrl, portfolioUrl: r.portfolioUrl, projectUrl: r.projectUrl },
     resume: r.resume,
@@ -168,6 +173,8 @@ function toCandidate(r: Row): ScreenedCandidate {
     systemDecision: e?.systemDecision ?? null,
     hrDecision: e?.hrDecision ?? null,
     decision: e?.status === 'SCORED' ? (e.hrDecision ?? e.systemDecision) : null,
+    autoRejectionReason: autoRejectionReasonSchema.safeParse(e?.autoRejectionReason).data ?? null,
+    requiredExperienceMin,
     hrDecidedAt: e?.hrDecidedAt?.toISOString() ?? null,
     scoredAt: e?.scoredAt?.toISOString() ?? null,
     decisionEmail: r.decisionEmail

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { ApplicationsBoard } from './applications-board';
 
-export const metadata: Metadata = { title: 'Applications · ANVEXA' };
+export const metadata: Metadata = { title: 'Applications · Anvexa' };
 
 export default function ApplicationsPage() {
   return (

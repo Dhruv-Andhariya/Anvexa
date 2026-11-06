@@ -4,7 +4,7 @@ import { Authenticated, Public, type AuthInfo, type AuthRequest } from './access
 import { AuthService } from './auth.service';
 import { SESSION_COOKIE, clearSessionCookie, readCookie, sessionCookie, type CookieResponse } from './cookies';
 import { GoogleAuthService } from './google-auth.service';
-import { GOOGLE_STATE_COOKIE, clearGoogleStateCookie, safeNextPath } from './google-oauth';
+import { GOOGLE_STATE_COOKIE, clearGoogleStateCookie, googleMode, safeNextPath } from './google-oauth';
 import { PasswordResetService } from './password-reset.service';
 import { SessionsService } from './sessions.service';
 
@@ -35,17 +35,20 @@ export class AuthController {
     return { google: this.google.enabled };
   }
 
-  /** GET /api/v1/auth/google/start?next=/path - browser navigation: redirects to Google's account chooser. */
+  /**
+   * GET /api/v1/auth/google/start?next=/path&mode=login|signup - browser navigation: redirects to Google's account
+   * chooser. Only mode=signup (the sign-up page) may create a new account; anything else is a login.
+   */
   @Public()
   @Get('google/start')
-  googleStart(@Req() req: AuthRequest, @Res() res: RedirectResponse, @Query('next') next?: string) {
+  googleStart(@Req() req: AuthRequest, @Res() res: RedirectResponse, @Query('next') next?: string, @Query('mode') mode?: string) {
     // the dashboard's /api/v1 proxy forwards the address HR is on: sign-in returns through that same address
-    const step = this.google.start(safeNextPath(str(next)), clientIp(req), overHttps(req), str(req.headers['x-forwarded-host']));
+    const step = this.google.start(safeNextPath(str(next)), clientIp(req), overHttps(req), str(req.headers['x-forwarded-host']), googleMode(str(mode)));
     if (step.cookie) res.setHeader('Set-Cookie', step.cookie);
     res.redirect(302, step.redirectTo);
   }
 
-  /** GET /api/v1/auth/google/callback?code&state - Google sends the browser here; logs in (or signs up) and redirects. */
+  /** GET /api/v1/auth/google/callback?code&state - Google sends the browser here; logs in (or, from sign-up, signs up) and redirects. */
   @Public()
   @Get('google/callback')
   async googleCallback(

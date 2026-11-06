@@ -46,9 +46,13 @@ describe.skipIf(!DB)('Continue with Google (real database)', () => {
   const cookieFrom = (res: Response, name: string) =>
     res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`) && !c.startsWith(`${name}=;`))?.split(';')[0];
 
-  /** The whole browser round trip: start -> (Google) -> callback. Returns where the browser ends up + session cookie. */
-  async function signInWithGoogle(next?: string, tamper?: { state?: string; error?: string }) {
-    const start = await get(`/auth/google/start${next ? `?next=${encodeURIComponent(next)}` : ''}`);
+  /**
+   * The whole browser round trip: start -> (Google) -> callback. Returns where the browser ends up + session cookie.
+   * mode: which page the button was on ("signup" may create the account, "login" never does; none = login).
+   */
+  async function signInWithGoogle(next?: string, tamper?: { state?: string; error?: string }, mode: 'login' | 'signup' | null = 'signup') {
+    const q0 = new URLSearchParams({ ...(next ? { next } : {}), ...(mode ? { mode } : {}) });
+    const start = await get(`/auth/google/start${q0.size ? `?${q0}` : ''}`);
     expect(start.status).toBe(302);
     const google = new URL(start.headers.get('location')!);
     expect(google.origin + google.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
@@ -98,14 +102,25 @@ describe.skipIf(!DB)('Continue with Google (real database)', () => {
     // PKCE: the verifier went to Google with the code
     expect(tokenRequests.at(-1)!.get('code_verifier')).toMatch(/^[\w-]{40,}$/);
 
-    // second time: the same account, found by the Google id
-    const again = await signInWithGoogle('/jobs');
+    // second time, from the LOGIN page: the same account, found by the Google id
+    const again = await signInWithGoogle('/jobs', undefined, 'login');
     expect(again.location).toBe(`${DASHBOARD}/jobs`);
     expect((await me(again.session!)).user.email).toBe(email);
     expect(await prisma.user.count({ where: { email } })).toBe(1);
   });
 
-  it('links an existing password account with the same verified email', async () => {
+  it('"Log in with Google" by an unknown Google account creates nothing and goes to sign-up', async () => {
+    for (const mode of ['login', null] as const) {
+      const email = `g-nologin-${RUN}-${mode ?? 'none'}@example.com`;
+      claims = googleUser(email);
+      const { location, session } = await signInWithGoogle('/jobs', undefined, mode);
+      expect(location).toBe(`${DASHBOARD}/signup?oauth_error=no_account`);
+      expect(session).toBeUndefined();
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+    }
+  });
+
+  it('links an existing password account with the same verified email (also from the login page)', async () => {
     const email = `g-link-${RUN}@example.com`;
     const signup = await realFetch(`${base}/auth/signup`, {
       method: 'POST',
@@ -114,7 +129,7 @@ describe.skipIf(!DB)('Continue with Google (real database)', () => {
     });
     expect(signup.status).toBe(201);
     claims = googleUser(email);
-    const { session } = await signInWithGoogle();
+    const { session } = await signInWithGoogle(undefined, undefined, 'login');
     expect((await me(session!)).user).toMatchObject({ email, name: 'Password Person' });
     expect((await prisma.user.findUniqueOrThrow({ where: { email } })).googleSub).toBe(claims.sub);
 

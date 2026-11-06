@@ -98,7 +98,7 @@ describe('uniqueViolation', () => {
 describe('ApplicationsService.submit', () => {
   const FORM = {
     name: 'Asha Patel', email: 'Asha.Patel@Example.com', phone: '98765 43210', city: 'Ahmedabad', college: 'LDCE', degree: 'B.E.',
-    branch: 'Computer', graduationYear: 2026, scoreType: 'CGPA', scoreValue: 8.4, consents: { dataProcessing: true, aiEvaluation: true },
+    branch: 'Computer', graduationYear: 2026, scoreType: 'CGPA', scoreValue: 8.4, experienceYears: 1, consents: { dataProcessing: true, aiEvaluation: true },
     otpToken: 'signed-proof-token',
   };
   const found = {

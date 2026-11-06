@@ -250,12 +250,14 @@ export function JobReview({ id, autoGenerate }: { id: string; autoGenerate: bool
                   <Button onClick={() => setPreviewId(null)}>{current ? 'Back to current' : 'Close'}</Button>
                 </div>
               </div>
-              <JdView jd={preview.content} />
+              <JdView jd={preview.content} form={job.form} />
             </div>
           ) : current ? (
             <JdPanel
               key={current.id}
               jd={current.content}
+              form={job.form}
+              company={snapshot}
               versionLabel={versionLabel(current)}
               locked={locked}
               busy={busy === 'regenerating' || busy === 'saving' ? busy : null}

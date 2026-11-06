@@ -139,7 +139,7 @@ export default async function JobPage({ params }: Params) {
 
         {live && (
           <aside id="apply" className="scroll-mt-6 rounded-xl border border-border bg-surface p-5 sm:p-6 lg:sticky lg:top-6">
-            <ApplyForm companySlug={company} jobSlug={jobSlug} />
+            <ApplyForm companySlug={company} jobSlug={jobSlug} experience={{ min: job.form.experienceMin, max: job.form.experienceMax }} />
           </aside>
         )}
       </div>

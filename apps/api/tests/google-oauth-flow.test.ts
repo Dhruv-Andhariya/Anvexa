@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GoogleOAuthClient, googleOAuthConfigFromEnv, newGoogleState, readGoogleState } from '../src/modules/auth/google-oauth';
+import { GoogleOAuthClient, googleMode, googleOAuthConfigFromEnv, newGoogleState, readGoogleState } from '../src/modules/auth/google-oauth';
 
 const PUBLIC = 'https://joins-liable-genius-resistance.trycloudflare.com';
 const env = {
@@ -45,5 +45,21 @@ describe('Google sign-in returns through the dashboard address HR is using', () 
     const read = readGoogleState(decodeURIComponent(cookie.split(';')[0]!.split('=')[1]!), state)!;
     expect(read.flow).toBeUndefined();
     expect(client().knownFlow(read.flow)).toBeNull();
+  });
+
+  it('the state cookie remembers login vs sign-up; anything but "signup" is a login', () => {
+    const value = (cookie: string) => decodeURIComponent(cookie.split(';')[0]!.split('=')[1]!);
+    const flow = client().flowFor('localhost:3000');
+    const signup = newGoogleState('/jobs', false, flow, 'signup');
+    expect(readGoogleState(value(signup.cookie), signup.state)).toMatchObject({ mode: 'signup', next: '/jobs', flow });
+    const noFlow = newGoogleState(undefined, false, undefined, 'signup');
+    expect(readGoogleState(value(noFlow.cookie), noFlow.state)).toMatchObject({ mode: 'signup', flow: undefined });
+    const login = newGoogleState(undefined, false);
+    expect(readGoogleState(value(login.cookie), login.state)!.mode).toBe('login');
+    // a cookie from before this change (state.verifier.next.dash.redirect, no mode) is a login
+    const old = [signup.state, 'verifier', '', '', ''].join('.');
+    expect(readGoogleState(old, signup.state)!.mode).toBe('login');
+    expect(googleMode('SIGNUP')).toBe('login');
+    expect(googleMode(undefined)).toBe('login');
   });
 });

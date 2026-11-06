@@ -1,6 +1,7 @@
 export * from './schemas/auth';
 export * from './schemas/company';
 export * from './schemas/job';
+export * from './schemas/jd-review';
 export * from './schemas/resume';
 export * from './schemas/publisher';
 export * from './schemas/application';

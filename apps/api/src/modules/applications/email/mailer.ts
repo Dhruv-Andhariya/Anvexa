@@ -175,10 +175,10 @@ function rawMailerFromEnv(env: NodeJS.ProcessEnv): Mailer {
   if (gmailUser && gmailPass) {
     return new SmtpMailer(
       { host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: gmailUser, pass: gmailPass } },
-      env.MAIL_FROM?.trim() || `ANVEXA <${gmailUser}>`,
+      env.MAIL_FROM?.trim() || `Anvexa <${gmailUser}>`,
     );
   }
   const url = env.SMTP_URL?.trim();
   if (!url) return new DisabledMailer();
-  return new SmtpMailer(url, env.MAIL_FROM?.trim() || 'ANVEXA <no-reply@anvexa.local>');
+  return new SmtpMailer(url, env.MAIL_FROM?.trim() || 'Anvexa <no-reply@anvexa.local>');
 }

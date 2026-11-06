@@ -15,9 +15,14 @@ export async function seedCompany(db: PrismaClient, name = 'Acme') {
 export async function seedJob(
   db: PrismaClient,
   tenantId: string,
-  opts: { title?: string; minAtsScore?: number | null; mustHaveSkills?: string[] } = {},
+  opts: { title?: string; minAtsScore?: number | null; mustHaveSkills?: string[]; experience?: [number, number] } = {},
 ) {
-  const form = { ...FORM, title: opts.title ?? FORM.title, mustHaveSkills: opts.mustHaveSkills ?? FORM.mustHaveSkills };
+  const form = {
+    ...FORM,
+    title: opts.title ?? FORM.title,
+    mustHaveSkills: opts.mustHaveSkills ?? FORM.mustHaveSkills,
+    ...(opts.experience ? { experienceMin: opts.experience[0], experienceMax: opts.experience[1] } : {}),
+  };
   const job = await db.job.create({
     data: { id: uuidv7(), tenantId, title: form.title, formData: form, status: 'APPROVED', openings: 1 },
   });
@@ -35,7 +40,7 @@ export async function seedApplication(
   db: PrismaClient,
   tenantId: string,
   job: { jobId: string; jdVersionId: string },
-  opts: { name?: string; resume?: Buffer | null; mimeType?: string } = {},
+  opts: { name?: string; resume?: Buffer | null; mimeType?: string; experienceYears?: number | null } = {},
 ) {
   const n = randomUUID().slice(0, 8);
   const candidate = await db.candidate.create({
@@ -55,6 +60,7 @@ export async function seedApplication(
       graduationYear: 2026,
       scoreType: 'CGPA',
       scoreValue: 8.4,
+      experienceYears: opts.experienceYears ?? null,
     },
   });
   if (opts.resume !== null) {

@@ -1,6 +1,6 @@
 # DSA coding assessment — integration notes
 
-Isolated DSA assessment module for ANVEXA: candidate route `/dsa/[token]` in `apps/candidate-app`, backend module `apps/api/src/modules/dsa`, code execution through a self-hosted **Piston** runner on the hosting PC (see [dsa-piston-hosting.md](dsa-piston-hosting.md)).
+Isolated DSA assessment module for Anvexa: candidate route `/dsa/[token]` in `apps/candidate-app`, backend module `apps/api/src/modules/dsa`, code execution through a self-hosted **Piston** runner on the hosting PC (see [dsa-piston-hosting.md](dsa-piston-hosting.md)).
 
 > **Status in one paragraph.** The module is **wired into the round engine** as a DSA round of a job's selection process: HR picks bank problems in the rounds editor, students are invited by email after the AI voice screening (or the previous round), take the test on the candidate page with real sandboxed execution on Piston, and the result, the cleared email or the rejection email follow automatically. Sessions, results and the monitoring record are in the database. The whole flow is described in [DSA_ASSESSMENT_ROUND.md](DSA_ASSESSMENT_ROUND.md). Sections below that talk about demo tokens describe the demo mode (`DSA_DEMO_MODE=on`). Judge0, used in an earlier iteration, was dropped (it could not run on this machine's cgroup v2) and its client code was removed.
 

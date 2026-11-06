@@ -2,7 +2,7 @@ import { CONSENT_POLICY_VERSION } from '@hireflow/contracts';
 
 /** Every piece of user-facing text on the careers site lives here, so wording changes never touch components. */
 export const CONTENT = {
-  siteName: 'ANVEXA Careers',
+  siteName: 'Anvexa Careers',
   jobPage: {
     applyNow: 'Apply now',
     closed: "We're sorry, this job is no longer open.",
@@ -45,7 +45,7 @@ export const CONTENT = {
   form: {
     heading: 'Apply for this job',
     intro: 'Takes about 3 minutes. Fields marked * are required.',
-    sections: { you: 'About you', education: 'Education', links: 'Links (optional)', resume: 'Resume', consent: 'Consent' },
+    sections: { you: 'About you', education: 'Education', experience: 'Experience', links: 'Links (optional)', resume: 'Resume', consent: 'Consent' },
     labels: {
       name: 'Full name',
       email: 'Email',
@@ -58,6 +58,7 @@ export const CONTENT = {
       graduationYear: 'Graduation year',
       scoreType: 'Score type',
       scoreValue: 'Score',
+      experienceYears: 'Total work experience (years)',
       linkedinUrl: 'LinkedIn',
       githubUrl: 'GitHub',
       portfolioUrl: 'Portfolio',
@@ -69,6 +70,10 @@ export const CONTENT = {
       resume: 'PDF or Word (.docx), up to 5 MB.',
       degree: 'For example B.E., B.Tech, BCA, MCA',
       projectUrl: 'A project you built: live website, GitHub repo, or a demo video.',
+      experienceYears: 'Full-time work experience only. Enter 0 if you are a fresher; half years are fine (e.g. 1.5).',
+      /** The job's experience range from HR, shown under the field so the student knows the requirement. */
+      experienceRequired: (min: number, max: number) =>
+        max === 0 ? 'This job is open to freshers.' : min === 0 ? `This job asks for up to ${max} years of experience.` : `This job needs ${min === max ? min : `${min}-${max}`} years of experience. Applications with less than ${min} years are not taken forward.`,
     },
     otp: {
       send: 'Send code',
@@ -82,7 +87,7 @@ export const CONTENT = {
     },
     consent: {
       dataProcessing:
-        'I agree that this company and ANVEXA may store and use my details and resume to process this job application.',
+        'I agree that this company and Anvexa may store and use my details and resume to process this job application.',
       aiEvaluation: 'I understand my resume and answers will be checked by AI first, and people make the final decision.',
       recordings: 'I agree that later test rounds may record audio/video for evaluation (optional - you can decide later).',
       policy: `Consent policy version ${CONSENT_POLICY_VERSION}. You can ask us to delete your data at any time.`,

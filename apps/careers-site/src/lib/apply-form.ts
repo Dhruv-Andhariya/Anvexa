@@ -13,6 +13,7 @@ export interface ApplyDraft {
   graduationYear: string;
   scoreType: 'CGPA' | 'PERCENTAGE';
   scoreValue: string;
+  experienceYears: string;
   linkedinUrl: string;
   githubUrl: string;
   portfolioUrl: string;
@@ -33,6 +34,7 @@ export const emptyApplyDraft: ApplyDraft = {
   graduationYear: '',
   scoreType: 'CGPA',
   scoreValue: '',
+  experienceYears: '',
   linkedinUrl: '',
   githubUrl: '',
   portfolioUrl: '',
@@ -84,6 +86,7 @@ export function validateApplyDraft(
     graduationYear: draft.graduationYear,
     scoreType: draft.scoreType,
     scoreValue: draft.scoreValue,
+    experienceYears: draft.experienceYears,
     linkedinUrl: draft.linkedinUrl,
     githubUrl: draft.githubUrl,
     portfolioUrl: draft.portfolioUrl,
@@ -115,7 +118,8 @@ export function validateApplyDraft(
 
 function friendly(field: keyof ApplyDraft, message: string): string {
   if (field === 'graduationYear') return 'Enter the year you graduate, e.g. 2026';
-  if (field === 'scoreValue' && /number/i.test(message)) return 'Enter a number';
+  if ((field === 'scoreValue' || field === 'experienceYears') && /expected number|invalid_type/i.test(message)) return 'Enter a number';
+  if (field === 'experienceYears' && /required/i.test(message)) return 'Enter your years of experience (0 if you are a fresher)';
   if (/expected|invalid_type|required/i.test(message) && !/consent/i.test(message)) return 'Required';
   return message;
 }

@@ -1,4 +1,4 @@
-"""Rubric evaluation of one GD student by an LLM (Gemini free tier, the key ANVEXA already uses).
+"""Rubric evaluation of one GD student by an LLM (Gemini free tier, the key Anvexa already uses).
 
 The model must return ONLY the JSON below; it is validated with Pydantic and the call is retried once when parsing or
 validation fails. Accent and minor grammar are never penalised; HR's own lines are context ("HR asked:"), never scored.

@@ -6,8 +6,9 @@ import { getAuthProviders, googleSignInUrl } from '@/lib/api';
 /**
  * "Continue with Google" (login and sign-up). A plain link: the browser goes to the API, then Google, then back.
  * Hidden until the API says Google sign-in is configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+ * mode "login" never creates an account (a Google account with no Anvexa account is sent to /signup); "signup" does.
  */
-export function GoogleButton({ next, label = 'Continue with Google' }: { next?: string; label?: string }) {
+export function GoogleButton({ next, label = 'Continue with Google', mode = 'login' }: { next?: string; label?: string; mode?: 'login' | 'signup' }) {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     let live = true;
@@ -21,7 +22,7 @@ export function GoogleButton({ next, label = 'Continue with Google' }: { next?: 
   return (
     <>
       <a
-        href={googleSignInUrl(next)}
+        href={googleSignInUrl(next, mode)}
         className="inline-flex items-center justify-center gap-2.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground hover:bg-accent-soft focus:outline-none focus:ring-2 focus:ring-accent/40"
       >
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48">
@@ -41,7 +42,7 @@ export function GoogleButton({ next, label = 'Continue with Google' }: { next?: 
   );
 }
 
-/** Messages for /login?oauth_error=<reason> (set by the API's Google callback). */
+/** Messages for /login?oauth_error=<reason> and /signup?oauth_error=no_account (set by the API's Google callback). */
 export const GOOGLE_ERRORS: Record<string, string> = {
   cancelled: 'Google sign-in was cancelled.',
   expired: 'The Google sign-in took too long or was opened in another browser. Please try again.',
@@ -49,6 +50,10 @@ export const GOOGLE_ERRORS: Record<string, string> = {
   unreachable: 'Could not reach Google. Please try again.',
   rejected: 'Google sign-in did not work. Please try again.',
   unverified_email: 'Your Google account email is not verified, so it cannot be used here.',
-  account_disabled: 'This ANVEXA account is disabled. Contact your Company Admin.',
+  account_disabled: 'This Anvexa account is disabled. Contact your Company Admin.',
   account_mismatch: 'This email is already linked to a different Google account. Log in with your password instead.',
+  no_account: 'There is no Anvexa account for this Google account yet. Create your account first.',
 };
+
+/** Shown on /signup when the login page sent the person here because their email has no account. */
+export const NO_ACCOUNT_NOTICE = 'There is no Anvexa account with this email yet. Create your account below, then log in.';

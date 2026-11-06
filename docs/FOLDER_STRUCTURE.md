@@ -1,4 +1,4 @@
-# ANVEXA — Folder Structure Guide
+# Anvexa — Folder Structure Guide
 
 A short tour of every folder: what it is for, who owns it, and whether it has real code yet.
 
@@ -11,7 +11,7 @@ Module numbers (M01, M02 …) refer to [ANVEXA_Documentation.md](ANVEXA_Document
 
 ## 1. The big picture
 
-ANVEXA is a **monorepo**: many apps and libraries in one git repo.
+Anvexa is a **monorepo**: many apps and libraries in one git repo.
 
 - **TypeScript side** is managed by **pnpm workspaces + Turborepo** (`apps/*`, `packages/*`, two `workers/*`).
 - **Python side** (`workers/ai-worker`) is managed separately by **uv**.
@@ -142,7 +142,7 @@ Temporal "activities" in TypeScript: the actual side effects (send email, publis
 
 | Folder | Purpose |
 |---|---|
-| `prompts/` | Versioned LLM prompts in YAML (I2). Never hard-code prompts in code. Bump `version` on any wording change — e.g. `jd_generate.v2.yaml` → `jd_generate.v3.yaml` (current: adds the company profile) |
+| `prompts/` | Versioned LLM prompts in YAML (I2). Never hard-code prompts in code. Bump `version` on any wording change — e.g. `jd_generate.v3.yaml` → `jd_generate.v4.yaml` (current: seniority profiles + style examples per level, corrections from the API fact check) |
 | `docs/` | `ANVEXA_Documentation.md` (full spec), `TEAM_GUIDE.md` (setup + workflow), this file |
 | `infra/docker/` | `docker-compose.yml` for local Postgres (with pgvector), Redis, Mailpit (fake inbox :8025). MinIO (`--profile storage`) and Temporal (`--profile workflow`) are opt-in |
 | `infra/k8s/`, `infra/terraform/` | ⬜ Production deployment, later (v1.0) |
@@ -163,7 +163,7 @@ apps/api            modules/jobs/             loads the job form + the saved com
                     ai-worker.client.ts       POST http://localhost:8000/v1/jd/generate  { ...jobForm, company }
         ▼
 workers/ai-worker   main.py → jd/generator.py builds <company_profile> + <job_requirements>
-                    llm_gateway/prompts.py    fills prompts/jd_generate.v3.yaml
+                    llm_gateway/prompts.py    fills prompts/jd_generate.v4.yaml
                     llm_gateway/gemini.py     calls Gemini, gets JSON
                     jd/generator.py           validates + cleans → JdContent
         ▲

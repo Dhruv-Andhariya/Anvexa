@@ -78,7 +78,7 @@ export const ROUND_TYPES: Record<RoundType, { label: string; interview: boolean;
 };
 
 /**
- * Round modules: separate parts of ANVEXA that run a round themselves (their own candidate page) and send the result
+ * Round modules: separate parts of Anvexa that run a round themselves (their own candidate page) and send the result
  * and answers to the assessments module. A round whose questions are not a plain online test (round engine) goes to
  * the module of its type when that module is connected, else HR runs it.
  */

@@ -4,7 +4,7 @@ import { PASSWORD_LIMITS, signupRequestSchema, type LoginCodeRequired } from '@h
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { GoogleButton } from '@/components/google-button';
+import { GOOGLE_ERRORS, GoogleButton, NO_ACCOUNT_NOTICE } from '@/components/google-button';
 import { useRefreshSession } from '@/components/session';
 import { Button, Card, ErrorNotice, Field, Spinner, inputClass } from '@/components/ui';
 import { ApiError, signup, verifySignupCode } from '@/lib/api';
@@ -13,11 +13,13 @@ import { ApiError, signup, verifySignupCode } from '@/lib/api';
  * Step A of onboarding a new company: the HR person creates their own account. Step B: /register-company.
  * With sign-up email verification on, the account is created only after the code emailed to that address is entered.
  */
-export function SignupForm() {
+export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string; noAccount?: 'google' | 'password' } = {}) {
+  // sent here by a failed login: that email / Google account has no Anvexa account yet
+  const notice = noAccount === 'google' ? GOOGLE_ERRORS.no_account : noAccount === 'password' ? NO_ACCOUNT_NOTICE : undefined;
   const router = useRouter();
   const refresh = useRefreshSession();
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail ?? '');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -157,7 +159,12 @@ export function SignupForm() {
           </h1>
           <p className="mt-1 text-sm text-muted">Next you will register your company and become its Company Admin.</p>
         </div>
-        <GoogleButton label="Sign up with Google" />
+        {notice && !error && (
+          <p role="status" className="rounded-md border border-accent/40 bg-accent-soft px-4 py-3 text-sm text-foreground">
+            {notice}
+          </p>
+        )}
+        <GoogleButton label="Sign up with Google" mode="signup" />
         <Field id="name" label="Your name" required error={errors.name}>
           <input id="name" autoComplete="name" maxLength={100} className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -204,7 +211,7 @@ export function SignupForm() {
           {busy ? 'Creating account…' : 'Create account'}
         </Button>
         <p className="text-sm text-muted">
-          Already on ANVEXA?{' '}
+          Already on Anvexa?{' '}
           <Link href="/login" className="font-medium text-accent hover:underline">
             Log in
           </Link>

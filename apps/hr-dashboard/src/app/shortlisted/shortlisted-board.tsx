@@ -316,6 +316,7 @@ function CandidateCard({
             <p>
               {c.degree} in {c.branch} · {c.college} · {c.graduationYear}
             </p>
+            {c.experienceYears !== null && <p>Experience: {experienceText(c.experienceYears)}</p>}
             <p className="text-muted">Applied {date(c.appliedAt)}</p>
           </div>
         </div>
@@ -336,7 +337,14 @@ function CandidateCard({
         </div>
       </div>
 
-      {c.status === 'SCORED' && (
+      {c.autoRejectionReason === 'EXPERIENCE_BELOW_REQUIRED' && (
+        <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+          Rejected automatically: {experienceText(c.experienceYears ?? 0)} of experience
+          {c.requiredExperienceMin !== null && `, below the ${experienceText(c.requiredExperienceMin)} this job requires`}. The resume was not
+          screened. You can still shortlist this student.
+        </p>
+      )}
+      {c.status === 'SCORED' && !c.autoRejectionReason && (
         <div className="flex flex-col gap-2 text-sm">
           {c.matchedSkills.length > 0 && <SkillRow label="Matched skills" skills={c.matchedSkills} style={GOOD} />}
           {c.missingSkills.length > 0 && <SkillRow label="Missing skills" skills={c.missingSkills} style={BAD} />}
@@ -428,8 +436,14 @@ function CandidateCard({
   );
 }
 
+/** "0 years (fresher)", "1 year", "2.5 years" */
+function experienceText(years: number): string {
+  return years === 0 ? '0 years (fresher)' : `${years} year${years === 1 ? '' : 's'}`;
+}
+
 function StatusPill({ c }: { c: ScreenedCandidate }) {
   if (c.status === 'NEEDS_REVIEW') return <span className={`${pill} ${BAD}`}>Needs HR review</span>;
+  if (c.autoRejectionReason === 'EXPERIENCE_BELOW_REQUIRED') return <span className={`${pill} ${BAD}`}>Below required experience</span>;
   if (c.status === 'SCORED') return <span className={`${pill} ${PLAIN}`}>Screened</span>;
   return (
     <span className={`${pill} ${INFO}`}>

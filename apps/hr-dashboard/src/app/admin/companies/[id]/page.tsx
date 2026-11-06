@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { CompanyAdminDetail } from './company-detail';
 
-export const metadata: Metadata = { title: 'Company · ANVEXA' };
+export const metadata: Metadata = { title: 'Company · Anvexa' };
 
 export default async function AdminCompanyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

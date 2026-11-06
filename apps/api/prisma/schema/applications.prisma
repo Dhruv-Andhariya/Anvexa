@@ -45,6 +45,9 @@ model Application {
   graduationYear          Int              @map("graduation_year")
   scoreType               ScoreType        @map("score_type")
   scoreValue              Decimal          @map("score_value") @db.Decimal(5, 2)
+  /// Total work experience in years the student entered (0 = fresher). Null for applications older than the field.
+  /// Below the job's minimum experience the application is rejected automatically (ats_evaluations.auto_rejection_reason).
+  experienceYears         Decimal?         @map("experience_years") @db.Decimal(4, 1)
   linkedinUrl             String?          @map("linkedin_url")
   githubUrl               String?          @map("github_url")
   portfolioUrl            String?          @map("portfolio_url")

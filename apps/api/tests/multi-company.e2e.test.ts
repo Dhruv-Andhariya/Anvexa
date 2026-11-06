@@ -110,7 +110,7 @@ let A: CompanyFixture;
 let B: CompanyFixture;
 
 /**
- * Full workflow for one company, the way a new company's HR uses ANVEXA:
+ * Full workflow for one company, the way a new company's HR uses Anvexa:
  * sign up -> register company (profile) -> invite HR -> job -> generate -> edit -> regenerate.
  */
 async function onboard(letter: string): Promise<CompanyFixture> {
@@ -201,14 +201,16 @@ run('multi-company isolation (real database)', () => {
   });
 
   describe('authentication', () => {
-    it('rejects anonymous requests and wrong passwords, without revealing which part was wrong', async () => {
+    it('rejects anonymous requests and wrong passwords; an unknown email is told to sign up first', async () => {
       const anon = new Browser();
       expect((await anon.call('GET', '/jobs')).status).toBe(401);
       expect((await anon.call('GET', '/auth/me')).body.code).toBe('UNAUTHENTICATED');
       const wrong = await anon.login(`admin-A-${RUN}@example.com`, 'wrong password!');
       const unknown = await anon.login(`nobody-${RUN}@example.com`, 'wrong password!');
       expect([wrong.status, unknown.status]).toEqual([401, 401]);
-      expect(wrong.body).toEqual(unknown.body);
+      expect(wrong.body.code).toBe('INVALID_CREDENTIALS');
+      // no account: the login page sends the person to /signup (sign-up already reveals EMAIL_TAKEN)
+      expect(unknown.body.code).toBe('ACCOUNT_NOT_FOUND');
     });
 
     it('rate-limits repeated failed logins', async () => {

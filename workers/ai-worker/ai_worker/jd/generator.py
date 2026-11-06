@@ -1,5 +1,9 @@
-"""M02 JD generator: JobForm + CompanyProfile -> versioned prompt -> LLM (structured JSON) -> validated
-JdContent."""
+"""M02 JD generator: JobForm + CompanyProfile -> seniority -> versioned prompt -> LLM (structured JSON) ->
+validated JdContent.
+
+The prompt gets the seniority guidance and style examples for THIS role's level (from the prompt file), and the
+API's fact-check corrections when it asks for a second draft. Grounding is enforced by the API afterwards
+(packages/contracts jd-review.ts); this module only cleans the output shape."""
 import json
 import logging
 import time
@@ -16,11 +20,13 @@ from ..llm_gateway import (
     parse_json_object,
 )
 from ..schemas import CompanyProfile, JdContent, JobForm
+from .seniority import Seniority, seniority_for
 
 log = logging.getLogger("ai_worker.jd")
 
-PROMPT_FILE = "jd_generate.v3.yaml"
+PROMPT_FILE = "jd_generate.v4.yaml"
 NO_COMPANY_PROFILE = "(not provided)"
+NO_CORRECTIONS = "(none)"
 MAX_ATTEMPTS = 2  # one automatic retry on invalid output (doc 13.1), no more - protects quota
 
 _WORK_MODES = {"ONSITE": "On-site", "HYBRID": "Hybrid", "REMOTE": "Remote"}
@@ -46,10 +52,18 @@ def generate_jd(
     company: CompanyProfile | None = None,
     *,
     budget_seconds: float | None = None,
+    corrections: list[str] | None = None,
 ) -> GeneratedJd:
     """`budget_seconds` caps the WHOLE generation (output retry, provider retries and fallback models),
     so the worker answers before the API stops waiting for it."""
-    rendered = prompt.render(requirements=requirements_block(form), company=company_block(company))
+    level = seniority_for(form)
+    rendered = prompt.render(
+        requirements=requirements_block(form),
+        company=company_block(company),
+        seniority=seniority_block(prompt, level),
+        examples=examples_block(prompt, level),
+        corrections=corrections_block(corrections),
+    )
     deadline = time.monotonic() + budget_seconds if budget_seconds else None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         if deadline is not None and time.monotonic() >= deadline:
@@ -98,6 +112,24 @@ def company_block(company: CompanyProfile | None) -> str:
     if company is None:
         return NO_COMPANY_PROFILE
     return _data_block(company.model_dump())
+
+
+def seniority_block(prompt: PromptSpec, level: Seniority) -> str:
+    """The prompt file's guidance for this level (what the role owns, which verbs fit, what it must not claim)."""
+    return str(prompt.extras.get("seniority", {}).get(level, f"Level: {level}")).strip()
+
+
+def examples_block(prompt: PromptSpec, level: Seniority) -> str:
+    """Style references for the same level only - showing other levels would blur the depth."""
+    return str(prompt.extras.get("examples", {}).get(level, "(none)")).strip()
+
+
+def corrections_block(corrections: list[str] | None) -> str:
+    if not corrections:
+        return NO_CORRECTIONS
+    lines = "\n".join(f"- {c}" for c in corrections)
+    # checker messages quote words from the previous draft - keep them inside the data tag
+    return escape_data(f"Your previous draft had these problems. Fix all of them in this draft:\n{lines}")
 
 
 def _data_block(data: dict[str, object]) -> str:

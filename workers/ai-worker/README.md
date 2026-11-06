@@ -12,7 +12,7 @@ Schemas must mirror `packages/contracts` (see `ai_worker/schemas.py`).
 ## Status
 | Endpoint | State |
 |---|---|
-| `POST /v1/jd/generate` | **Real** — Gemini via `llm_gateway`, prompt `prompts/jd_generate.v3.yaml` |
+| `POST /v1/jd/generate` | **Real** — Gemini via `llm_gateway`, prompt `prompts/jd_generate.v4.yaml` (seniority-aware; the API fact-checks each draft) |
 | `POST /v1/jd/validate` | Rule-based completeness checks only (no LLM bias/clarity check yet) |
 | `POST /v1/resume/screen` | **Real** — M10 + M11: PDF (pypdf) / DOCX (python-docx) text -> Gemini reads it against the approved JD (prompt `prompts/resume_screen.v1.yaml`) -> fixed formula in `ai_worker/scoring/ats.py` gives the explainable score (skills 40, experience 20, projects 20, achievements 10, qualifications 10). Scanned PDF (opens fine, no text) = Gemini reads the page images (prompt `prompts/resume_transcribe.v1.yaml`, first 10 pages), then the transcript is screened the normal way; its `promptVersion` becomes `resume_screen.v1+resume_transcribe.v1` and the `X-Resume-Text-Source` header is `scan` (else `file`). Damaged / password-protected PDF, empty DOCX, or a scan the model cannot read = 422 `RESUME_UNREADABLE` -> HR review |
 

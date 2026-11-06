@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { LiveDashboard } from './live-dashboard';
 
-export const metadata: Metadata = { title: 'Live group discussion · ANVEXA' };
+export const metadata: Metadata = { title: 'Live group discussion · Anvexa' };
 
 export default async function GdLivePage({ params }: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await params;
