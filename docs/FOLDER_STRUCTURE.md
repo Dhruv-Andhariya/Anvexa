@@ -1,17 +1,17 @@
-# HireFlow — Folder Structure Guide
+# ANVEXA — Folder Structure Guide
 
 A short tour of every folder: what it is for, who owns it, and whether it has real code yet.
 
 **Status key:** ✅ working code · 🟡 partial / mock · ⬜ placeholder (only a README describing the plan)
 
 Owners: **I1** = Intern 1 (Core & HR), **I2** = Intern 2 (AI), **I3** = Intern 3 (Candidate & Comms).
-Module numbers (M01, M02 …) refer to [HireFlow_AI_Documentation.md](HireFlow_AI_Documentation.md).
+Module numbers (M01, M02 …) refer to [ANVEXA_Documentation.md](ANVEXA_Documentation.md).
 
 ---
 
 ## 1. The big picture
 
-HireFlow is a **monorepo**: many apps and libraries in one git repo.
+ANVEXA is a **monorepo**: many apps and libraries in one git repo.
 
 - **TypeScript side** is managed by **pnpm workspaces + Turborepo** (`apps/*`, `packages/*`, two `workers/*`).
 - **Python side** (`workers/ai-worker`) is managed separately by **uv**.
@@ -143,7 +143,7 @@ Temporal "activities" in TypeScript: the actual side effects (send email, publis
 | Folder | Purpose |
 |---|---|
 | `prompts/` | Versioned LLM prompts in YAML (I2). Never hard-code prompts in code. Bump `version` on any wording change — e.g. `jd_generate.v2.yaml` → `jd_generate.v3.yaml` (current: adds the company profile) |
-| `docs/` | `HireFlow_AI_Documentation.md` (full spec), `TEAM_GUIDE.md` (setup + workflow), this file |
+| `docs/` | `ANVEXA_Documentation.md` (full spec), `TEAM_GUIDE.md` (setup + workflow), this file |
 | `infra/docker/` | `docker-compose.yml` for local Postgres (with pgvector), Redis, Mailpit (fake inbox :8025). MinIO (`--profile storage`) and Temporal (`--profile workflow`) are opt-in |
 | `infra/k8s/`, `infra/terraform/` | ⬜ Production deployment, later (v1.0) |
 | `seed/` | Demo data and sample resumes (`seed/resumes/`) for testing |

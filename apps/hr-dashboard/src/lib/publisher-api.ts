@@ -54,7 +54,7 @@ export async function call<T>(method: string, path: string, body: unknown, parse
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') throw err;
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the HireFlow API. Check that it is running and try again.');
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the ANVEXA API. Check that it is running and try again.');
   }
   if (res.status === 204) return undefined as T;
   const json: unknown = await res.json().catch(() => undefined);

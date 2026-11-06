@@ -800,7 +800,7 @@ export function ExamRoom({ token }: { token: string }) {
               <path fill="currentColor" d="M4 4h7v9h10V4h7v24h-7v-9H11v9H4z" />
             </svg>
             <p className="text-base font-semibold leading-tight">
-              HireFlow
+              ANVEXA
               <br />
               Careers
             </p>

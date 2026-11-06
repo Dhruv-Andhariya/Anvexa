@@ -59,7 +59,7 @@ export function RegisterCompany() {
         <h2 className="text-base font-semibold">What happens next</h2>
         <ol className="list-decimal space-y-1.5 pl-5 text-muted">
           <li>Your company is created and you become its Company Admin.</li>
-          <li>Create jobs. HireFlow writes each job description from these details and the job requirements.</li>
+          <li>Create jobs. ANVEXA writes each job description from these details and the job requirements.</li>
           <li>Invite your HR team from the Team page.</li>
         </ol>
         {session.companies.length > 0 && (

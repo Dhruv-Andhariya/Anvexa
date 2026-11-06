@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { PersonalInterviewBoard } from './pi-board';
 
-export const metadata: Metadata = { title: 'Personal interview · HireFlow AI' };
+export const metadata: Metadata = { title: 'Personal interview · ANVEXA' };
 
 export default function PersonalInterviewPage() {
   return (

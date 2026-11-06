@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { AssessmentsBoard } from './assessments-board';
 
-export const metadata: Metadata = { title: 'Assessments · HireFlow AI' };
+export const metadata: Metadata = { title: 'Assessments · ANVEXA' };
 
 export default function AssessmentsPage() {
   return (

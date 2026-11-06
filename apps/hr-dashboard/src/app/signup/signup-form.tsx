@@ -204,7 +204,7 @@ export function SignupForm() {
           {busy ? 'Creating account…' : 'Create account'}
         </Button>
         <p className="text-sm text-muted">
-          Already on HireFlow?{' '}
+          Already on ANVEXA?{' '}
           <Link href="/login" className="font-medium text-accent hover:underline">
             Log in
           </Link>

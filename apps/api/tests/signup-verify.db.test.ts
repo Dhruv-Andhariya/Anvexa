@@ -36,7 +36,7 @@ describe.skipIf(!DB)('sign-up email verification (real database)', () => {
     return { status: res.status, body: text ? JSON.parse(text) : undefined, cookie: res.headers.get('set-cookie')?.split(';')[0] };
   };
   const me = async (cookie: string) => (await fetch(`${base}/auth/me`, { headers: { cookie } })).status;
-  const lastCode = () => /HireFlow account is: (\d{6})/.exec(sent.at(-1)!.message.text)![1]!;
+  const lastCode = () => /ANVEXA account is: (\d{6})/.exec(sent.at(-1)!.message.text)![1]!;
   const wrong = (code: string) => String((Number(code) + 1) % 1_000_000).padStart(6, '0');
   const users = (email: string) => prisma.user.count({ where: { email } });
   const start = (email: string, name = 'New HR') => call('/auth/signup', { name, email, password: PASSWORD });

@@ -13,8 +13,8 @@
 $ErrorActionPreference = 'Continue'
 # One run at a time (the 5-minute watchdog, VS Code's folder-open task and a manual run may overlap): two runs at once
 # could each start a tunnel and email different links.
-$mutex = New-Object System.Threading.Mutex($false, 'Local\HireFlowStartPublic')
-if (-not $mutex.WaitOne(0)) { Write-Host 'HireFlow start-public is already running - nothing to do'; exit 0 }
+$mutex = New-Object System.Threading.Mutex($false, 'Local\ANVEXAStartPublic')
+if (-not $mutex.WaitOne(0)) { Write-Host 'ANVEXA start-public is already running - nothing to do'; exit 0 }
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root '.env'
 $logs = Join-Path $env:LOCALAPPDATA 'hireflow\logs'
@@ -97,7 +97,7 @@ function StopPort($port) {
   taskkill /PID $top /T /F *> $null
 }
 
-Say '--- starting HireFlow public stack ---'
+Say '--- starting ANVEXA public stack ---'
 
 # 1. Docker Desktop
 docker info *> $null

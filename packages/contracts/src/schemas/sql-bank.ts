@@ -134,7 +134,7 @@ export interface SqlBankQuestion {
   marks: number;
   topics: string[];
   active: boolean;
-  /** Set on the starter questions HireFlow ships (so adding them twice does nothing). */
+  /** Set on the starter questions ANVEXA ships (so adding them twice does nothing). */
   seedKey: string | null;
   problem: SqlProblemSpec;
   createdAt: string;

@@ -110,7 +110,7 @@ let A: CompanyFixture;
 let B: CompanyFixture;
 
 /**
- * Full workflow for one company, the way a new company's HR uses HireFlow:
+ * Full workflow for one company, the way a new company's HR uses ANVEXA:
  * sign up -> register company (profile) -> invite HR -> job -> generate -> edit -> regenerate.
  */
 async function onboard(letter: string): Promise<CompanyFixture> {

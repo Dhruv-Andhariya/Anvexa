@@ -454,7 +454,7 @@ const CONNECT_RESULT: Record<string, { ok: boolean; text: string }> = {
   },
   wrong_account: {
     ok: false,
-    text: 'That LinkedIn account is not allowed to post for HireFlow. Log in to LinkedIn with the approved account and connect again.',
+    text: 'That LinkedIn account is not allowed to post for ANVEXA. Log in to LinkedIn with the approved account and connect again.',
   },
   failed: { ok: false, text: 'LinkedIn did not accept the connection. Please try again.' },
 };

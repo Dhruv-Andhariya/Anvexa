@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { JobReview } from './job-review';
 
-export const metadata: Metadata = { title: 'Review job · HireFlow AI' };
+export const metadata: Metadata = { title: 'Review job · ANVEXA' };
 
 export default async function JobPage({
   params,

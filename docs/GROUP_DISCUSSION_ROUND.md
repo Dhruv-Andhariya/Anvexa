@@ -7,7 +7,7 @@ student, and makes the final selection after an AI evaluation of every student.
 Built like the aptitude round ([APTITUDE_ASSESSMENT_ROUND.md](APTITUDE_ASSESSMENT_ROUND.md)): one API, one database,
 HR's normal login, the round / topics / pass rule from the Publish page. **Everything is free**: LiveKit Cloud's free
 plan (video), students' own browsers record their audio (no paid recorder), Whisper and the moderator's voice (Piper)
-run on the server's own CPU, the evaluation uses the Gemini key HireFlow already has (free tier).
+run on the server's own CPU, the evaluation uses the Gemini key ANVEXA already has (free tier).
 
 | Part | Where |
 |---|---|

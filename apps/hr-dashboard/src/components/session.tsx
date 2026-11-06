@@ -80,7 +80,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   if (state.kind === 'error') {
     return (
       <Page>
-        <ErrorNotice title="Could not reach HireFlow" message={state.message} action={<Button onClick={() => load()}>Try again</Button>} />
+        <ErrorNotice title="Could not reach ANVEXA" message={state.message} action={<Button onClick={() => load()}>Try again</Button>} />
       </Page>
     );
   }
@@ -109,7 +109,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 /** Explains why a page is unavailable instead of showing API errors. The API enforces the same rules. */
 function Gate({ session, pathname, children }: { session: Session; pathname: string; children: ReactNode }) {
   if (pathname.startsWith('/admin')) {
-    return session.user.isPlatformAdmin ? children : <Notice title="Platform Admins only" text="This page manages all companies on HireFlow." />;
+    return session.user.isPlatformAdmin ? children : <Notice title="Platform Admins only" text="This page manages all companies on ANVEXA." />;
   }
   if (pathname === REGISTER_PATH) return children;
   if (!session.company) {
@@ -119,7 +119,7 @@ function Gate({ session, pathname, children }: { session: Session; pathname: str
     return (
       <Notice
         title={`${session.company.name} is suspended`}
-        text="Jobs and recruitment data are unavailable while the company account is suspended. Contact HireFlow support."
+        text="Jobs and recruitment data are unavailable while the company account is suspended. Contact ANVEXA support."
       />
     );
   }
@@ -197,7 +197,7 @@ function AppHeader({ session, onChanged }: { session: Session; onChanged: () => 
     <header className="border-b border-border bg-surface">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
         <Link href={usable ? '/jobs' : '/admin'} className="flex items-center gap-3">
-          <span className="text-base font-semibold tracking-tight">HireFlow AI</span>
+          <span className="text-base font-semibold tracking-tight">ANVEXA</span>
           <span className="text-sm text-muted">HR Dashboard</span>
         </Link>
         <nav aria-label="Main" className="flex flex-wrap gap-1 text-sm">

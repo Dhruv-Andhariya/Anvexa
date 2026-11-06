@@ -23,8 +23,8 @@ def find_repo_root(start: Path | None = None) -> Path:
 
 @lru_cache(maxsize=1)
 def load_env() -> Path | None:
-    """Load <repo root>/.env (or $HIREFLOW_ENV_FILE). Returns the file loaded, if any."""
-    explicit = os.environ.get("HIREFLOW_ENV_FILE")
+    """Load <repo root>/.env (or $ANVEXA_ENV_FILE). Returns the file loaded, if any."""
+    explicit = os.environ.get("ANVEXA_ENV_FILE")
     env_file = Path(explicit) if explicit else find_repo_root() / ".env"
     if env_file.is_file():
         load_dotenv(env_file, override=False)

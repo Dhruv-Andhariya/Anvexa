@@ -20,7 +20,7 @@ Project documentation. Update when a module, event or version changes.
 | [HIRING_PIPELINE.md](HIRING_PIPELINE.md) | Rules between the rounds: stages, Stage 2 overall criterion, rejection reasons, rejection emails on / off, GD rubric, Personal interview section, freezing, API, tests |
 | [SCREENING_ROUND.md](SCREENING_ROUND.md) | M12 AI voice screening round: flow, voice architecture, security/privacy, running, tests, deployment plan, limits |
 | [PROJECT_MAP.md](PROJECT_MAP.md) | Simple one-file map: every folder, how apps/API/AI worker/database are wired, main flows, where to change what |
-| [HireFlow_AI_Documentation.md](HireFlow_AI_Documentation.md) | Full product + architecture spec |
+| [ANVEXA_Documentation.md](ANVEXA_Documentation.md) | Full product + architecture spec |
 | [TEAM_GUIDE.md](TEAM_GUIDE.md) | Team workflow, setup, conventions |
 | [FOLDER_STRUCTURE.md](FOLDER_STRUCTURE.md) | Every folder: purpose, owner, and what is built vs. placeholder |
 | [JD_WORKFLOW.md](JD_WORKFLOW.md) | The full JD flow (company profile → job → AI JD → HR approval): how it was built, step by step, and how to run, test, and extend it |

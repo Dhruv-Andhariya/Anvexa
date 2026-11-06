@@ -10,7 +10,7 @@ const oneLine = (s: string) => s.replace(/[\r\n\t]+/g, ' ').trim();
 
 const ROLE_LABEL: Record<CompanyRole, string> = { COMPANY_ADMIN: 'Company Admin', HR_MEMBER: 'HR Member' };
 
-/** "Join <company> on HireFlow" email. Contains only the company, the inviter, the role and the one-time link. */
+/** "Join <company> on ANVEXA" email. Contains only the company, the inviter, the role and the one-time link. */
 export function buildInvitationEmail(i: {
   companyName: string;
   inviterName: string | null;
@@ -26,7 +26,7 @@ export function buildInvitationEmail(i: {
   const text = [
     'Hi,',
     '',
-    `${who} to join ${company} on HireFlow as ${role}. To accept, open this link:`,
+    `${who} to join ${company} on ANVEXA as ${role}. To accept, open this link:`,
     '',
     i.link,
     '',
@@ -36,11 +36,11 @@ export function buildInvitationEmail(i: {
   const html = `<!doctype html>
 <html lang="en"><body style="font-family:Arial,Helvetica,sans-serif;color:#1f2933;line-height:1.5;max-width:560px;margin:0 auto;padding:16px">
 <p>Hi,</p>
-<p>${escapeHtml(who)} to join <strong>${escapeHtml(company)}</strong> on HireFlow as <strong>${role}</strong>.</p>
+<p>${escapeHtml(who)} to join <strong>${escapeHtml(company)}</strong> on ANVEXA as <strong>${role}</strong>.</p>
 <p><a href="${escapeHtml(i.link)}" style="display:inline-block;background:#4f6bed;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Accept invitation</a></p>
 <p style="font-size:13px;color:#52606d">Or open this link: ${escapeHtml(i.link)}</p>
 <p>The link works once and expires on ${escapeHtml(expires)} (IST).</p>
 <p>If you were not expecting this, ignore this email - nothing happens without you opening the link.</p>
 </body></html>`;
-  return { subject: `Join ${company} on HireFlow`, text, html };
+  return { subject: `Join ${company} on ANVEXA`, text, html };
 }

@@ -56,7 +56,7 @@ export const sendDecisionEmails = (kind: CandidateEmailKind, applicationIds: str
 export async function fetchResumeBlob(applicationId: string, opts: Options = {}): Promise<Blob> {
   const fetchImpl = opts.fetch ?? fetch;
   const res = await fetchImpl(resumeDownloadUrl(applicationId, opts.baseUrl ?? API_URL), { credentials: 'include', signal: opts.signal }).catch(() => {
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the HireFlow API.');
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the ANVEXA API.');
   });
   if (!res.ok) throw new ApiError(res.status, `HTTP_${res.status}`, 'The resume could not be loaded.');
   return res.blob();

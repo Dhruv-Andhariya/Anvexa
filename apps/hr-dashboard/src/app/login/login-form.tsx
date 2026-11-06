@@ -169,7 +169,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
           {busy ? 'Logging in…' : 'Log in'}
         </Button>
         <p className="text-sm text-muted">
-          New company on HireFlow?{' '}
+          New company on ANVEXA?{' '}
           <Link href="/signup" className="font-medium text-accent hover:underline">
             Create an account
           </Link>
