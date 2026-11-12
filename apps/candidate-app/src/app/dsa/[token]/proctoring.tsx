@@ -1,6 +1,6 @@
 'use client';
 
-import type { CameraAlert } from '@hireflow/contracts';
+import type { CameraAlert, ProctorCandidateWarning } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card } from '@/components/ui';
 import { ApiError, sendProctorEvents, type ProctorEventInput, type ProctorInputType, type ProctoringConfig } from '@/lib/dsa-api';
@@ -44,6 +44,8 @@ interface Options {
   serverNow: () => number;
   /** Called when the server ended the attempt (policy). */
   onEnded: () => void;
+  /** The warning number already shown before this page was (re)loaded: it is not shown again. */
+  shownWarning?: number;
 }
 
 export interface Notice {
@@ -52,6 +54,11 @@ export interface Notice {
 }
 
 const CLIENT_DEDUPE_MS = 300;
+
+/** An id per event (the server counts a retried event once). */
+let eventSeq = 0;
+const newEventId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `ev-${Date.now().toString(36)}-${(eventSeq++).toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 // A focus loss only counts if it lasts this long. It also lets a blur turn out to be a tab switch (reported once, as
 // that), and ignores flickers (a notification toast, a system pop-up) that are not a deliberate action.
 const BLUR_SETTLE_MS = 1000;
@@ -63,12 +70,16 @@ const MAX_QUEUE = 200;
  * It reports to the server (the source of truth) and shows the candidate what was recorded.
  * It cannot see other applications or block operating-system actions.
  */
-export function useProctoring({ token, config, active, resumed, serverNow, onEnded }: Options) {
+export function useProctoring({ token, config, active, resumed, serverNow, onEnded, shownWarning = 0 }: Options) {
   const [fullscreen, setFullscreen] = useState(inFullscreen);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [violationCount, setViolationCount] = useState(0);
   const [level, setLevel] = useState<'ok' | 'warning' | 'final_warning'>('ok');
   const [strikesUsed, setStrikesUsed] = useState(0);
+  /** A warning the server just issued: shown as a dialog until the candidate confirms it. */
+  const [warning, setWarning] = useState<ProctorCandidateWarning | null>(null);
+  const lastWarning = useRef(shownWarning);
+  lastWarning.current = Math.max(lastWarning.current, shownWarning);
 
   const queue = useRef<ProctorEventInput[]>([]);
   const flushTimer = useRef<number | null>(null);
@@ -95,7 +106,12 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
           setViolationCount(res.violationCount);
           setStrikesUsed(res.strikesUsed);
           setLevel(res.level);
-          if (res.ended) onEndedRef.current();
+          // the server decides the warnings (never this page): show each new one once
+          if (res.warning && res.warning.warningNumber > lastWarning.current && !res.ended) {
+            lastWarning.current = res.warning.warningNumber;
+            setWarning(res.warning);
+          }
+          if (res.ended || res.terminated) onEndedRef.current();
         } catch (err) {
           // Network trouble: keep the events and try again shortly. A refusal (assessment over, bad request) drops them.
           if (err instanceof ApiError && err.status !== 0 && err.status !== 503 && err.status !== 429) break;
@@ -116,7 +132,7 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
       if (now - (lastEmit.current[key] ?? 0) < CLIENT_DEDUPE_MS) return; // one action reported twice (key + clipboard event)
       lastEmit.current[key] = now;
       if (queue.current.length >= MAX_QUEUE) queue.current.shift();
-      queue.current.push({ type, at: at ?? serverNowRef.current(), ...(detail ? { detail } : {}), ...(extra ?? {}) });
+      queue.current.push({ type, at: at ?? serverNowRef.current(), eventId: newEventId(), ...(detail ? { detail } : {}), ...(extra ?? {}) });
       const text = NOTICE_TEXT[type];
       if (text) setNotice({ id: ++noticeId.current, text });
       if (flushTimer.current === null) flushTimer.current = window.setTimeout(() => void flush(), FLUSH_DELAY_MS);
@@ -265,10 +281,40 @@ export function useProctoring({ token, config, active, resumed, serverNow, onEnd
     [enabled, emit],
   );
 
-  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled, report, reportCamera };
+  const dismissWarning = useCallback(() => setWarning(null), []);
+
+  return { fullscreen, notice, violationCount, level, strikesUsed, flush, reenter, enabled, report, reportCamera, warning, dismissWarning };
 }
 
 // ---------------------------------------------------------------- UI
+
+/** Warning 1 / Warning 2 from the server, with what was detected. The candidate confirms it to continue. */
+export function WarningDialog({ warning, onClose }: { warning: ProctorCandidateWarning; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4" role="alertdialog" aria-modal="true" aria-labelledby="warn-title" aria-describedby="warn-text">
+      <Card className="flex w-full max-w-md flex-col gap-3 border-danger/40 p-5">
+        <h2 id="warn-title" className="text-lg font-semibold tracking-tight text-danger">
+          Warning {warning.warningNumber} of {warning.maxWarnings}
+        </h2>
+        <p id="warn-text" className="text-sm">
+          {warning.message}
+        </p>
+        {warning.reason && (
+          <p className="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted">
+            <span className="font-medium text-foreground">What was detected: </span>
+            {warning.reason}
+          </p>
+        )}
+        <p className="text-xs text-muted">The timer keeps running. Detections are possible incidents for the hiring team to review, not proof on their own.</p>
+        <div>
+          <Button variant="primary" onClick={onClose} autoFocus>
+            I understand
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
 
 /** Blocks the assessment until full screen is back (policy "block"), or shows a banner (policy "warn"). */
 export function FullscreenGate({ mode, onReenter, strikesUsed, strikesAllowed }: { mode: 'block' | 'warn'; onReenter: () => void; strikesUsed: number; strikesAllowed: number }) {

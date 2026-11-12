@@ -1,6 +1,6 @@
 'use client';
 
-import type { FaceLandmarker } from '@mediapipe/tasks-vision';
+import type { FaceLandmarker, ObjectDetector } from '@mediapipe/tasks-vision';
 import { CameraRuleEngine, type CameraAlert } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Spinner } from '@/components/ui';
@@ -14,12 +14,16 @@ import {
   type CameraPermission,
   type CameraProblem,
 } from '@/lib/camera';
-import { loadFaceLandmarker, toMeasures } from './face-model';
+import { loadFaceLandmarker, loadObjectDetector, toDetections, toMeasures } from './face-model';
 
 /** Frames analysed per second; slowed down on weak computers so the page stays responsive. */
 const FRAME_MS = 200;
 const SLOW_FRAME_MS = 500;
 const SLOW_DETECT_MS = 80;
+/** The object detector (people, phones) is heavier: about once a second, every 2 s on a weak computer. */
+const OBJECT_MS = 1000;
+const SLOW_OBJECT_MS = 2000;
+const SLOW_OBJECT_DETECT_MS = 150;
 
 export type CameraStatus = 'off' | 'starting' | 'on' | 'error';
 /** What the candidate's own preview says (live, never sent): a face, none, or more than one. */
@@ -37,9 +41,10 @@ interface Options {
 }
 
 /**
- * The webcam, analysed in the browser with MediaPipe Face Landmarker. Each frame is reduced to a few numbers (4 face
- * points, eye scores) that the shared rules turn into rare, grouped alerts; frames, images and landmarks never leave
- * this function.
+ * The webcam, analysed in the browser with MediaPipe: Face Landmarker about 5 times a second (face in view, head pose,
+ * eyes) and an Object Detector about once a second (people and phones in view). Each frame is reduced to a few numbers
+ * (4 face points, eye scores, labels with scores) that the shared rules turn into rare, grouped alerts; frames, images
+ * and landmarks never leave this function.
  *
  * Permission: when the site is already allowed the camera turns on by itself (also after a reload mid-test); when the
  * browser has not asked yet, `start()` (from a click) makes it ask; when it is blocked, the page explains how to allow
@@ -58,6 +63,9 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
   const previews = useRef(new Set<HTMLVideoElement>());
   const landmarker = useRef<FaceLandmarker | null>(null);
   const model = useRef<Promise<FaceLandmarker> | null>(null);
+  /** The people / phone detector; null when it could not load (the face checks still run). */
+  const detector = useRef<ObjectDetector | null>(null);
+  const detectorLoad = useRef<Promise<ObjectDetector | null> | null>(null);
   const starting = useRef(false);
   /** When the model's runtime last crashed (a second crash within a minute stops the check). */
   const lastCrash = useRef(0);
@@ -99,6 +107,20 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
     return model.current;
   }, []);
 
+  /** A technical alert (never misconduct): the check could not run. Only reported while the attempt runs. */
+  const unavailable = useCallback((why: string) => {
+    if (activeRef.current) engine.current.unavailable(serverNowRef.current(), why).forEach((a) => onAlertRef.current(a));
+  }, []);
+
+  /** The people / phone detector, loaded once in the background. A failure leaves the face checks running. */
+  const loadDetector = useCallback(() => {
+    detectorLoad.current ??= loadObjectDetector().catch(() => {
+      detectorLoad.current = null;
+      return null;
+    });
+    return detectorLoad.current;
+  }, []);
+
   const showPreview = (el: HTMLVideoElement, s: MediaStream | null) => {
     if (el.srcObject !== s) el.srcObject = s;
     if (s) void el.play().catch(() => undefined);
@@ -138,6 +160,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
       } finally {
         setPreparing(false);
       }
+      detector.current ??= await loadDetector();
       // a hidden element for the analysis, so it does not depend on which screen shows the preview
       const v = video.current ?? document.createElement('video');
       v.muted = true;
@@ -152,7 +175,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
     } finally {
       starting.current = false;
     }
-  }, [enabled, lost, loadModel, release]);
+  }, [enabled, lost, loadModel, loadDetector, release]);
 
   /** A preview <video> (the candidate's own picture). Several may exist; all show the same stream. */
   const preview = useCallback((el: HTMLVideoElement | null) => {
@@ -165,6 +188,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
   useEffect(() => {
     if (!enabled) return;
     void loadModel().catch(() => undefined); // errors show when the candidate turns the camera on
+    void loadDetector();
     let stop: (() => void) | null = null;
     let alive = true;
     void followCameraPermission((p) => alive && setPermission(p)).then((s) => {
@@ -175,7 +199,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
       alive = false;
       stop?.();
     };
-  }, [enabled, loadModel]);
+  }, [enabled, loadModel, loadDetector]);
 
   // allowed already (or just allowed after being blocked): no need to ask, the camera turns on by itself
   useEffect(() => {
@@ -198,6 +222,9 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
 
     let lastTs = 0;
     let stopped = false;
+    let lastObjects = -Infinity;
+    let objectEvery = OBJECT_MS;
+    let objectWarned = false;
 
     /**
      * The model's runtime crashed ("Aborted()"): every later frame would fail too. Throw this instance away and load a
@@ -216,6 +243,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
       const now = Date.now();
       if (now - lastCrash.current < 60_000) {
         lastCrash.current = now;
+        unavailable('the face check stopped working');
         release();
         setProblem('model');
         setStatus('error');
@@ -227,16 +255,47 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
         stopped = false;
         timer = window.setTimeout(tick, every);
       } catch {
+        unavailable('the face check could not be restarted');
         release();
         setProblem('model');
         setStatus('error');
       }
     };
 
+    /** People and phones in view, about once a second (never every frame). A detector failure only disables it. */
+    const detectObjects = (v: HTMLVideoElement, ts: number) => {
+      const od = detector.current;
+      if (!od) {
+        if (!objectWarned && activeRef.current) {
+          objectWarned = true;
+          unavailable('people / phone check unavailable');
+        }
+        return;
+      }
+      const began = performance.now();
+      try {
+        const found = toDetections(od.detectForVideo(v, ts), v.videoWidth, v.videoHeight);
+        if (activeRef.current) engine.current.pushObjects(serverNowRef.current(), found).forEach((a) => onAlertRef.current(a));
+      } catch {
+        detector.current = null; // broken: the face checks continue, HR sees "check unavailable"
+        try {
+          od.close();
+        } catch {
+          // already closed
+        }
+      }
+      objectEvery = performance.now() - began > SLOW_OBJECT_DETECT_MS ? SLOW_OBJECT_MS : OBJECT_MS;
+    };
+
     const tick = () => {
       if (stopped) return;
       const v = video.current;
       const lm = landmarker.current;
+      // a hidden tab is already reported as a tab switch, and the browser slows timers there: nothing to analyse
+      if (document.hidden) {
+        timer = window.setTimeout(tick, SLOW_FRAME_MS);
+        return;
+      }
       // a frame with no picture yet (camera warming up, resizing) cannot be analysed
       if (v && lm && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
         const began = performance.now();
@@ -262,6 +321,11 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
           frame += 1;
           setFace(faces.length === 0 ? 'none' : faces.length > 1 ? 'many' : 'ok');
           if (activeRef.current) engine.current.push(serverNowRef.current(), faces, brightness).forEach((a) => onAlertRef.current(a));
+          if (activeRef.current && began - lastObjects >= objectEvery) {
+            lastObjects = began;
+            lastTs += 1; // the detectors need strictly increasing frame times too
+            detectObjects(v, lastTs);
+          }
         } catch {
           // one frame that could not be read (e.g. the video resized): skip it
         }
@@ -277,7 +341,7 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
       stopped = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [status, loadModel, release]);
+  }, [status, loadModel, release, unavailable]);
 
   // stop everything when the page goes away. The closed model is forgotten everywhere (also the preloaded promise):
   // React may mount the page again (development mode does it on purpose) and must then build a fresh one.
@@ -285,10 +349,14 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
     () => () => {
       release();
       const lm = landmarker.current;
+      const od = detector.current;
       landmarker.current = null;
       model.current = null;
+      detector.current = null;
+      detectorLoad.current = null;
       try {
         lm?.close();
+        od?.close();
       } catch {
         // already closed
       }

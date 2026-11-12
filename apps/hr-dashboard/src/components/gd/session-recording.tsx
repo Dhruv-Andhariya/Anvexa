@@ -24,7 +24,7 @@ export function SessionRecording({ batchId, audio, title }: { batchId: string; a
       </audio>
       <p className="text-xs text-muted">
         {length(audio.durationMs)} · {size(audio.bytes)} · built {built.format(new Date(audio.createdAt))} ·{' '}
-        <a href={src} download className="text-accent hover:underline">
+        <a href={src} download className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           Download
         </a>
       </p>

@@ -84,7 +84,7 @@ export function NewJob() {
   if (company.kind === 'loading') {
     return (
       <Card className="flex min-h-64 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading your company profile…
+        <Spinner className="text-muted" /> Loading your company profile…
       </Card>
     );
   }
@@ -100,7 +100,7 @@ export function NewJob() {
   if (!company.profile) {
     return (
       <Card className="flex flex-col items-start gap-3">
-        <p className="text-sm font-medium text-accent">Step 1 of 4 is missing</p>
+        <p className="text-sm font-medium text-muted">Step 1 of 4 is missing</p>
         <h2 className="text-lg font-semibold">Save your company profile first</h2>
         <p className="max-w-xl text-sm text-muted">
           The AI needs your company details to describe the company accurately in the job description. You only do this once.
@@ -161,7 +161,7 @@ export function NewJob() {
         </div>
         <CompanyFacts profile={company.profile} />
         {isCompanyAdmin(session) && (
-          <Link href="/company?next=/jobs/new" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/company?next=/jobs/new" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Edit company profile
           </Link>
         )}

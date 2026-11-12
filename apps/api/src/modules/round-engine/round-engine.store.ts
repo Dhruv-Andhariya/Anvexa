@@ -160,6 +160,15 @@ export abstract class RoundEngineStore {
   abstract saveAnswers(attemptId: string, revision: number, answers: StoredAnswers): Promise<number | null>;
   /** IN_PROGRESS -> SUBMITTED / TIMED_OUT, once. Optional final answers (applied only when newer). true = this call finished it. */
   abstract finishAttempt(attemptId: string, status: Exclude<AttemptStatus, 'IN_PROGRESS'>, at: Date, final?: { revision: number; answers: StoredAnswers }): Promise<boolean>;
+  /**
+   * DSA / SQL coding attempt terminated by its proctoring warning limit (decided by the coding page's warning manager):
+   * IN_PROGRESS -> TERMINATED, once, with the saved progress, the warning count, the reason and an integrity review for
+   * HR (nothing moves on until HR decided). true = this call terminated it.
+   */
+  abstract terminateCodingAttempt(
+    attemptId: string,
+    t: { at: Date; reason: string; warningCount: number; protection: AssessmentProtectionSettings; state: CodingState },
+  ): Promise<boolean>;
   abstract setSystemPassed(attemptId: string, passed: boolean): Promise<void>;
   /** Takes the right to run the next step (only one caller ever gets true). */
   abstract claimProgress(attemptId: string, at: Date): Promise<boolean>;
@@ -347,6 +356,26 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
       const done = await tx.roundAttempt.updateMany({ where: { id: attemptId, status: 'IN_PROGRESS' }, data: { status, submittedAt: at } });
       return done.count > 0;
     });
+  }
+
+  async terminateCodingAttempt(
+    attemptId: string,
+    t: { at: Date; reason: string; warningCount: number; protection: AssessmentProtectionSettings; state: CodingState },
+  ) {
+    const r = await this.db.roundAttempt.updateMany({
+      where: { id: attemptId, status: 'IN_PROGRESS' },
+      data: {
+        status: 'TERMINATED',
+        submittedAt: t.at,
+        terminatedAt: t.at,
+        terminationReason: t.reason.slice(0, 300),
+        warningCount: t.warningCount,
+        integrityStatus: 'INTEGRITY_VIOLATION_REVIEW',
+        protection: t.protection as unknown as Prisma.InputJsonObject,
+        codingState: t.state as unknown as Prisma.InputJsonObject,
+      },
+    });
+    return r.count > 0;
   }
 
   async setSystemPassed(attemptId: string, passed: boolean) {

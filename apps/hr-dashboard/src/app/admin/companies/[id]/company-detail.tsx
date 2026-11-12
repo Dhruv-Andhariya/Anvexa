@@ -38,7 +38,7 @@ export function CompanyAdminDetail({ id }: { id: string }) {
   if (!company) {
     return (
       <Card className="flex min-h-40 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading company…
+        <Spinner className="text-muted" /> Loading company…
       </Card>
     );
   }
@@ -64,7 +64,7 @@ export function CompanyAdminDetail({ id }: { id: string }) {
           <Link href="/admin" className="text-sm text-muted hover:text-foreground">
             ← Companies
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{company.name}</h1>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight">{company.name}</h1>
           <p className="mt-1 text-sm text-muted">
             {company.slug} · {company.jobCount} job{company.jobCount === 1 ? '' : 's'} · registered{' '}
             {new Date(company.createdAt).toLocaleDateString()} ·{' '}

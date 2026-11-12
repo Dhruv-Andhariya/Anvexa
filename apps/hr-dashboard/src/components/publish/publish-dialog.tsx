@@ -254,7 +254,7 @@ export function PublishDialog({ job, onClose, onPublished }: { job: PublishableJ
               {notice && <p className="rounded-md border border-success/40 bg-success-soft px-4 py-2 text-sm text-success">{notice}</p>}
               {rounds.kind === 'loading' ? (
                 <p className="flex items-center gap-2 text-sm text-muted">
-                  <Spinner className="text-accent" /> Loading rounds…
+                  <Spinner className="text-muted" /> Loading rounds…
                 </p>
               ) : rounds.kind === 'error' ? (
                 <p role="alert" className="text-sm text-danger">

@@ -1,5 +1,5 @@
 // The browser talks ONLY to the Anvexa API. The code runner (Piston) is reachable only from the backend.
-import type { CameraEventType } from '@hireflow/contracts';
+import type { CameraEventType, ProctorCandidateWarning } from '@hireflow/contracts';
 
 /**
  * Browser: same-origin /api/v1/dsa/*, forwarded to the API by next.config.ts, so the page works from its public link
@@ -106,6 +106,8 @@ export interface ProctorEventInput {
   /** AI camera alerts only: how long the behaviour lasted, and how sure the check was (0..1). */
   durationMs?: number;
   confidence?: number;
+  /** This page's own id for the event: a retry after a lost answer is then counted once. */
+  eventId?: string;
 }
 
 export interface ProctoringConfig {
@@ -129,6 +131,9 @@ export interface ProctoringState extends ProctoringConfig {
   level: 'ok' | 'warning' | 'final_warning';
   strikesAllowed: number;
   strikesUsed: number;
+  /** The latest warning the server issued (missing from older API versions). */
+  warning?: ProctorCandidateWarning | null;
+  terminated?: boolean;
 }
 
 export interface ProctorRecordResponse {
@@ -139,6 +144,9 @@ export interface ProctorRecordResponse {
   strikesAllowed: number;
   strikesUsed: number;
   ended: boolean;
+  /** The latest warning the server issued, worded for the candidate (missing from older API versions). */
+  warning?: ProctorCandidateWarning | null;
+  terminated?: boolean;
 }
 
 export interface FinalResult {

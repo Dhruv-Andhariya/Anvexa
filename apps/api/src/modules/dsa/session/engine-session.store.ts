@@ -71,6 +71,6 @@ export class EngineSessionStore implements SessionStore {
       else await this.engine.saveCodingProgress(session.token, toState(session));
       return;
     }
-    await this.engine.finishCodingAttempt(session.token, session.finishReason ?? 'submitted', toState(session));
+    await this.engine.finishCodingAttempt(session.token, session.finishReason ?? 'submitted', toState(session), session.termination);
   }
 }

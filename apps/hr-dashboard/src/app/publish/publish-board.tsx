@@ -90,7 +90,7 @@ export function PublishBoard() {
   if (!jobs) {
     return (
       <Card className="flex min-h-48 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading approved jobs…
+        <Spinner className="text-muted" /> Loading approved jobs…
       </Card>
     );
   }
@@ -128,7 +128,7 @@ export function PublishBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Publish jobs</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Publish jobs</h1>
         <p className="mt-1 text-sm text-muted">
           Approved jobs from your job list. Publishing puts the approved job description on your
           careers page and LinkedIn, with one apply link and your company careers page link.
@@ -146,7 +146,7 @@ export function PublishBoard() {
           <p className="text-sm text-muted">
             Approve a job description first — it will appear here, ready to publish.
           </p>
-          <Link href="/jobs" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/jobs" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Go to jobs →
           </Link>
         </Card>
@@ -427,7 +427,7 @@ function Applications({ job }: { job: PublishableJob }) {
           {' · '}
           <Link
             href={`/applications?job=${encodeURIComponent(job.jobId)}`}
-            className="font-medium text-accent hover:underline"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
           >
             View applications →
           </Link>

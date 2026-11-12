@@ -98,6 +98,21 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     Object.assign(a, { status, submittedAt: at });
     return true;
   }
+  async terminateCodingAttempt(attemptId: string, t: { at: Date; reason: string; warningCount: number; protection: unknown; state: CodingState }) {
+    const a = this.attempts.find((x) => x.id === attemptId);
+    if (!a || a.status !== 'IN_PROGRESS') return false;
+    Object.assign(a, {
+      status: 'TERMINATED',
+      submittedAt: t.at,
+      terminatedAt: t.at,
+      terminationReason: t.reason,
+      warningCount: t.warningCount,
+      integrityStatus: 'INTEGRITY_VIOLATION_REVIEW',
+      protection: structuredClone(t.protection),
+      codingState: structuredClone(t.state),
+    });
+    return true;
+  }
   async setSystemPassed(attemptId: string, passed: boolean) {
     this.attempts.find((x) => x.id === attemptId)!.systemPassed = passed;
   }

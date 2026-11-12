@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { getRounds, listAssessmentJobs } from '@/lib/rounds-api';
+import { ChevronDownIcon, ClipboardIcon } from './icons';
+import { Tip, navRowClass } from './sidebar-parts';
 import { Spinner } from './ui';
 
 const STORE_KEY = 'hf:menu-job';
@@ -61,7 +63,8 @@ function isHere(href: string, pathname: string, search: string): boolean {
  * job, step by step, with only the rounds HR selected for that job. The job comes from the page (?job=), else the
  * last one picked here, else the first job with rounds.
  */
-export function AssessmentsMenu() {
+export function AssessmentsMenu({ variant = 'header', collapsed = false }: { variant?: 'header' | 'sidebar'; collapsed?: boolean } = {}) {
+  const sidebar = variant === 'sidebar';
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -72,14 +75,16 @@ export function AssessmentsMenu() {
   const box = useRef<HTMLDivElement | null>(null);
 
   // follow the job of the page being viewed
+  const active = ['/assessments', '/shortlisted', '/group-discussion', '/personal-interview'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   useEffect(() => {
-    setOpen(false);
+    setOpen(sidebar && active && !pathname.startsWith('/shortlisted'));
     setSearch(window.location.search);
     const fromPage = new URLSearchParams(window.location.search).get('job');
     if (fromPage) {
       setJobId(fromPage);
       remember(fromPage);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the page changes
   }, [pathname]);
 
   // load the jobs the first time the menu opens
@@ -108,6 +113,7 @@ export function AssessmentsMenu() {
   useEffect(() => {
     if (!open) return;
     setSearch(window.location.search);
+    if (sidebar) return; // the sidebar list stays open until its chevron closes it
     const onDown = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
@@ -120,11 +126,97 @@ export function AssessmentsMenu() {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, sidebar]);
 
-  const active = ['/assessments', '/shortlisted', '/group-discussion', '/personal-interview'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const steps = rounds && rounds.jobId === jobId ? stepsOf(jobId, rounds.data) : null;
   const tone = active ? 'text-foreground' : 'text-muted';
+  const boardActive = pathname === '/assessments' || pathname.startsWith('/assessments/') || pathname.startsWith('/group-discussion') || pathname.startsWith('/personal-interview');
+
+  if (sidebar) {
+    if (collapsed) {
+      return (
+        <Tip label="Assessments" show>
+          <Link href="/assessments" aria-label="Assessments" aria-current={boardActive ? 'page' : undefined} className={navRowClass(boardActive, true)}>
+            <ClipboardIcon />
+          </Link>
+        </Tip>
+      );
+    }
+    return (
+      <div className="flex flex-col">
+        <div className="group/row relative flex items-center">
+          <Link href="/assessments" aria-current={boardActive ? 'page' : undefined} className={`${navRowClass(boardActive, false)} pr-9`}>
+            <ClipboardIcon />
+            <span className="truncate">Assessments</span>
+          </Link>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? 'Hide the steps of a job' : 'Show the steps of a job'}
+            onClick={() => setOpen(!open)}
+            className="absolute right-1 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
+          >
+            <ChevronDownIcon className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+        {open && (
+          <div className="mb-1 ml-[18px] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2">
+            {error ? (
+              <p className="px-2 py-1.5 text-xs text-danger">Could not load the jobs. Try again in a moment.</p>
+            ) : !jobs ? (
+              <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted">
+                <Spinner className="h-3 w-3" /> Loading…
+              </p>
+            ) : jobs.length === 0 ? (
+              <p className="px-2 py-1.5 text-xs text-muted">No job has assessment rounds yet. Set them up on the Publish page.</p>
+            ) : (
+              <>
+                <label className="sr-only" htmlFor="sidebar-assessment-job">
+                  Job
+                </label>
+                <select
+                  id="sidebar-assessment-job"
+                  className="mx-0.5 mb-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  value={jobId ?? ''}
+                  onChange={(e) => {
+                    setJobId(e.target.value);
+                    remember(e.target.value);
+                  }}
+                >
+                  {jobs.map((j) => (
+                    <option key={j.jobId} value={j.jobId}>
+                      {j.title}
+                    </option>
+                  ))}
+                </select>
+                {!steps ? (
+                  <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted">
+                    <Spinner className="h-3 w-3" /> Loading the rounds…
+                  </p>
+                ) : (
+                  steps.map((st, i) => {
+                    const here = isHere(st.href, pathname, search);
+                    return (
+                      <Link
+                        key={st.key}
+                        href={st.href}
+                        aria-current={here ? 'page' : undefined}
+                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors ${here ? 'bg-active font-medium text-foreground' : 'text-muted hover:bg-hover hover:text-foreground'}`}
+                      >
+                        <span className="w-4 shrink-0 text-right text-[11px] tabular-nums text-muted">{i + 1}</span>
+                        <span className="truncate">{st.label}</span>
+                      </Link>
+                    );
+                  })
+                )}
+                {steps && steps.length === 1 && <p className="px-2 py-1 text-xs text-muted">This job has no assessment rounds yet.</p>}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div ref={box} className="relative flex items-center" onMouseLeave={() => setOpen(false)}>

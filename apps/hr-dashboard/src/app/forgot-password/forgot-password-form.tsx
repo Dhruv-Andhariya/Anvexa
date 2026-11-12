@@ -42,7 +42,7 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
             password. The link works once and expires in 1 hour.
           </p>
           <p className="text-sm text-muted">No email after a few minutes? Check the spam folder, or try again.</p>
-          <Link href="/login" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Back to log in
           </Link>
         </div>
@@ -72,7 +72,7 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
           {busy && <Spinner />}
           {busy ? 'Sending…' : 'Send reset link'}
         </Button>
-        <Link href="/login" className="text-sm font-medium text-accent hover:underline">
+        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           Back to log in
         </Link>
       </form>

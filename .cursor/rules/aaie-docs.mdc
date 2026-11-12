@@ -1,0 +1,50 @@
+---
+description: AAIE (Anvexa Assessment Intelligence Engine) governance. Apply to any work, discussion or change that concerns AAIE, its architecture, its evidence bundle or summaries, or its documentation in docs/AAIE/.
+globs:
+  - docs/AAIE/**
+  - apps/api/src/modules/aaie/**
+  - packages/contracts/src/schemas/aaie.ts
+  - workers/ai-worker/ai_worker/aaie/**
+  - workers/ai-worker/prompts/aaie_*.yaml
+  - prompts/aaie_*
+  - apps/hr-dashboard/src/**/aaie*
+  - apps/hr-dashboard/src/**/aaie*/**
+alwaysApply: false
+---
+
+# AAIE governance
+
+## Source of truth
+- `docs/AAIE/README.md` is the single source of truth for AAIE architecture, decisions (D-register), open
+  decisions (U-items) and blockers (B-register). `docs/AAIE/ENGINEERING-DECISIONS.md` holds the detail of B1–B3 and
+  must stay consistent with the README.
+- If code, a conversation or another document disagrees with the README, the README wins until it is changed through
+  an approved update. Point out the disagreement; do not resolve it silently.
+
+## Changing the architecture
+- Any **approved** AAIE architecture change must update `docs/AAIE/README.md` in the same change: the affected
+  sections and a new row in its "Version history" (version, date, what changed).
+- Record every newly **approved** or **rejected** decision explicitly in the decision register, with its status.
+  Never mark a decision approved without evidence of approval (who approved, when).
+- Never silently add, remove, reword or change the status of decisions D1–D14. Any change to them needs explicit
+  approval and a version-history entry that says what changed and why.
+- Keep unresolved blockers marked **OPEN** (or "Deferred" where the README says so). A blocker may only be marked
+  resolved with the recorded agreement of the module owners named in the blocker.
+- Do not invent owner names. Refer to module owners by role, by the module README's owner line, or by
+  `.github/CODEOWNERS`.
+
+## Implementation
+- Never begin implementing AAIE (code, contracts, migrations, prompts, endpoints, UI) on the basis of the
+  architecture documentation alone. Implementation of a phase starts only after explicit approval of that phase and
+  after its entry-gate blockers are resolved, as listed in the README's roadmap.
+- No new agents, microservices, queues, schedulers or infrastructure for AAIE without explicit approval recorded in
+  the decision register.
+
+## Preserve existing behaviour (always)
+- Do not change existing assessment workflows, candidate answer recording, speech-to-text, transcripts, stored
+  answers, evaluators, proctoring, or HR evidence panels and their access as part of AAIE work.
+- AAIE must never modify, override, delete, hide or replace existing assessment scores, pass/fail decisions, HR
+  overrides or original evidence. AAIE only reads them through approved read paths and only writes its own data.
+- An infrastructure failure must never be presented or summarised as a candidate failure.
+- No combined score, weights, rankings, percentiles or hire / no-hire output; no AI integrity judgments; no expired
+  group-discussion evidence — unless the decision register is changed through explicit approval.

@@ -146,7 +146,7 @@ export function SqlBankBoard() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">SQL questions</h1>
+          <h1 className="text-xl font-semibold tracking-tight">SQL questions</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted">
             Your company&apos;s SQL question bank. Candidates answer each question with one SQL query on the same proctored coding page as the DSA round.
             Put questions into a job&apos;s SQL round in the job&apos;s rounds editor (Coding question → SQL problem).

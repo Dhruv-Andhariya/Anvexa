@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ProctorIncidentOutcome, ProctorIncidentReview, ProctorIncidentType } from './coding-proctoring';
 import { sqlSpecProblems } from './sql-bank';
 
 /**
@@ -142,6 +143,34 @@ export interface DsaProctoringReview {
   applicationId: string;
   rounds: {
     roundId: string;
+    /** DSA (programs), SQL, or both in one round. Each round has its own warning count. Missing on older records. */
+    module?: 'DSA' | 'SQL' | 'MIXED' | null;
+    /** Confirmed incidents that became warnings, and how many are allowed before termination. */
+    warningCount?: number;
+    maxWarnings?: number;
+    /** The attempt was terminated by the warning limit (backend-enforced). */
+    terminatedAt?: string | null;
+    terminationReason?: string | null;
+    cameraMonitored?: boolean;
+    /** Version of the detection rules / models the record was made with. */
+    detectionVersion?: string | null;
+    /** Validated incidents and observations, with what the server did and HR's review. Metadata only: no images. */
+    incidents?: {
+      id: number;
+      type: string;
+      category: ProctorIncidentType;
+      at: string;
+      durationMs: number | null;
+      confidence: number | null;
+      detail: string | null;
+      outcome: ProctorIncidentOutcome | null;
+      warningNumber: number | null;
+      /** Why it did not become a warning (technical, too short, low confidence...). */
+      note: string | null;
+      /** Evidence kept: metadata only (type, time, duration, confidence). No image or video is ever stored. */
+      evidence: 'METADATA_ONLY';
+      review: ProctorIncidentReview | null;
+    }[];
     status: 'clean' | 'warning' | 'review' | 'disqualified';
     flagged: boolean;
     reasons: string[];

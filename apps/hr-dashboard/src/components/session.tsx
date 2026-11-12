@@ -1,12 +1,10 @@
 'use client';
 
 import type { Session } from '@hireflow/contracts';
-import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { ApiError, UNAUTHENTICATED_EVENT, getSession, logout, switchCompany } from '@/lib/api';
-import { ROLE_LABEL } from '@/lib/roles';
-import { AssessmentsMenu } from './assessments-menu';
+import { ApiError, UNAUTHENTICATED_EVENT, getSession } from '@/lib/api';
+import { AppShell } from './app-shell';
 import { Button, Card, ErrorNotice, Spinner } from './ui';
 
 /**
@@ -88,7 +86,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return (
       <Page>
         <Card className="flex min-h-40 items-center justify-center gap-3 text-muted">
-          <Spinner className="text-accent" /> Loading…
+          <Spinner className="text-muted" /> Loading…
         </Card>
       </Page>
     );
@@ -97,10 +95,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <RefreshContext.Provider value={load}>
       <SessionContext.Provider value={{ session, refresh: load }}>
-        <AppHeader session={session} onChanged={load} />
-        <Gate session={session} pathname={pathname}>
-          {children}
-        </Gate>
+        {/* the shared frame of every HR page: collapsible sidebar + white workspace (app-shell.tsx) */}
+        <AppShell session={session} onChanged={load}>
+          <Gate session={session} pathname={pathname}>
+            {children}
+          </Gate>
+        </AppShell>
       </SessionContext.Provider>
     </RefreshContext.Provider>
   );
@@ -113,7 +113,7 @@ function Gate({ session, pathname, children }: { session: Session; pathname: str
   }
   if (pathname === REGISTER_PATH) return children;
   if (!session.company) {
-    return <Notice title="Choose a company" text="Pick one of your companies in the menu at the top of the page." />;
+    return <Notice title="Choose a company" text="Pick one of your companies in your account menu at the bottom of the sidebar." />;
   }
   if (session.company.status === 'SUSPENDED') {
     return (
@@ -141,106 +141,3 @@ function Notice({ title, text }: { title: string; text: string }) {
 }
 
 const Page = ({ children }: { children: ReactNode }) => <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">{children}</main>;
-
-interface NavItem {
-  href: string;
-  label: string;
-  /** Rendered as the Assessments step menu. */
-  menu?: boolean;
-}
-
-function AppHeader({ session, onChanged }: { session: Session; onChanged: () => Promise<void> }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const usable = session.company?.status === 'ACTIVE';
-  const nav: NavItem[] = [
-    ...(usable
-      ? [
-          { href: '/jobs', label: 'Jobs' },
-          { href: '/jobs/new', label: 'New job' },
-          { href: '/publish', label: 'Publish' },
-          { href: '/applications', label: 'Applications' },
-          { href: '/shortlisted', label: 'Shortlisted Students' },
-          // the Group Discussion page is opened from a GD round on Assessments ("Manage groups")
-          {
-            href: '/assessments',
-            label: 'Assessments',
-            // the hiring process of one job, step by step: only the rounds HR chose (assessments-menu.tsx)
-            menu: true,
-          },
-          { href: '/company', label: 'Company profile' },
-        ]
-      : []),
-    ...(usable && isCompanyAdmin(session) ? [{ href: '/team', label: 'Team' }] : []),
-    ...(session.user.isPlatformAdmin ? [{ href: '/admin', label: 'Companies' }] : []),
-  ];
-
-  const signOut = async () => {
-    setBusy(true);
-    await logout().catch(() => undefined);
-    router.replace('/login');
-    await onChanged();
-  };
-
-  const onSwitch = async (companyId: string) => {
-    setBusy(true);
-    try {
-      await switchCompany(companyId);
-      router.push('/jobs');
-      await onChanged();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <header className="border-b border-border bg-surface">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-        <Link href={usable ? '/jobs' : '/admin'} className="flex items-center gap-3">
-          <span className="text-base font-semibold tracking-tight">Anvexa</span>
-          <span className="text-sm text-muted">HR Dashboard</span>
-        </Link>
-        <nav aria-label="Main" className="flex flex-wrap gap-1 text-sm">
-          {nav.map((n) =>
-            n.menu ? (
-              <AssessmentsMenu key={n.href} />
-            ) : (
-              <Link key={n.href} href={n.href} className="rounded-md px-2.5 py-1.5 text-muted hover:bg-accent-soft hover:text-foreground">
-                {n.label}
-              </Link>
-            ),
-          )}
-        </nav>
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
-          {session.companies.length > 1 ? (
-            <label className="flex items-center gap-2">
-              <span className="sr-only">Company</span>
-              <select
-                className="rounded-md border border-border bg-surface px-2 py-1.5"
-                value={session.company?.id ?? ''}
-                disabled={busy}
-                onChange={(e) => void onSwitch(e.target.value)}
-              >
-                {!session.company && <option value="">Choose a company</option>}
-                {session.companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            session.company && <span className="font-medium">{session.company.name}</span>
-          )}
-          <span className="text-muted">
-            {session.user.name}
-            {session.company ? ` · ${ROLE_LABEL[session.company.role]}` : session.user.isPlatformAdmin ? ' · Platform Admin' : ''}
-          </span>
-          <Button variant="ghost" onClick={() => void signOut()} disabled={busy}>
-            Log out
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
-}

@@ -1,4 +1,10 @@
-import { applicationRoundEngineSchema, type ApplicationRoundEngine, type AssessmentIntegrityDecisionRequest, type DsaProctoringReview } from '@hireflow/contracts';
+import {
+  applicationRoundEngineSchema,
+  type ApplicationRoundEngine,
+  type AssessmentIntegrityDecisionRequest,
+  type DsaProctoringReview,
+  type ProctorIncidentReviewRequest,
+} from '@hireflow/contracts';
 import { call, type Options } from './publisher-api';
 
 /**
@@ -23,16 +29,22 @@ export const decideRoundIntegrity = (applicationId: string, roundId: string, req
 export const resendRoundInvite = (applicationId: string, roundId: string, opts: Options = {}): Promise<ApplicationRoundEngine> =>
   call('POST', `${app(applicationId)}/rounds/${encodeURIComponent(roundId)}/resend`, undefined, parse, opts);
 
-/** What the browser noticed during the student's DSA coding round(s): observations for HR's review. */
+const parseReview = (v: unknown): DsaProctoringReview => {
+  const r = v as Partial<DsaProctoringReview> | null;
+  if (!r || typeof r.applicationId !== 'string' || !Array.isArray(r.rounds)) throw new Error('Unexpected response');
+  return r as DsaProctoringReview;
+};
+
+/** The student's DSA / SQL proctoring records: warnings, incidents, termination, reviews. */
 export const getDsaProctoring = (applicationId: string, opts: Options = {}): Promise<DsaProctoringReview> =>
+  call('GET', `/dsa-hr/applications/${encodeURIComponent(applicationId)}/proctoring`, undefined, parseReview, opts);
+
+/** Confirm / dismiss / mark for further review one incident, with a reason (audited; never changes a score). */
+export const reviewProctorIncident = (applicationId: string, roundId: string, incidentId: number, req: ProctorIncidentReviewRequest, opts: Options = {}): Promise<DsaProctoringReview> =>
   call(
-    'GET',
-    `/dsa-hr/applications/${encodeURIComponent(applicationId)}/proctoring`,
-    undefined,
-    (v: unknown) => {
-      const r = v as Partial<DsaProctoringReview> | null;
-      if (!r || typeof r.applicationId !== 'string' || !Array.isArray(r.rounds)) throw new Error('Unexpected response');
-      return r as DsaProctoringReview;
-    },
+    'PUT',
+    `/dsa-hr/applications/${encodeURIComponent(applicationId)}/proctoring/${encodeURIComponent(roundId)}/incidents/${incidentId}/review`,
+    req,
+    parseReview,
     opts,
   );

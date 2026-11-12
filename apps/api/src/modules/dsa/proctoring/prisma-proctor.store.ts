@@ -25,21 +25,47 @@ export class PrismaProctorStore implements ProctorStore {
     const json = session as unknown as Prisma.InputJsonObject;
     const updated = await this.db.dsaProctorSession.updateMany({ where: { inviteRef: session.inviteRef }, data: { session: json } });
     if (updated.count > 0) return;
-    const ids = splitAssessmentId(session.assessmentId);
-    if (!ids) throw new Error('proctoring records are only stored for HR rounds');
-    const app = await this.db.application.findUnique({ where: { id: ids.applicationId }, select: { tenantId: true } });
-    if (!app) throw new Error('application not found for the proctoring record');
-    await this.db.dsaProctorSession.createMany({
-      data: { inviteRef: session.inviteRef, tenantId: app.tenantId, applicationId: ids.applicationId, roundId: ids.roundId, session: json },
-      skipDuplicates: true, // two first events at once: the second one is written by the update below
-    });
+    await this.create(this.db, session);
     await this.db.dsaProctorSession.updateMany({ where: { inviteRef: session.inviteRef }, data: { session: json } });
   }
 
+  /**
+   * The record's row lock (SELECT ... FOR UPDATE inside a transaction): reports of one attempt are decided one after
+   * the other, so two simultaneous reports can never both use up "the last" warning or terminate twice.
+   */
+  async withLock<T>(inviteRef: string, init: () => ProctorSession, fn: (session: ProctorSession) => T): Promise<T> {
+    return this.db.$transaction(async (tx) => {
+      let rows = await tx.$queryRaw<{ session: unknown }[]>`SELECT session FROM dsa_proctor_sessions WHERE invite_ref = ${inviteRef} FOR UPDATE`;
+      if (rows.length === 0) {
+        await this.create(tx, init()); // two first reports at once: the second one finds the row made by the first
+        rows = await tx.$queryRaw<{ session: unknown }[]>`SELECT session FROM dsa_proctor_sessions WHERE invite_ref = ${inviteRef} FOR UPDATE`;
+      }
+      const session = rows[0]!.session as ProctorSession;
+      const result = fn(session);
+      await tx.dsaProctorSession.update({ where: { inviteRef }, data: { session: session as unknown as Prisma.InputJsonObject } });
+      return result;
+    });
+  }
+
+  private async create(db: Pick<PrismaService, 'dsaProctorSession' | 'application'>, session: ProctorSession): Promise<void> {
+    const ids = splitAssessmentId(session.assessmentId);
+    if (!ids) throw new Error('proctoring records are only stored for HR rounds');
+    const app = await db.application.findUnique({ where: { id: ids.applicationId }, select: { tenantId: true } });
+    if (!app) throw new Error('application not found for the proctoring record');
+    await db.dsaProctorSession.createMany({
+      data: { inviteRef: session.inviteRef, tenantId: app.tenantId, applicationId: ids.applicationId, roundId: ids.roundId, session: session as unknown as Prisma.InputJsonObject },
+      skipDuplicates: true,
+    });
+  }
+
   /** One company's records of one application (HR review). Another company's ids find nothing. */
-  async forApplication(tenantId: string, applicationId: string): Promise<{ roundId: string; session: ProctorSession }[]> {
-    const rows = await this.db.dsaProctorSession.findMany({ where: { tenantId, applicationId }, orderBy: { createdAt: 'asc' }, select: { roundId: true, session: true } });
-    return rows.map((r) => ({ roundId: r.roundId, session: r.session as unknown as ProctorSession }));
+  async forApplication(tenantId: string, applicationId: string): Promise<{ inviteRef: string; roundId: string; session: ProctorSession }[]> {
+    const rows = await this.db.dsaProctorSession.findMany({
+      where: { tenantId, applicationId },
+      orderBy: { createdAt: 'asc' },
+      select: { inviteRef: true, roundId: true, session: true },
+    });
+    return rows.map((r) => ({ inviteRef: r.inviteRef, roundId: r.roundId, session: r.session as unknown as ProctorSession }));
   }
 
   async list(): Promise<ProctorSession[]> {
