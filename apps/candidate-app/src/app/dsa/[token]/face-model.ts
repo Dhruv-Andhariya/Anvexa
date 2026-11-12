@@ -1,5 +1,5 @@
-import type { FaceLandmarker, FaceLandmarkerResult } from '@mediapipe/tasks-vision';
-import { FACE_POINTS, type FaceMeasure } from '@hireflow/contracts';
+import type { FaceLandmarker, FaceLandmarkerResult, ObjectDetector, ObjectDetectorResult } from '@mediapipe/tasks-vision';
+import { CAMERA_RULES_DEFAULTS, FACE_POINTS, type FaceMeasure, type ObjectDetection } from '@hireflow/contracts';
 
 let quieted = false;
 
@@ -55,5 +55,34 @@ export function toMeasures(result: FaceLandmarkerResult): FaceMeasure[] {
       if (c.categoryName.startsWith('eye')) blendshapes[c.categoryName] = c.score;
     }
     return { points, blendshapes };
+  });
+}
+
+/**
+ * MediaPipe Object Detector (EfficientDet-Lite0, COCO labels), served by this app like the face model: counts the
+ * people in view and notices a phone. Run about once a second (it is heavier than the face model). Only labels the
+ * rules use are asked for, so nothing else about the room is even computed.
+ */
+export async function loadObjectDetector(): Promise<ObjectDetector> {
+  quietMediapipeInfo();
+  const { FilesetResolver, ObjectDetector } = await import('@mediapipe/tasks-vision');
+  const files = await FilesetResolver.forVisionTasks('/mediapipe/wasm');
+  return ObjectDetector.createFromOptions(files, {
+    baseOptions: { modelAssetPath: '/mediapipe/efficientdet_lite0.tflite', delegate: 'CPU' },
+    runningMode: 'VIDEO',
+    maxResults: 6,
+    scoreThreshold: Math.min(CAMERA_RULES_DEFAULTS.personScore, CAMERA_RULES_DEFAULTS.deviceScore),
+    categoryAllowlist: ['person', ...CAMERA_RULES_DEFAULTS.deviceLabels],
+  });
+}
+
+/** Label, score and the box's share of the frame for each detection: no image data is kept. */
+export function toDetections(result: ObjectDetectorResult, width: number, height: number): ObjectDetection[] {
+  const frame = Math.max(1, width * height);
+  return result.detections.flatMap((d) => {
+    const c = d.categories[0];
+    if (!c) return [];
+    const box = d.boundingBox;
+    return [{ label: c.categoryName, score: c.score, area: box ? (box.width * box.height) / frame : 0 }];
   });
 }

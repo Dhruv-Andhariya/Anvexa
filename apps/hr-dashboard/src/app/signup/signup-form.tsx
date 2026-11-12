@@ -102,7 +102,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
       <Card>
         <form noValidate onSubmit={submitCode} className="flex flex-col gap-4" aria-labelledby="verify-heading">
           <div>
-            <p className="text-sm font-medium text-accent">Step 1 of 2</p>
+            <p className="text-sm font-medium text-muted">Step 1 of 2</p>
             <h1 id="verify-heading" className="text-xl font-semibold tracking-tight">
               Verify your email
             </h1>
@@ -129,7 +129,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
             {busy ? 'Creating account…' : 'Verify and create account'}
           </Button>
           <div className="flex justify-between text-sm">
-            <button type="button" className="font-medium text-accent hover:underline" disabled={busy} onClick={() => void submit()}>
+            <button type="button" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground" disabled={busy} onClick={() => void submit()}>
               Send a new code
             </button>
             <button
@@ -153,7 +153,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
     <Card>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="signup-heading">
         <div>
-          <p className="text-sm font-medium text-accent">Step 1 of 2</p>
+          <p className="text-sm font-medium text-muted">Step 1 of 2</p>
           <h1 id="signup-heading" className="text-xl font-semibold tracking-tight">
             Create your account
           </h1>
@@ -212,7 +212,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
         </Button>
         <p className="text-sm text-muted">
           Already on Anvexa?{' '}
-          <Link href="/login" className="font-medium text-accent hover:underline">
+          <Link href="/login" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Log in
           </Link>
         </p>

@@ -53,7 +53,7 @@ export function ApplicationsBoard() {
   if (!jobs) {
     return (
       <Card className="flex min-h-48 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading jobs…
+        <Spinner className="text-muted" /> Loading jobs…
       </Card>
     );
   }
@@ -61,7 +61,7 @@ export function ApplicationsBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Applications</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Applications</h1>
         <p className="mt-1 text-sm text-muted">
           Everyone who applied through your careers page or job posts. Resumes download as files. See the ATS details on Shortlisted Students.
         </p>
@@ -71,7 +71,7 @@ export function ApplicationsBoard() {
         <Card className="flex flex-col items-start gap-2">
           <p className="font-medium">No published jobs yet</p>
           <p className="text-sm text-muted">Publish a job first — applications for it will show up here.</p>
-          <Link href="/publish" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Go to publish →
           </Link>
         </Card>
@@ -142,7 +142,7 @@ function JobApplicationsList({ jobId }: { jobId: string }) {
   if (!data) {
     return (
       <Card className="flex min-h-32 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading applications…
+        <Spinner className="text-muted" /> Loading applications…
       </Card>
     );
   }
@@ -248,7 +248,7 @@ function ApplicationCard({ app, jobId }: { app: HrApplication; jobId: string }) 
         {links.length > 0 && (
           <p className="flex flex-wrap gap-3">
             {links.map((l) => (
-              <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="font-medium text-accent hover:underline">
+              <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
                 {l.label} ↗
               </a>
             ))}

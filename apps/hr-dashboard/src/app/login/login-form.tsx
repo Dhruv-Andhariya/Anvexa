@@ -110,7 +110,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
             {busy ? 'Checking…' : 'Verify and log in'}
           </Button>
           <div className="flex justify-between text-sm">
-            <button type="button" className="font-medium text-accent hover:underline" disabled={busy} onClick={() => void submit()}>
+            <button type="button" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground" disabled={busy} onClick={() => void submit()}>
               Send a new code
             </button>
             <button
@@ -159,7 +159,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
         </Field>
         <Link
           href={email.trim() ? `/forgot-password?email=${encodeURIComponent(email.trim())}` : '/forgot-password'}
-          className="-mt-2 self-end text-sm font-medium text-accent hover:underline"
+          className="-mt-2 self-end text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
         >
           Forgot password?
         </Link>
@@ -175,7 +175,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
         </Button>
         <p className="text-sm text-muted">
           New company on Anvexa?{' '}
-          <Link href="/signup" className="font-medium text-accent hover:underline">
+          <Link href="/signup" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Create an account
           </Link>
           . Joining your company&apos;s existing team? Ask your Company Admin for an invitation link.

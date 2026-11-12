@@ -1,5 +1,10 @@
 # AI camera monitoring (SQL and DSA rounds)
 
+> **Superseded in part by [PROCTORING.md](PROCTORING.md)** (November 2026): the warning policy (2 warnings, the 3rd
+> confirmed incident terminates), the server-side validation of camera alerts (looking away 120 s, face missing 20 s,
+> people / phone 3 s), person and phone detection, and the HR incident review are described there. Where the two
+> documents disagree, PROCTORING.md is current. The background below (consent, privacy, model hosting) still applies.
+
 On SQL and DSA rounds, the coding page watches the webcam to notice suspicious patterns: repeated or long looks away
 from the screen, the face leaving the camera's view, more than one face in view, very frequent head turning, and the
 camera turning off. It extends the existing proctoring (full screen, tabs, clipboard, screenshots). The SQL and DSA

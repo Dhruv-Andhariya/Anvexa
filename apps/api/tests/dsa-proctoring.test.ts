@@ -327,7 +327,7 @@ describe('allowed warnings: two tolerated, the next one ends the assessment', ()
     ctx.send(A, { type, at: ctx.at(10 + n * 3) });
 
   it('defaults to 2 allowed warnings', () => {
-    expect(policyFromEnv({}).maxStrikes).toBe(3);
+    expect(policyFromEnv({}).maxStrikes).toBe(2);
     expect(policyFromEnv({ DSA_PROCTOR_MAX_STRIKES: '5' }).maxStrikes).toBe(5);
     expect(policyFromEnv({ DSA_PROCTOR_MAX_STRIKES: '0' }).maxStrikes).toBe(0);
   });

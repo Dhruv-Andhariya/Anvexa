@@ -73,7 +73,7 @@ export function ShortlistedBoard() {
   if (!jobs) {
     return (
       <Card className="flex min-h-48 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading jobs…
+        <Spinner className="text-muted" /> Loading jobs…
       </Card>
     );
   }
@@ -81,7 +81,7 @@ export function ShortlistedBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Shortlisted Students</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Shortlisted Students</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students whose resume met the job’s minimum ATS score. Decision emails go out automatically as soon as a resume
           is screened: shortlisted students get the shortlist email with their AI screening link, the others the
@@ -92,7 +92,7 @@ export function ShortlistedBoard() {
       {jobs.length === 0 ? (
         <Card className="flex flex-col items-start gap-2">
           <p className="font-medium">No approved jobs yet</p>
-          <Link href="/jobs" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/jobs" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Go to jobs →
           </Link>
         </Card>
@@ -175,7 +175,7 @@ function CandidateList({
   if (!data) {
     return (
       <Card className="flex min-h-32 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading candidates…
+        <Spinner className="text-muted" /> Loading candidates…
       </Card>
     );
   }

@@ -10,7 +10,7 @@ export function CompanyFacts({ profile }: { profile: CompanyProfile }) {
     [
       'Website',
       profile.website && (
-        <a href={profile.website} target="_blank" rel="noreferrer noopener" className="text-accent hover:underline">
+        <a href={profile.website} target="_blank" rel="noreferrer noopener" className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           {profile.website}
         </a>
       ),
@@ -18,7 +18,7 @@ export function CompanyFacts({ profile }: { profile: CompanyProfile }) {
     [
       'Careers page',
       profile.careersUrl && (
-        <a href={profile.careersUrl} target="_blank" rel="noreferrer noopener" className="text-accent hover:underline">
+        <a href={profile.careersUrl} target="_blank" rel="noreferrer noopener" className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           {profile.careersUrl}
         </a>
       ),

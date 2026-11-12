@@ -12,8 +12,10 @@ import type { CodeRunner, RunnerJob, RunnerResult } from '../../src/modules/dsa/
 import { PrismaProctorStore } from '../../src/modules/dsa/proctoring/prisma-proctor.store';
 import { DSA_PROCTOR_POLICY, policyFromEnv } from '../../src/modules/dsa/proctoring/proctoring.policy';
 import { ProctoringService, inviteRefFor } from '../../src/modules/dsa/proctoring/proctoring.service';
-import { CONSENT_VERSION } from '../../src/modules/dsa/proctoring/proctoring.types';
+// DSA rounds are camera-monitored by default (DSA_PROCTOR_CAMERA=all): the camera notice is the one consented to
+import { CAMERA_CONSENT_VERSION as CONSENT_VERSION } from '../../src/modules/dsa/proctoring/proctoring.types';
 import { DsaHrController } from '../../src/modules/dsa/dsa-hr.controller';
+import { ProctoringHrService } from '../../src/modules/dsa/proctoring/proctoring-hr.service';
 import { BankQuestionRepository } from '../../src/modules/dsa/questions/bank-question.repository';
 import { MOCK_QUESTIONS } from '../../src/modules/dsa/questions/mock-questions.data';
 import { EngineSessionStore } from '../../src/modules/dsa/session/engine-session.store';
@@ -84,14 +86,14 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     new RoundEngineWorker(new PrismaRoundEngineStore(prisma), engine, rounds, mailer, audit as never, workerConfig(over), { cameraRequired: true });
 
   /** A fresh DSA service on top of the database: building another one is what an API restart does. */
-  const dsaService = () =>
+  const dsaService = (policy: Partial<ReturnType<typeof policyFromEnv>> = {}) =>
     new DsaService(
       new RoundInvitationResolver(engine),
       new BankQuestionRepository(),
       new EngineSessionStore(engine),
       runner,
       Date.now,
-      new ProctoringService(new PrismaProctorStore(prisma), { ...policyFromEnv({}), enabled: true }, Date.now),
+      new ProctoringService(new PrismaProctorStore(prisma), { ...policyFromEnv({}), enabled: true, ...policy }, Date.now),
     );
 
   /** Seeds a student with a completed AI screening for a job whose rounds are `roundInputs`. */
@@ -277,6 +279,38 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     expect(await db.roundAttempt.count({ where: { applicationId: s.applicationId } })).toBe(0);
   });
 
+  it('warning manager under the row lock: simultaneous reports give warnings 1 and 2 and ONE termination; the attempt waits for HR', async () => {
+    const s = await seedStudent([dsaRound]);
+    const { token } = await invited(s.email);
+    await dsaService().proctorStart(token, consent);
+    await dsaService().start(token);
+    const t0 = Date.now() - 50_000;
+    // six phone alerts from six "API instances" at once. The real clock puts them all at the attempt's start, so the
+    // same-act windows are switched off here: all six reach the counter together, the row lock must serialise them.
+    const burst = { cameraCooldownMs: 0, groupWindowSeconds: 0, dedupeMs: 0 };
+    const results = await Promise.allSettled(
+      [0, 5, 10, 15, 20, 25].map((sec, i) =>
+        dsaService(burst).proctorEvents(token, {
+          events: [{ type: 'CAMERA_DEVICE_DETECTED', at: t0 + sec * 1000, durationMs: 4000, confidence: 0.8, detail: 'cell phone visible 4 s', eventId: `db-evt-${i}-0000` }],
+        }),
+      ),
+    );
+    expect(results.every((r) => r.status === 'fulfilled' || /ATTEMPT_ENDED|ended/i.test(String((r as PromiseRejectedResult).reason?.message)))).toBe(true);
+    const row = await db.dsaProctorSession.findUniqueOrThrow({ where: { inviteRef: inviteRefFor(token) } });
+    const session = row.session as { warningCount: number; terminatedAt: number | null; events: { outcome?: string; warningNumber?: number | null }[] };
+    expect(session.events.filter((e) => e.outcome === 'WARNING' || e.outcome === 'TERMINATED').map((e) => [e.outcome, e.warningNumber])).toEqual([
+      ['WARNING', 1],
+      ['WARNING', 2],
+      ['TERMINATED', 3],
+    ]);
+    expect(session.warningCount).toBe(3);
+    const attempt = await db.roundAttempt.findFirstOrThrow({ where: { applicationId: s.applicationId } });
+    expect(attempt).toMatchObject({ status: 'TERMINATED', integrityStatus: 'INTEGRITY_VIOLATION_REVIEW', warningCount: 3, progressedAt: null });
+    expect(attempt.terminationReason).toMatch(/^Used all 2 allowed warnings/);
+    // the server refuses any further answer
+    await expect(dsaService().submit(token, { questionId: 'dsa-001', language: 'python', code: code(true) })).rejects.toMatchObject({ status: 403 });
+  });
+
   it('a token opens only its own round: another student, a withdrawn link, a made-up token', async () => {
     const a = await seedStudent([dsaRound]);
     const b = await seedStudent([dsaRound]);
@@ -316,7 +350,7 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     await svc.proctorEvents(token, { events: [{ type: 'FULLSCREEN_EXIT' }] });
     await svc.proctorEvents(token, { events: [{ type: 'FULLSCREEN_RETURN' }] });
     const proctoring = new ProctoringService(new PrismaProctorStore(prisma), { ...policyFromEnv({}), enabled: true }, Date.now);
-    const hr = (tenant: string) => new DsaHrController(new PrismaProctorStore(prisma), proctoring, new FixedTenant(tenant));
+    const hr = (tenant: string) => new DsaHrController(new ProctoringHrService(new PrismaProctorStore(prisma), proctoring, audit as never), new FixedTenant(tenant));
     const mine = await hr(tenantId).review(s.applicationId);
     expect(mine.applicationId).toBe(s.applicationId);
     expect(mine.rounds).toHaveLength(1);

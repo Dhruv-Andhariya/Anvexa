@@ -28,6 +28,8 @@ export interface DsaSession {
   finishedAt: number | null;
   finishReason: 'submitted' | 'time_expired' | 'disqualified' | null;
   progress: Record<string, QuestionProgress>;
+  /** Set when the proctoring warning limit terminated the attempt (finishReason 'disqualified'). */
+  termination?: { reason: string; warnings: number } | null;
 }
 
 /**

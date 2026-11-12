@@ -4,6 +4,7 @@ import { ALL_INPUT_TYPES, isCameraType, type ProctorInputType } from './proctori
 
 export const MAX_EVENTS_PER_REQUEST = 20;
 const MAX_DETAIL = 60;
+const EVENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 export interface ProctorStartDto {
   consent: true;
@@ -21,6 +22,8 @@ export interface ProctorEventInput {
   /** AI camera alerts only: how long the behaviour lasted (capped at 30 minutes) and the model's confidence (0..1). */
   durationMs?: number;
   confidence?: number;
+  /** The page's own id for this event (8-64 letters, digits, _ or -): sent again after a lost answer, it is ignored. */
+  eventId?: string;
 }
 
 /** A camera alert's duration is capped here (the longest test is not longer). */
@@ -76,7 +79,7 @@ export function parseProctorEvents(body: unknown): ProctorEventInput[] {
     if (!isRecord(raw)) throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1} is not an object.`);
     // duration and confidence describe an AI camera alert; no other event carries them
     const camera = typeof raw.type === 'string' && isCameraType(raw.type);
-    rejectUnknownKeys(raw, camera ? ['type', 'at', 'detail', 'durationMs', 'confidence'] : ['type', 'at', 'detail'], `Event ${i + 1}`);
+    rejectUnknownKeys(raw, camera ? ['type', 'at', 'detail', 'eventId', 'durationMs', 'confidence'] : ['type', 'at', 'detail', 'eventId'], `Event ${i + 1}`);
     if (typeof raw.type !== 'string' || !ALL_INPUT_TYPES.includes(raw.type)) {
       throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_EVENT_TYPE', `Event ${i + 1} has an unknown type.`);
     }
@@ -91,6 +94,12 @@ export function parseProctorEvents(body: unknown): ProctorEventInput[] {
       if (typeof raw.detail !== 'string') throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1}: detail must be text.`);
       // Short label only (e.g. "Ctrl+Shift+I"): strip control characters, cap the length.
       out.detail = raw.detail.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MAX_DETAIL);
+    }
+    if (raw.eventId !== undefined) {
+      if (typeof raw.eventId !== 'string' || !EVENT_ID.test(raw.eventId)) {
+        throw dsaError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', `Event ${i + 1}: eventId must be 8-64 letters, digits, _ or -.`);
+      }
+      out.eventId = raw.eventId;
     }
     if (raw.durationMs !== undefined) {
       if (typeof raw.durationMs !== 'number' || !Number.isFinite(raw.durationMs) || raw.durationMs < 0) {

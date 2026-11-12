@@ -88,7 +88,7 @@ export function CompanyEditor({ next }: { next?: string }) {
   if (loadState === 'loading') {
     return (
       <Card className="flex min-h-64 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading company profile…
+        <Spinner className="text-muted" /> Loading company profile…
       </Card>
     );
   }
@@ -153,7 +153,7 @@ export function CompanyEditor({ next }: { next?: string }) {
           </p>
         )}
         {saved && !next && (
-          <Link href="/jobs/new" className="font-medium text-accent hover:underline">
+          <Link href="/jobs/new" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Create a job →
           </Link>
         )}

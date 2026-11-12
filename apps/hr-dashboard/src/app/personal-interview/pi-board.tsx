@@ -50,14 +50,14 @@ export function PersonalInterviewBoard() {
   if (!jobs) {
     return (
       <Card className="flex min-h-48 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading jobs…
+        <Spinner className="text-muted" /> Loading jobs…
       </Card>
     );
   }
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Personal interview</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Personal interview</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students who cleared the technical interview, best overall score first. Call them, then record the outcome: a selected or rejected student&apos;s
           status updates everywhere.
@@ -66,7 +66,7 @@ export function PersonalInterviewBoard() {
       {jobs.length === 0 ? (
         <Card className="flex flex-col items-start gap-2">
           <p className="font-medium">No jobs with assessment rounds yet</p>
-          <Link href="/publish" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Open the Publish page →
           </Link>
         </Card>
@@ -113,7 +113,7 @@ function JobBoard({ jobId }: { jobId: string }) {
   if (!data) {
     return (
       <Card className="flex min-h-32 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading…
+        <Spinner className="text-muted" /> Loading…
       </Card>
     );
   }
@@ -198,7 +198,7 @@ function CandidateCard({ rank, c, jobId, onSaved }: { rank: number; c: PiCandida
             </p>
             <p className="text-sm text-muted">
               {c.phone ? (
-                <a href={`tel:${c.phone.replace(/[^\d+]/g, '')}`} className="font-medium text-accent hover:underline">
+                <a href={`tel:${c.phone.replace(/[^\d+]/g, '')}`} className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
                   {c.phone}
                 </a>
               ) : (

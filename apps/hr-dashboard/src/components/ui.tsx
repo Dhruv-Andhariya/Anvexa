@@ -1,8 +1,8 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 export const inputClass =
-  'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 ' +
-  'focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent ' +
+  'w-full rounded-lg border border-border-strong bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/70 ' +
+  'focus:outline-none focus:ring-2 focus:ring-foreground/10 focus:border-foreground/40 ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/30 disabled:opacity-60';
 
 export const errorId = (id: string) => `${id}-error`;
@@ -54,10 +54,11 @@ export function Field({ id, label, required, hint, error, children, className = 
 
 type Variant = 'primary' | 'secondary' | 'ghost';
 
+/** Minimal buttons: black primary, white outlined secondary, borderless ghost; grey hover backgrounds. */
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-accent-foreground hover:opacity-90',
-  secondary: 'border border-border bg-surface text-foreground hover:bg-accent-soft',
-  ghost: 'text-muted hover:text-foreground hover:bg-accent-soft',
+  primary: 'bg-accent text-accent-foreground hover:opacity-85',
+  secondary: 'border border-border-strong bg-background text-foreground hover:bg-hover',
+  ghost: 'text-muted hover:text-foreground hover:bg-hover',
 };
 
 export function Button({
@@ -70,8 +71,8 @@ export function Button({
       type="button"
       {...props}
       className={
-        'inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition ' +
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 ' +
+        'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ' +
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/25 focus-visible:ring-offset-1 ' +
         'disabled:cursor-not-allowed disabled:opacity-50 ' +
         `${VARIANTS[variant]} ${className}`
       }
@@ -80,12 +81,12 @@ export function Button({
 }
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-border bg-surface p-5 sm:p-6 ${className}`}>{children}</div>;
+  return <div className={`rounded-xl border border-border bg-surface p-5 ${className}`}>{children}</div>;
 }
 
 const STATUS: Record<string, { label: string; className: string }> = {
   DRAFT: { label: 'Draft', className: 'border-border text-muted' },
-  JD_GENERATED: { label: 'Awaiting approval', className: 'border-accent/40 bg-accent-soft text-accent' },
+  JD_GENERATED: { label: 'Awaiting approval', className: 'border-border-strong bg-accent-soft text-foreground' },
   APPROVED: { label: 'Approved', className: 'border-success/40 bg-success-soft text-success' },
 };
 

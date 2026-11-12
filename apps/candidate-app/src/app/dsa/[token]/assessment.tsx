@@ -21,7 +21,7 @@ import {
 import { CodeEditor } from './code-editor';
 import { ProblemPanel, difficultyTone } from './problem-panel';
 import { ResultsPanel, type PanelResult } from './results-panel';
-import { FullscreenGate, ProctorNotice, enterFullscreen, fullscreenSupported, inFullscreen, leaveFullscreen, useProctoring } from './proctoring';
+import { FullscreenGate, ProctorNotice, WarningDialog, enterFullscreen, fullscreenSupported, inFullscreen, leaveFullscreen, useProctoring } from './proctoring';
 import { ErrorScreen, IntroScreen, LoadingScreen, ResultScreen } from './screens';
 import { CameraGate, CameraTile, useCameraMonitor } from './camera-monitor';
 
@@ -127,14 +127,16 @@ export function Assessment({ token }: { token: string }) {
     resumed: resumedLoad.current,
     serverNow: () => Date.now() + clockOffset.current,
     onEnded: () => void load(),
+    shownWarning: state?.proctoring.warning?.warningNumber ?? 0,
   });
   useEffect(() => {
     if (state?.status === 'finished') void leaveFullscreen();
   }, [state?.status]);
 
   // AI camera (SQL and DSA rounds unless the server says otherwise): MediaPipe on this computer turns the frames into a
-  // few grouped alerts (looking away repeatedly, face missing, two faces, frequent head turning, camera stopped).
-  // Nothing of the video leaves the browser; the alerts go through the proctoring queue like any other event.
+  // few grouped alerts (another person or a phone in view, face not visible, looking away for more than 2 minutes, and
+  // technical ones). Nothing of the video leaves the browser; the alerts go through the proctoring queue, and the SERVER
+  // decides which are confirmed incidents (warnings).
   const cameraRequired = !!state?.proctoring.enabled && !!(state?.proctoring.camera ?? state?.proctoring.requireCamera);
   const cameraWatched = proctor.enabled && cameraRequired;
   const status = state?.status;
@@ -460,6 +462,7 @@ export function Assessment({ token }: { token: string }) {
     {/* The gates sit outside the inert page so their buttons stay usable. Full screen first, then the camera. */}
     {fullscreenBlocked && <FullscreenGate mode="block" onReenter={() => void reenter()} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} />}
     {!fullscreenBlocked && cameraBlocked && <CameraGate cam={cam} />}
+    {proctor.warning && <WarningDialog warning={proctor.warning} onClose={proctor.dismissWarning} />}
     </>
   );
 }

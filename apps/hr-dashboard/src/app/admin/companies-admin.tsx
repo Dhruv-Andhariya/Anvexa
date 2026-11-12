@@ -32,7 +32,7 @@ export function CompaniesAdmin() {
   if (!companies) {
     return (
       <Card className="flex min-h-40 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading companies…
+        <Spinner className="text-muted" /> Loading companies…
       </Card>
     );
   }
@@ -53,7 +53,7 @@ export function CompaniesAdmin() {
           {companies.map((c) => (
             <tr key={c.id} className="border-b border-border last:border-0 hover:bg-accent-soft/50">
               <td className="px-5 py-3">
-                <Link href={`/admin/companies/${c.id}`} className="font-medium hover:text-accent hover:underline">
+                <Link href={`/admin/companies/${c.id}`} className="font-medium hover:text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
                   {c.name}
                 </Link>
                 <span className="ml-2 text-xs text-muted">{c.slug}</span>

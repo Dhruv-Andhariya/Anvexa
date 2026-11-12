@@ -1,3 +1,4 @@
+import { PROCTOR_TERMINATION_MESSAGE } from '@hireflow/contracts';
 import { useEffect, useState } from 'react';
 import type { AssessmentState, FinalResult, NextStep } from '@/lib/dsa-api';
 import { LANGUAGE_LABELS, continueAfterRound } from '@/lib/dsa-api';
@@ -201,7 +202,7 @@ export function ResultScreen({ result, candidateName, showScore = true, token }:
             {result.reason === 'time_expired'
               ? 'Time ran out, so the assessment ended automatically. Your best scores were recorded.'
               : result.reason === 'disqualified'
-                ? 'The assessment was ended automatically because the allowed number of warnings was used up. Your answers submitted so far were recorded and will be reviewed by the hiring team.'
+                ? PROCTOR_TERMINATION_MESSAGE
                 : 'Your assessment was submitted. Your best scores were recorded.'}
           </p>
         </header>
@@ -274,7 +275,7 @@ function SubmittedScreen({ result, candidateName, token }: { result: FinalResult
           {result.reason === 'time_expired'
             ? 'Time ran out, so the assessment ended automatically. Everything you submitted before that was recorded.'
             : result.reason === 'disqualified'
-              ? 'The assessment was ended automatically because the allowed number of warnings was used up. Everything you submitted before that was recorded and will be reviewed by the hiring team.'
+              ? PROCTOR_TERMINATION_MESSAGE
               : 'Your solutions were submitted successfully.'}
         </p>
         <NextStepPanel

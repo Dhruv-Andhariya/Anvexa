@@ -82,7 +82,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
           {busy && <Spinner />}
           {busy ? 'Saving…' : 'Change password'}
         </Button>
-        <Link href="/login" className="text-sm font-medium text-accent hover:underline">
+        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           Back to log in
         </Link>
       </form>

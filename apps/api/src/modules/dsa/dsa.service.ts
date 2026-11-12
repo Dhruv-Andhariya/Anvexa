@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { PROCTOR_TERMINATION_MESSAGE } from '@hireflow/contracts';
 import { SQL_SANDBOX, SqlSandbox } from '../sql/engine/sql-sandbox';
 import { dsaError, parseCodeRequest, type CodeRequestDto } from './dsa.dto';
 import { Evaluator, type CaseResult, type Evaluation, type Verdict } from './evaluation/evaluator';
@@ -6,7 +7,7 @@ import { CODE_RUNNER, CodeRunnerBusyError, CodeRunnerUnavailableError, type Code
 import { DSA_CLOCK } from './dsa.tokens';
 import { parseProctorEvents, parseProctorStart } from './proctoring/proctoring.dto';
 import { cameraFor } from './proctoring/proctoring.policy';
-import { ProctoringService, inviteRefFor, type RecordResult } from './proctoring/proctoring.service';
+import { ProctoringService, inviteRefFor, type CodingRoundKind, type RecordResult } from './proctoring/proctoring.service';
 import type { CandidateProctorState, ClientProctoringConfig } from './proctoring/proctoring.types';
 import { DSA_QUESTION_REPOSITORY, type QuestionRepository } from './questions/question.repository';
 import { LANGUAGES, languagesOf, toPublicQuestion, type DsaQuestion, type Language, type PublicQuestion } from './questions/question.types';
@@ -102,6 +103,12 @@ const toPublicProgress = ({ bestCode: _bestCode, ...rest }: QuestionProgress): P
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** The kind of coding round from its problems: SQL only, programs only (DSA) or both. */
+export function kindOf(questions: readonly Pick<DsaQuestion, 'sql'>[]): CodingRoundKind {
+  const sql = questions.filter((q) => q.sql).length;
+  return sql === 0 ? 'code' : sql === questions.length ? 'sql' : 'mixed';
+}
+
 @Injectable()
 export class DsaService {
   private readonly logger = new Logger(DsaService.name);
@@ -153,14 +160,12 @@ export class DsaService {
     const dto = parseProctorStart(body);
     const { session, questions } = await this.load(token);
     if (session.status === 'finished') throw this.finishedError(session);
-    return this.proctoring.start(inviteRefFor(token), session.assessmentId, dto, this.cameraFor(questions));
+    return this.proctoring.start(inviteRefFor(token), session.assessmentId, dto, this.cameraFor(questions), kindOf(questions));
   }
 
   /** Is this attempt watched by the AI camera? From the round's problems: SQL only, programs only or both. */
   private cameraFor(questions: DsaQuestion[]): boolean {
-    const sql = questions.filter((q) => q.sql).length;
-    const kind = sql === 0 ? 'code' : sql === questions.length ? 'sql' : 'mixed';
-    return cameraFor(this.proctoring.policy, kind);
+    return cameraFor(this.proctoring.policy, kindOf(questions));
   }
 
   /** Stores browser integrity events. The candidate is whoever owns the token; nothing else is accepted. */
@@ -171,12 +176,13 @@ export class DsaService {
     if (session.status === 'finished') throw this.finishedError(session);
     const result = await this.proctoring.record(inviteRefFor(token), this.attemptWindow(session), inputs);
 
-    // Allowed warnings: the first N suspicious events are tolerated, the next one ends the attempt right away.
-    // The answers submitted so far are kept. (Each real action counts once: merging already happened in `record`.)
+    // The warning manager (inside `record`, under the record's lock) decided: the third confirmed incident terminates.
+    // Ending it here is enforced by the server: run / submit / finish are refused from now on. The answers submitted so
+    // far are kept and graded, and the result waits for HR's integrity review.
     const policy = this.proctoring.policy;
     let ended = false;
-    if (policy.maxStrikes > 0 && result.violationCount > policy.maxStrikes) {
-      await this.closeSession(session, 'disqualified');
+    if (result.terminated) {
+      await this.terminate(session);
       ended = true;
     }
     // Optional score-based policy: ending the attempt when the disqualification threshold is reached. Off unless configured.
@@ -251,8 +257,9 @@ export class DsaService {
 
   // ---------------------------------------------------------------- internals
 
-  /** One place that ends an attempt: stores the result and seals the proctoring record. */
+  /** One place that ends an attempt: stores the result and seals the proctoring record. Only a running attempt ends. */
   private async closeSession(session: DsaSession, reason: 'submitted' | 'disqualified'): Promise<void> {
+    if (session.status !== 'in_progress') return;
     session.status = 'finished';
     session.finishedAt = this.now();
     session.finishReason = reason;
@@ -260,10 +267,18 @@ export class DsaService {
     await this.proctoring.end(inviteRefFor(session.token), session.finishedAt);
   }
 
+  /** The warning limit was exceeded: the attempt ends as terminated (once), with the reason for HR. */
+  private async terminate(session: DsaSession): Promise<void> {
+    const ref = inviteRefFor(session.token);
+    const t = await this.proctoring.isTerminated(ref);
+    session.termination = { reason: t?.reason ?? 'Maximum number of permitted warnings exceeded.', warnings: this.proctoring.policy.maxStrikes };
+    await this.closeSession(session, 'disqualified');
+  }
+
   private finishedError(session: DsaSession) {
     if (session.finishReason === 'time_expired') return dsaError(HttpStatus.FORBIDDEN, 'TIME_EXPIRED', 'Time is up. The assessment has ended.');
     if (session.finishReason === 'disqualified') {
-      return dsaError(HttpStatus.FORBIDDEN, 'ATTEMPT_ENDED', 'The assessment was ended because of integrity violations. Your answers so far were recorded.');
+      return dsaError(HttpStatus.FORBIDDEN, 'ATTEMPT_ENDED', PROCTOR_TERMINATION_MESSAGE);
     }
     return dsaError(HttpStatus.FORBIDDEN, 'ALREADY_FINISHED', 'The assessment has already been submitted.');
   }
@@ -286,6 +301,11 @@ export class DsaService {
     if (this.expireIfNeeded(session)) {
       await this.sessions.save(session);
       await this.proctoring.end(inviteRefFor(session.token), session.finishedAt ?? this.now());
+    }
+    // Backend enforcement: a terminated proctoring record ends a running attempt even if ending it failed earlier
+    // (e.g. the database was unreachable right after the decision). No answer is accepted after termination.
+    if (session.status === 'in_progress' && this.proctoring.enabled && (await this.proctoring.isTerminated(inviteRefFor(token)))) {
+      await this.terminate(session);
     }
     return { session, questions, invitation };
   }

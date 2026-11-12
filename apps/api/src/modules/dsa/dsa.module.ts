@@ -14,6 +14,7 @@ import { DsaService } from './dsa.service';
 import { CODE_RUNNER } from './execution/code-runner';
 import { PistonRunner, pistonOptionsFromEnv } from './execution/piston.runner';
 import { ProctoringAdminController } from './proctoring/proctoring-admin.controller';
+import { DSA_PROCTOR_RECORDS, ProctoringHrService } from './proctoring/proctoring-hr.service';
 import { ProctoringController } from './proctoring/proctoring.controller';
 import { DSA_PROCTOR_POLICY, policyFromEnv } from './proctoring/proctoring.policy';
 import { ProctoringService } from './proctoring/proctoring.service';
@@ -46,6 +47,8 @@ const demoMode = () => ['on', 'true', '1'].includes((process.env.DSA_DEMO_MODE ?
     InMemorySessionStore,
     PrismaProctorStore,
     InMemoryProctorStore,
+    ProctoringHrService,
+    { provide: DSA_PROCTOR_RECORDS, useExisting: PrismaProctorStore },
     { provide: DSA_QUESTION_REPOSITORY, useClass: BankQuestionRepository },
     {
       provide: DSA_INVITATION_RESOLVER,

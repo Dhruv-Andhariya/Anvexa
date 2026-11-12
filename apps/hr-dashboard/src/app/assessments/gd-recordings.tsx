@@ -37,7 +37,7 @@ export function GdRecordings({ roundId }: { roundId: string }) {
             <span className="font-medium">
               {b.eventName} · Group {b.number} · {when.format(new Date(b.startsAt))}
             </span>
-            <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-accent hover:underline">
+            <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
               Results →
             </Link>
           </div>

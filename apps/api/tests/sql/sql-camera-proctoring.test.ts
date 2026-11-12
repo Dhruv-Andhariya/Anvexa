@@ -45,6 +45,7 @@ let store: MemoryRoundEngineStore;
 let results: MemoryAssessmentsStore;
 let proctoring: ProctoringService;
 let service: DsaService;
+let engine: RoundEngineService;
 let token: string;
 
 /** A SQL round (camera-monitored by default) taken through the round engine, with the given proctoring policy. */
@@ -59,7 +60,7 @@ async function setup(policy: Partial<ProctorPolicy> = {}) {
   store.contexts.set(APP, { tenantId: TENANT, applicationId: APP, jobId: JOB, candidateName: 'Candidate', email: 'c@example.com', jobTitle: 'Data Analyst', companyName: 'Pattern Labs', companyWebsite: null });
   const audit = new MemoryAudit();
   const rounds = new RoundsConfigService(roundsStore, audit, new FakeGenerator().asClient());
-  const engine = new RoundEngineService(store, rounds, new AssessmentsService(results, rounds, audit), audit, { cameraRequired: true }, () => new Date(now));
+  engine = new RoundEngineService(store, rounds, new AssessmentsService(results, rounds, audit), audit, { cameraRequired: true }, () => new Date(now));
   const sqlRound: RoundInput = {
     type: 'SQL',
     name: 'SQL Assessment',
@@ -81,8 +82,10 @@ const begin = async () => {
   await service.proctorStart(token, consent(true));
   return service.start(token);
 };
+/** How long each kind of alert lasted, by default: just past what the server needs to confirm it as an incident. */
+const LASTED: Record<string, number> = { CAMERA_GAZE_AWAY: 125_000, CAMERA_FACE_MISSING: 25_000, CAMERA_MULTIPLE_FACES: 4000, CAMERA_DEVICE_DETECTED: 4000 };
 /** A grouped camera alert as the page sends it. */
-const alert = (type: string, sec: number, extra: Record<string, unknown> = {}) => ({ type, at: T0 + sec * 1000, durationMs: 8000, confidence: 0.82, detail: 'left: 4 looks in 60 s', ...extra });
+const alert = (type: string, sec: number, extra: Record<string, unknown> = {}) => ({ type, at: T0 + sec * 1000, durationMs: LASTED[type] ?? 8000, confidence: 0.82, detail: 'right: looked away 2 min', ...extra });
 const send = async (sec: number, ...events: Record<string, unknown>[]) => {
   now = T0 + sec * 1000;
   return service.proctorEvents(token, { events });
@@ -161,12 +164,12 @@ describe('a DSA round with the camera (default DSA_PROCTOR_CAMERA=all)', () => {
     expect((await dsa.getState(T)).status).toBe('finished');
   });
 
-  it('the older webcam events (camera off, no face, two faces) still count on a DSA round', async () => {
+  it('the older webcam events (camera off, no face, two faces) from old pages are kept for HR, never a warning (no duration to validate)', async () => {
     const dsa = dsaSetup();
     await dsa.proctorStart(T, consent(true));
     await dsa.start(T);
     now = T0 + 60_000;
-    expect(await dsa.proctorEvents(T, { events: [{ type: 'NO_FACE', at: T0 + 50_000 }] })).toMatchObject({ accepted: 1, strikesUsed: 1 });
+    expect(await dsa.proctorEvents(T, { events: [{ type: 'NO_FACE', at: T0 + 50_000 }] })).toMatchObject({ accepted: 1, strikesUsed: 0 });
   });
 });
 
@@ -181,6 +184,14 @@ describe('camera alerts in the existing warning system', () => {
     expect((await service.getState(token)).status).toBe('finished');
     // graded with what was submitted (nothing here), like every other way an attempt ends
     expect(results.results[0]).toMatchObject({ roundId: saved[0]!.id, systemPassed: false });
+    // terminated (not "submitted"): held for HR's integrity review, nothing moves on and no email is queued until HR decides
+    expect(store.attempts[0]).toMatchObject({ status: 'TERMINATED', integrityStatus: 'INTEGRITY_VIOLATION_REVIEW', warningCount: 3, progressedAt: null });
+    expect(store.attempts[0]!.terminationReason).toMatch(/^Used all 2 allowed warnings; the 3rd confirmed incident \(more than one person in view\)/);
+    const hrView = await engine.forApplication(TENANT, APP);
+    expect(hrView.rounds[0]!.integrity).toMatchObject({ status: 'INTEGRITY_VIOLATION_REVIEW', warningCount: 3, settings: { maxWarnings: 2 } });
+    // HR's decision (existing integrity flow): advance with a reason, then the usual next step follows once
+    const decided = await engine.integrityDecision(TENANT, APP, saved[0]!.id, { decision: 'ADVANCE', reason: 'Reviewed: the second person was a family member passing by.' }, null);
+    expect(decided.rounds[0]!.integrity).toMatchObject({ status: 'REVIEWED', decision: { decision: 'ADVANCE' } });
   }, 30_000);
 
   it('the same behaviour reported again within the cool-down is one alert, not two warnings', async () => {
@@ -196,8 +207,8 @@ describe('camera alerts in the existing warning system', () => {
     const session = (await (proctoring as unknown as { store: InMemoryProctorStore }).store.get(inviteRefFor(token)))!;
     const { summary, events } = proctoring.reviewOf(session, 50);
     expect(summary).toMatchObject({ status: 'review', flagged: true, camera: { monitored: true, faceMissing: 1, gazeAway: 0 } });
-    expect(summary.reasons.join(' ')).toMatch(/1 AI camera alert \(suspicious patterns, not proof\)/);
-    expect(events[0]).toMatchObject({ type: 'CAMERA_FACE_MISSING', camera: true, confidence: 0.9, durationMs: 8000, detail: 'no face in view', strike: 1, at: new Date(T0 + 40_000).toISOString() });
+    expect(summary.reasons.join(' ')).toMatch(/1 AI camera alert \(possible incidents, not proof\)/);
+    expect(events[0]).toMatchObject({ type: 'CAMERA_FACE_MISSING', camera: true, confidence: 0.9, durationMs: 25_000, detail: 'no face in view', strike: 1, outcome: 'WARNING', at: new Date(T0 + 40_000).toISOString() });
     expect(events[1]).toMatchObject({ type: 'TAB_SWITCH', camera: false, confidence: null, strike: 2 });
   }, 30_000);
 });

@@ -170,7 +170,7 @@ export function JdView({ jd, form }: { jd: JdContent; form?: JobForm }) {
   return (
     <article className="flex flex-col gap-7 leading-relaxed">
       <header className="flex flex-col gap-3">
-        <h3 className="text-2xl font-semibold tracking-tight">{jd.title}</h3>
+        <h3 className="text-xl font-semibold tracking-tight">{jd.title}</h3>
         {form && (
           <ul className="flex flex-wrap gap-x-2 gap-y-1 text-sm text-muted" aria-label="Job details">
             {jobMeta(form).map((m, i) => (
@@ -228,7 +228,7 @@ export function JdView({ jd, form }: { jd: JdContent; form?: JobForm }) {
           <h4 className={sectionHeading}>{COMPANY_LINK_HEADING}</h4>
           <p className="text-[15px]">
             Learn more about us at{' '}
-            <a href={jd.companyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent hover:underline">
+            <a href={jd.companyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
               {jd.companyUrl}
             </a>
           </p>
@@ -239,7 +239,7 @@ export function JdView({ jd, form }: { jd: JdContent; form?: JobForm }) {
           <h4 className={sectionHeading}>{HOW_TO_APPLY_HEADING}</h4>
           <p className="text-[15px]">
             See all our openings and apply at{' '}
-            <a href={jd.careersUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent hover:underline">
+            <a href={jd.careersUrl} target="_blank" rel="noreferrer noopener" className="break-all text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
               {jd.careersUrl}
             </a>
           </p>

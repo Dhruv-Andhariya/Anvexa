@@ -78,12 +78,14 @@ describe('proctoring over HTTP', () => {
 
     const rec = await call('POST', `/dsa/${t}/proctor/events`, { events: [{ type: 'FULLSCREEN_EXIT' }, { type: 'COPY' }] });
     expect(rec.status).toBe(200);
-    // two suspicious events used both allowed warnings: still running, but this is now the final warning
-    expect(rec.json).toMatchObject({ accepted: 2, ignored: 0, violationCount: 2, level: 'final_warning', strikesUsed: 2, strikesAllowed: 2, ended: false });
+    // two signals in the same moment are one act (shared grouping rule): both recorded, one warning
+    expect(rec.json).toMatchObject({ accepted: 2, ignored: 0, violationCount: 1, level: 'warning', strikesUsed: 1, strikesAllowed: 2, ended: false });
+    expect(rec.json.warning).toMatchObject({ warningNumber: 1, maxWarnings: 2, final: false });
+    expect(rec.json.warning.message).toMatch(/^Warning 1 of 2: Potential suspicious activity has been detected/);
     expect(rec.text).not.toMatch(/warnScore|reviewScore|disqualify|inviteRef|threshold/i);
     await call('POST', `/dsa/${t}/proctor/events`, { events: [{ type: 'FULLSCREEN_RETURN' }] });
     const state = await call('GET', `/dsa/${t}`);
-    expect(state.json.proctoring).toMatchObject({ started: true, violationCount: 2 });
+    expect(state.json.proctoring).toMatchObject({ started: true, violationCount: 1, terminated: false });
   });
 
   it('refuses fabricated identities and malformed bodies', async () => {

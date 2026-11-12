@@ -1,10 +1,21 @@
 'use client';
 
-import { ASSESSMENT_INCIDENT_LABEL, PROCTOR_EVENT_LABELS, type ApplicationRoundEngine, type DsaProctoringReview, type RoundEngineRound } from '@hireflow/contracts';
+import {
+  ASSESSMENT_INCIDENT_LABEL,
+  CAMERA_EVENT_LABELS,
+  PROCTOR_EVENT_LABELS,
+  PROCTOR_INCIDENT_LABEL,
+  PROCTOR_REVIEW_LABEL,
+  type ApplicationRoundEngine,
+  type CameraEventType,
+  type DsaProctoringReview,
+  type ProctorReviewStatus,
+  type RoundEngineRound,
+} from '@hireflow/contracts';
 import { useEffect, useState } from 'react';
 import { pill } from '@/app/assessments/assessment-styles';
 import { ApiError } from '@/lib/api';
-import { decideRoundIntegrity, getDsaProctoring, resendRoundInvite, revokeRoundInvite } from '@/lib/round-engine-api';
+import { decideRoundIntegrity, getDsaProctoring, resendRoundInvite, revokeRoundInvite, reviewProctorIncident } from '@/lib/round-engine-api';
 import { Button, Spinner, inputClass } from './ui';
 
 const date = (iso: string) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
@@ -106,7 +117,7 @@ export function OnlineTestPanel({
         </p>
       )}
 
-      {round.integrity && attempt && <TestIntegrity applicationId={applicationId} round={round} onChanged={onChanged} />}
+      {round.integrity && attempt && <TestIntegrity applicationId={applicationId} round={round} onChanged={onChanged} coding={coding} />}
 
       {attempt && coding && <DsaIntegrityLog applicationId={applicationId} roundId={round.roundId} />}
 
@@ -168,7 +179,17 @@ export function OnlineTestPanel({
 }
 
 const SECONDS = (ms: number) => (ms >= 1000 ? duration(Math.round(ms / 1000)) : '0 s');
-const STATUS_TEXT = { clean: 'Nothing unusual', warning: 'Warnings used', review: 'Needs a look', disqualified: 'Ended by the warning limit' } as const;
+const STATUS_TEXT = { clean: 'Nothing unusual', warning: 'Warnings used', review: 'Needs a look', disqualified: 'Terminated by the warning limit' } as const;
+const MODULE_TEXT = { DSA: 'DSA assessment', SQL: 'SQL assessment', MIXED: 'DSA + SQL assessment' } as const;
+const eventLabel = (type: string) => CAMERA_EVENT_LABELS[type as CameraEventType] ?? type.replaceAll('_', ' ').toLowerCase();
+type Incident = NonNullable<DsaProctoringReview['rounds'][number]['incidents']>[number];
+
+function outcomeText(i: Incident, max: number): { text: string; strong: boolean } {
+  if (i.outcome === 'TERMINATED') return { text: 'Terminated the assessment', strong: true };
+  if (i.outcome === 'WARNING') return { text: `Warning ${i.warningNumber ?? '?'}${max ? ` of ${max}` : ''}`, strong: true };
+  if (i.outcome === 'GROUPED') return { text: 'Same incident as the previous warning', strong: false };
+  return { text: 'Recorded (not a warning)', strong: false };
+}
 
 /**
  * What the browser noticed during the DSA coding round (full screen, tabs, clipboard, shortcuts): loaded when opened.
@@ -191,6 +212,8 @@ function DsaIntegrityLog({ applicationId, roundId }: { applicationId: string; ro
   }, [open, review, applicationId]);
 
   const mine = review?.rounds.find((r) => r.roundId === roundId);
+  const [onlyWarnings, setOnlyWarnings] = useState(false);
+  const incidents = (mine?.incidents ?? []).filter((i) => !onlyWarnings || i.outcome === 'WARNING' || i.outcome === 'TERMINATED');
   return (
     <div>
       <Button variant="ghost" className="px-2 py-1" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -204,9 +227,25 @@ function DsaIntegrityLog({ applicationId, roundId }: { applicationId: string; ro
           {mine && (
             <>
               <p className="text-xs text-muted">
-                What the candidate&apos;s browser reported. These are observations for your review, not proof of cheating, and they did not change the score. When
-                the webcam is required, it is only checked on the candidate&apos;s device for a face: no video, microphone or screen recording is kept.
+                What the candidate&apos;s browser and on-device camera check reported. Detections are possible incidents for your review, not proof of cheating,
+                and they never change the score. The camera is analysed only on the candidate&apos;s device: no video, image, microphone or screen recording is
+                kept. Your review below is stored with your name and audited.
               </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {mine.module && <span className={pill}>{MODULE_TEXT[mine.module]}</span>}
+                {mine.maxWarnings !== undefined && mine.maxWarnings > 0 && (
+                  <span className={`${pill} ${(mine.warningCount ?? 0) > 0 ? 'border-danger/40 text-danger' : ''}`}>
+                    Confirmed warnings {Math.min(mine.warningCount ?? 0, mine.maxWarnings)}/{mine.maxWarnings}
+                  </span>
+                )}
+                {mine.cameraMonitored !== undefined && <span className={pill}>{mine.cameraMonitored ? 'AI camera on' : 'No camera'}</span>}
+                <span className={pill}>Evidence: metadata only (no images or video)</span>
+              </div>
+              {mine.terminatedAt && (
+                <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-danger">
+                  <span className="font-medium">Terminated on {date(mine.terminatedAt)}.</span> {mine.terminationReason}
+                </p>
+              )}
               <p>
                 <span className={`${pill} ${mine.flagged ? 'border-danger/40 text-danger' : ''}`}>{STATUS_TEXT[mine.status]}</span>{' '}
                 <span className="text-muted">
@@ -225,17 +264,40 @@ function DsaIntegrityLog({ applicationId, roundId }: { applicationId: string; ro
                   ))}
                 </ul>
               )}
-              {mine.events.length > 0 && (
-                <ol className="flex flex-col divide-y divide-border rounded-md border border-border">
-                  {mine.events.map((e, i) => (
-                    <li key={i} className="flex flex-wrap items-center gap-2 px-3 py-1.5">
-                      <span className="w-24 shrink-0 tabular-nums text-muted">{time(e.at)}</span>
-                      <span className={e.severity === 'high' || e.severity === 'medium' ? 'font-medium text-danger' : ''}>{e.type.replaceAll('_', ' ').toLowerCase()}</span>
-                      {e.durationMs ? <span className="text-xs text-muted">{SECONDS(e.durationMs)}</span> : null}
-                    </li>
-                  ))}
-                </ol>
+              {mine.incidents ? (
+                mine.incidents.length > 0 && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-muted">
+                      <input type="checkbox" checked={onlyWarnings} onChange={(e) => setOnlyWarnings(e.target.checked)} /> Show warnings only
+                    </label>
+                    <ol className="flex flex-col divide-y divide-border rounded-md border border-border">
+                      {incidents.map((i) => (
+                        <IncidentRow
+                          key={i.id}
+                          incident={i}
+                          maxWarnings={mine.maxWarnings ?? 0}
+                          applicationId={applicationId}
+                          roundId={roundId}
+                          onReviewed={setReview}
+                        />
+                      ))}
+                    </ol>
+                  </>
+                )
+              ) : (
+                mine.events.length > 0 && (
+                  <ol className="flex flex-col divide-y divide-border rounded-md border border-border">
+                    {mine.events.map((e, i) => (
+                      <li key={i} className="flex flex-wrap items-center gap-2 px-3 py-1.5">
+                        <span className="w-24 shrink-0 tabular-nums text-muted">{time(e.at)}</span>
+                        <span className={e.severity === 'high' || e.severity === 'medium' ? 'font-medium text-danger' : ''}>{e.type.replaceAll('_', ' ').toLowerCase()}</span>
+                        {e.durationMs ? <span className="text-xs text-muted">{SECONDS(e.durationMs)}</span> : null}
+                      </li>
+                    ))}
+                  </ol>
+                )
               )}
+              {mine.detectionVersion && <p className="text-xs text-muted">Detection: {mine.detectionVersion}</p>}
             </>
           )}
         </div>
@@ -250,7 +312,7 @@ const INCIDENT_OUTCOME = { WARNING: 'Warning', TERMINATED: 'Ended the test', REC
  * Protection of an online test: warnings, every incident, and - when the warning limit ended the test - HR's review.
  * Nothing is sent to the candidate until HR decides here (never an automatic rejection).
  */
-function TestIntegrity({ applicationId, round, onChanged }: { applicationId: string; round: RoundEngineRound; onChanged: (d: ApplicationRoundEngine) => void }) {
+function TestIntegrity({ applicationId, round, onChanged, coding = false }: { applicationId: string; round: RoundEngineRound; onChanged: (d: ApplicationRoundEngine) => void; coding?: boolean }) {
   const g = round.integrity!;
   const review = g.status === 'INTEGRITY_VIOLATION_REVIEW';
   const [open, setOpen] = useState(review);
@@ -288,10 +350,15 @@ function TestIntegrity({ applicationId, round, onChanged }: { applicationId: str
           {review ? ' - your decision below decides what happens next' : ''}.
         </p>
       )}
-      <Button variant="ghost" className="self-start px-2 py-1" onClick={() => setOpen(!open)} aria-expanded={open}>
-        {open ? '▴ Hide incidents' : `▾ Incidents (${g.incidents.length})`}
-      </Button>
+      {coding ? (
+        <p className="text-xs text-muted">The incidents and warnings of this DSA / SQL round are in the monitoring record below.</p>
+      ) : (
+        <Button variant="ghost" className="self-start px-2 py-1" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? '▴ Hide incidents' : `▾ Incidents (${g.incidents.length})`}
+        </Button>
+      )}
       {open &&
+        !coding &&
         (g.incidents.length === 0 ? (
           <p className="text-muted">No monitored incident.</p>
         ) : (
@@ -309,10 +376,12 @@ function TestIntegrity({ applicationId, round, onChanged }: { applicationId: str
             ))}
           </ol>
         ))}
-      <p className="text-xs text-muted">
-        Browser signals only (the page was hidden or lost focus, full screen was left) and an on-device face count - never what was opened, and no image is
-        kept. A photo or someone walking past can be counted as a second face.
-      </p>
+      {!coding && (
+        <p className="text-xs text-muted">
+          Browser signals only (the page was hidden or lost focus, full screen was left) and an on-device face count - never what was opened, and no image is
+          kept. A photo or someone walking past can be counted as a second face.
+        </p>
+      )}
       {g.decision && (
         <p className="rounded-md border border-border bg-surface px-3 py-2">
           HR decision: <strong>{g.decision.decision === 'ADVANCE' ? 'advance' : 'reject'}</strong>
@@ -352,5 +421,109 @@ function TestIntegrity({ applicationId, round, onChanged }: { applicationId: str
         </div>
       )}
     </div>
+  );
+}
+
+const REVIEW_STATUSES: ProctorReviewStatus[] = ['CONFIRMED', 'DISMISSED', 'NEEDS_REVIEW'];
+
+/**
+ * One incident of a DSA / SQL round: when, what, how long, how sure, what the server did (warning / terminated /
+ * recorded), and HR's review (Confirmed / Dismissed / Requires further review, with a reason; stored and audited).
+ */
+function IncidentRow({
+  incident: i,
+  maxWarnings,
+  applicationId,
+  roundId,
+  onReviewed,
+}: {
+  incident: Incident;
+  maxWarnings: number;
+  applicationId: string;
+  roundId: string;
+  onReviewed: (r: DsaProctoringReview) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [status, setStatus] = useState<ProctorReviewStatus>(i.review?.status ?? 'CONFIRMED');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const outcome = outcomeText(i, maxWarnings);
+  const counted = i.outcome === 'WARNING' || i.outcome === 'TERMINATED';
+
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      onReviewed(await reviewProctorIncident(applicationId, roundId, i.id, { status, reason }));
+      setEditing(false);
+      setReason('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <li className="flex flex-col gap-1.5 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-24 shrink-0 tabular-nums text-muted">{time(i.at)}</span>
+        <span className={counted ? 'font-medium' : ''}>{eventLabel(i.type)}</span>
+        <span className="text-xs text-muted">{PROCTOR_INCIDENT_LABEL[i.category]}</span>
+        {i.durationMs ? <span className="text-xs text-muted">· {SECONDS(i.durationMs)}</span> : null}
+        {i.confidence !== null && <span className="text-xs text-muted">· confidence {Math.round(i.confidence * 100)}%</span>}
+        <span className={`ml-auto text-xs ${outcome.strong ? 'font-medium text-danger' : 'text-muted'}`}>{outcome.text}</span>
+      </div>
+      {(i.detail || i.note) && (
+        <p className="pl-26 text-xs text-muted">
+          {i.detail}
+          {i.detail && i.note ? ' - ' : ''}
+          {i.note}
+        </p>
+      )}
+      {i.review && !editing && (
+        <p className="text-xs">
+          <span className={`${pill} ${i.review.status === 'CONFIRMED' ? 'border-danger/40 text-danger' : ''}`}>{PROCTOR_REVIEW_LABEL[i.review.status]}</span>{' '}
+          <span className="text-muted">
+            {i.review.by ?? 'HR'}, {date(i.review.at)}: {i.review.reason}
+          </span>
+        </p>
+      )}
+      {editing ? (
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-surface p-2 text-sm">
+          <fieldset className="flex flex-wrap gap-3">
+            <legend className="sr-only">Review</legend>
+            {REVIEW_STATUSES.map((st) => (
+              <label key={st} className="flex items-center gap-1.5">
+                <input type="radio" name={`review-${roundId}-${i.id}`} checked={status === st} onChange={() => setStatus(st)} /> {PROCTOR_REVIEW_LABEL[st]}
+              </label>
+            ))}
+          </fieldset>
+          <label className="flex flex-col gap-1 text-xs font-medium">
+            Reason <span className="font-normal text-muted">(required; stored with your name in the audit log - it does not change the score or the warning count)</span>
+            <textarea rows={2} maxLength={500} className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </label>
+          {error && (
+            <p role="alert" className="text-xs text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button variant="primary" disabled={busy || reason.trim().length < 5} onClick={() => void save()}>
+              {busy && <Spinner />} Save review
+            </Button>
+            <Button variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        i.category !== 'SESSION' && (
+          <Button variant="ghost" className="self-start px-2 py-0.5 text-xs" onClick={() => setEditing(true)}>
+            {i.review ? 'Change review' : 'Review'}
+          </Button>
+        )
+      )}
+    </li>
   );
 }

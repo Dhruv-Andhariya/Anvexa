@@ -1,46 +1,66 @@
 @import "tailwindcss";
 
+/*
+ * Neutral, minimal palette: white workspace, light-grey sidebar, black / grey text, subtle borders and hovers.
+ * The Anvexa purple (--brand) is used sparingly (the logo mark). "accent" is the strong neutral used for primary
+ * buttons and selected states, so every existing component follows the new look without page-by-page changes.
+ */
 :root {
-  --background: #f6f7f9;
+  --background: #ffffff;
   --surface: #ffffff;
-  --foreground: #16181d;
-  --muted: #5b6270;
-  --border: #dde1e7;
-  --accent: #2f5bd3;
+  --sidebar: #f9f9f9;
+  --foreground: #0d0d0d;
+  --muted: #6b6b6b;
+  --border: #e5e5e5;
+  --border-strong: #d9d9d9;
+  --hover: #ececec;
+  --active: #e8e8e8;
+  --accent: #0d0d0d;
   --accent-foreground: #ffffff;
-  --accent-soft: #e8eefc;
-  --danger: #b42318;
-  --danger-soft: #fdecea;
-  --success: #1c7c4a;
-  --success-soft: #e6f4ec;
+  --accent-soft: #f3f3f3;
+  --brand: #6e56cf;
+  --danger: #c4321e;
+  --danger-soft: #fdf0ee;
+  --success: #17804b;
+  --success-soft: #eef7f1;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0f1115;
-    --surface: #171a21;
-    --foreground: #e8eaee;
-    --muted: #9aa2b1;
-    --border: #2a2f3a;
-    --accent: #7c9cf5;
-    --accent-foreground: #0f1115;
-    --accent-soft: #1d2640;
-    --danger: #f27a6e;
-    --danger-soft: #3a1d1b;
+    --background: #212121;
+    --surface: #212121;
+    --sidebar: #181818;
+    --foreground: #ececec;
+    --muted: #a3a3a3;
+    --border: #363636;
+    --border-strong: #444444;
+    --hover: #2f2f2f;
+    --active: #333333;
+    --accent: #ececec;
+    --accent-foreground: #0d0d0d;
+    --accent-soft: #2a2a2a;
+    --brand: #8b74e6;
+    --danger: #f08070;
+    --danger-soft: #3a1f1c;
     --success: #5fcf93;
-    --success-soft: #16301f;
+    --success-soft: #17291f;
   }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-soft: var(--accent-soft);
+  --color-brand: var(--brand);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-success: var(--success);
@@ -48,8 +68,22 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+/* no sideways page scroll ("clip", not "hidden": hidden would break the sticky sidebar) */
+body {
+  overflow-x: clip;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+/* simple tables: hairline separators, grey headers */
+table {
+  border-color: var(--border);
+}
+th {
+  font-weight: 500;
+  color: var(--muted);
 }

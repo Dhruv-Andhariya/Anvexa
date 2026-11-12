@@ -96,7 +96,7 @@ export function GdBoard() {
   if (!rounds) {
     return (
       <Card className="flex min-h-48 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading…
+        <Spinner className="text-muted" /> Loading…
       </Card>
     );
   }
@@ -104,7 +104,7 @@ export function GdBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Group Discussion</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Group Discussion</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students who pass the round before a group discussion wait here automatically. Schedule a GD to split them into
           groups: each group gets its own time slot, room and topic, and an AI moderator runs the discussion.
@@ -118,7 +118,7 @@ export function GdBoard() {
             Add a round of type <span className="font-medium">Group Discussion</span> to a job on the Publish page. Its questions
             are the discussion topics.
           </p>
-          <Link href="/publish" className="text-sm font-medium text-accent hover:underline">
+          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Open the Publish page →
           </Link>
         </Card>
@@ -172,7 +172,7 @@ function RoundPanel({ roundId, onChanged }: { roundId: string; onChanged: () => 
   if (!data) {
     return (
       <Card className="flex min-h-32 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading the round…
+        <Spinner className="text-muted" /> Loading the round…
       </Card>
     );
   }
@@ -194,7 +194,7 @@ function RoundPanel({ roundId, onChanged }: { roundId: string; onChanged: () => 
               ? 'Students only reach the group discussion once the job\'s rounds are complete.'
               : 'Each question of the Group Discussion round is a topic. Add at least one before scheduling.'}
           </p>
-          <Link href={`/publish?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-accent hover:underline">
+          <Link href={`/publish?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
             Open the Publish page →
           </Link>
         </Card>
@@ -452,11 +452,11 @@ function EventCard({ event, topics, onUpdated }: { event: GdEvent; topics: GdTop
                 <span className={`${pill} border-border text-muted`}>{BATCH[b.status]}</span>
               </div>
               <div className="flex gap-3 text-xs font-medium">
-                <Link href={`/group-discussion/live/${encodeURIComponent(b.id)}`} className="text-accent hover:underline">
+                <Link href={`/group-discussion/live/${encodeURIComponent(b.id)}`} className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
                   {b.status === 'LOBBY_OPEN' || b.status === 'IN_PROGRESS' ? '● Join live' : 'Live page'}
                 </Link>
                 {b.status === 'COMPLETED' && (
-                  <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-accent hover:underline">
+                  <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
                     Results
                   </Link>
                 )}

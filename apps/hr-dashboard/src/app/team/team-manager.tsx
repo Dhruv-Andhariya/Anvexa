@@ -63,7 +63,7 @@ export function TeamManager() {
   if (!team) {
     return (
       <Card className="flex min-h-40 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading team…
+        <Spinner className="text-muted" /> Loading team…
       </Card>
     );
   }

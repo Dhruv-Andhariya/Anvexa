@@ -677,16 +677,37 @@ export class RoundEngineService {
    * Ends the coding attempt (once) and, through finish() and progress(), records the result and queues the next step:
    * the next round's invitation, or the cleared / rejection email. Safe to repeat: nothing happens twice.
    */
-  async finishCodingAttempt(token: string | undefined, reason: CodingFinishReason, state: CodingState): Promise<void> {
+  async finishCodingAttempt(token: string | undefined, reason: CodingFinishReason, state: CodingState, termination?: { reason: string; warnings: number } | null): Promise<void> {
     const o = await this.open(token, { kind: 'CODING', allowFinished: true });
     const attempt = o.attempt;
     if (!attempt) throw engineError(HttpStatus.CONFLICT, 'ASSESSMENT_NOT_STARTED', 'Please start the assessment first.');
+    if (attempt.status === 'IN_PROGRESS' && reason === 'disqualified' && termination) {
+      // terminated by the proctoring warning limit: graded (HR sees the score) but held for HR's integrity review
+      await this.terminateCoding(attempt, termination, { ...state, finishReason: reason });
+      return;
+    }
     if (attempt.status === 'IN_PROGRESS') {
       await this.store.saveCodingState(attempt.id, { ...state, finishReason: reason });
       await this.finish(attempt, reason === 'time_expired' ? 'TIMED_OUT' : 'SUBMITTED');
     } else if (!attempt.progressedAt) {
       await this.progress(attempt.id); // finished earlier but the next step did not run yet
     }
+  }
+
+  private async terminateCoding(attempt: AttemptRow, t: { reason: string; warnings: number }, state: CodingState): Promise<void> {
+    const at = this.now();
+    const protection: AssessmentProtectionSettings = { maxWarnings: Math.min(5, Math.max(1, t.warnings)), tabSwitchMonitoring: true, fullscreenRequired: true, multipleFacesPolicy: 'WARN' };
+    if (await this.store.terminateCodingAttempt(attempt.id, { at, reason: t.reason, warningCount: t.warnings + 1, protection, state })) {
+      await this.audit.record({
+        tenantId: attempt.tenantId,
+        actorUserId: null,
+        action: 'assessment.terminated',
+        subjectType: 'application',
+        subjectId: attempt.applicationId,
+        metadata: { roundId: attempt.roundId, kind: 'CODING', warnings: t.warnings, integrityStatus: 'INTEGRITY_VIOLATION_REVIEW' },
+      });
+    }
+    await this.progress(attempt.id); // grades it; the next step waits for HR's decision
   }
 
   /**

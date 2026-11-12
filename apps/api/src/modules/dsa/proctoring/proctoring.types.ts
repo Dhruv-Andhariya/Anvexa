@@ -5,12 +5,12 @@
  * so HR can show both on one timeline later. These events are observations, never proof of cheating.
  */
 
-import { CAMERA_EVENT_TYPES, type CameraEventType } from '@hireflow/contracts';
+import { CAMERA_EVENT_TYPES, type CameraEventType, type ProctorCandidateWarning, type ProctorIncidentReview, type ProtectionOutcome } from '@hireflow/contracts';
 
 /** Shown to the candidate before monitoring starts (attempts without the camera); bump when the notice changes. */
 export const CONSENT_VERSION = 'dsa-proctoring-v2';
 /** The notice of a camera-monitored attempt (AI camera: gaze, face in view, one person). Bump when it changes. */
-export const CAMERA_CONSENT_VERSION = 'dsa-proctoring-camera-v3';
+export const CAMERA_CONSENT_VERSION = 'dsa-proctoring-camera-v4';
 
 /** AI camera alerts (contracts camera-proctoring.ts) and the older webcam events, still accepted from older pages. */
 export const LEGACY_CAMERA_TYPES = ['CAMERA_OFF', 'NO_FACE', 'MULTIPLE_FACES'] as const;
@@ -83,6 +83,19 @@ export interface ProctorEvent {
   detail: string | null;
   /** AI camera alerts: how sure the model was (0..1). Missing on older records. */
   confidence?: number | null;
+  /**
+   * What the warning manager decided (shared countProtectionIncident): WARNING / TERMINATED = a confirmed incident that
+   * used up warning `warningNumber`; GROUPED = the same act as the previous counted one; RECORDED = kept for HR only.
+   * Missing on records made before the warning manager (they are re-counted the old way).
+   */
+  outcome?: ProtectionOutcome;
+  warningNumber?: number | null;
+  /** Why a camera alert was not counted (technical, too short, low confidence...). */
+  note?: string | null;
+  /** The page's own id for this event: the same id sent again (a retry) is ignored. */
+  clientId?: string | null;
+  /** HR's review (Confirmed / Dismissed / Requires further review). Never changes a score or the warning count. */
+  review?: ProctorIncidentReview | null;
 }
 
 export interface ProctorSession {
@@ -103,6 +116,15 @@ export interface ProctorSession {
   events: ProctorEvent[];
   /** Events dropped because the per-attempt cap was reached. */
   dropped: number;
+  /** DSA (programs), SQL, or both in one round: set at consent. Each attempt has its own warning count. */
+  kind?: 'code' | 'sql' | 'mixed';
+  /** The ONE warning counter of this attempt (changed only under the record's lock). Missing on older records. */
+  warningCount?: number;
+  /** Set once, when the third confirmed incident terminated the attempt (backend-enforced). */
+  terminatedAt?: number | null;
+  terminationReason?: string | null;
+  /** Detection rules / models in force when the candidate consented (traceability). */
+  detectionVersion?: string | null;
 }
 
 export type ProctoringStatus = 'clean' | 'warning' | 'review' | 'disqualified';
@@ -129,7 +151,10 @@ export interface ProctoringSummary {
   noFaceCount: number;
   multipleFacesCount: number;
   /** AI camera alerts by kind (suspicious patterns for HR to review, never proof). Older webcam events counted in. */
-  camera: { monitored: boolean; gazeAway: number; faceMissing: number; multipleFaces: number; headMovement: number; stopped: number };
+  camera: { monitored: boolean; gazeAway: number; faceMissing: number; multipleFaces: number; device: number; headMovement: number; stopped: number; unavailable: number };
+  /** Terminated by the warning limit (the third confirmed incident). */
+  terminatedAt: string | null;
+  terminationReason: string | null;
   /** Allowed warnings (0 = no limit) and how many suspicious events have been used up. */
   strikesAllowed: number;
   strikesUsed: number;
@@ -150,6 +175,10 @@ export interface CandidateProctorState {
   /** Warnings the candidate is allowed before the next suspicious event ends the assessment (0 = no limit). */
   strikesAllowed: number;
   strikesUsed: number;
+  /** The latest warning issued (shown until the page is reloaded); null = none yet. */
+  warning: ProctorCandidateWarning | null;
+  /** The assessment was terminated by the warning limit. */
+  terminated: boolean;
 }
 
 /** Policy values safe to show HR. */
@@ -189,7 +218,7 @@ export const MONITORED_DESCRIPTIONS = [
 
 /** Added to the list when the attempt is camera-monitored. */
 export const CAMERA_MONITORED_DESCRIPTIONS = [
-  'Your webcam must stay on for the whole test; turning it off or withdrawing its permission pauses the test',
-  'Repeated or long looks away from the screen, your face leaving the camera view, more than one face in view, and very frequent head turning (a single glance never counts)',
-  'These are suspicious patterns for the hiring team to review, never proof on their own. No video, image or face data leaves your computer: only short alerts such as "looked left 4 times in 60 s" are sent',
+  'Your webcam must stay on for the whole test; turning it off or withdrawing its permission pauses the test (this is not counted against you)',
+  'Another person in view, a phone in view, your face not visible for a sustained time, and looking away from the screen continuously for more than 2 minutes (glances, blinking and normal head movement never count)',
+  'These are possible integrity incidents for the hiring team to review, never proof on their own. No video, image or face data leaves your computer: only short alerts such as "phone visible 4 s" are sent',
 ];

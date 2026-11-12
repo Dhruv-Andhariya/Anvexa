@@ -39,7 +39,7 @@ export function AcceptInvitation({ token }: { token: string }) {
       <Card className="flex flex-col gap-3">
         <h1 className="text-lg font-semibold">Invitation unavailable</h1>
         <p className="text-sm text-muted">{loadError}</p>
-        <Link href="/login" className="text-sm font-medium text-accent hover:underline">
+        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
           Go to log in
         </Link>
       </Card>
@@ -48,7 +48,7 @@ export function AcceptInvitation({ token }: { token: string }) {
   if (!invite) {
     return (
       <Card className="flex min-h-40 items-center justify-center gap-3 text-muted">
-        <Spinner className="text-accent" /> Loading invitation…
+        <Spinner className="text-muted" /> Loading invitation…
       </Card>
     );
   }
