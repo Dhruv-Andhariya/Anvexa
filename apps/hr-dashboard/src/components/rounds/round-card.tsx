@@ -1,6 +1,13 @@
 'use client';
 
-import { QUESTION_KINDS, ROUND_TYPES, ROUNDS_LIMITS, type PassMode, type QuestionKind, type RoundType } from '@hireflow/contracts';
+import {
+  QUESTION_KINDS,
+  ROUND_TYPES,
+  ROUNDS_LIMITS,
+  type PassMode,
+  type QuestionKind,
+  type RoundType,
+} from '@hireflow/contracts';
 import { useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { HR_ROUND_TYPES, PASS_MODES, messagesUnder, move, newQuestion, passMarkHint, passMarkMax, passMarkProblem, roundTypeLabel, type RoundDraft, type Validation } from '@/lib/rounds';
@@ -8,6 +15,7 @@ import { changePassRule } from '@/lib/rounds-api';
 import { Button, Spinner, inputClass } from '../ui';
 import { AiGeneratePanel } from './ai-generate-panel';
 import { CodingAuthorPanel } from './coding-author-panel';
+import { CodingPlan } from './coding-plan';
 import { InterviewProtectionSettings } from './interview-protection-settings';
 import { QuestionEditor } from './question-editor';
 import { RoundSkipButton, SkippedNote } from './round-skip';
@@ -49,22 +57,17 @@ export function RoundCard({
   const [aiOpen, setAiOpen] = useState(false);
   // DSA coding round: every question is a coding problem (no type to choose); AI or HR's file add problems with tests
   const codingRound = round.type === 'CODING';
+  // SQL round: every question is a coding question (one SQL query), so no question type is offered
+  const sqlRound = round.type === 'SQL';
   const [codingPanel, setCodingPanel] = useState<'ai' | 'upload' | null>(null);
-  // HR's plan for a coding round: how many problems, and the marks of each one
+  // HR's plan for a coding round: how many problems (each problem's marks are set in its own section, CodingPlan)
   const wholeOrNull = (v: string | undefined, max: number) => {
     const n = Number(v);
     return v && Number.isInteger(n) && n >= 1 && n <= max ? n : null;
   };
-  const sameMarks = round.questions.length && round.questions.every((q) => q.marks === round.questions[0]!.marks) ? round.questions[0]!.marks : '';
-  const targetText = round.targetCount ?? (codingRound && round.questions.length ? String(round.questions.length) : '');
-  const eachText = round.marksEach ?? (codingRound ? sameMarks : '');
+  const targetText = round.targetCount ?? ((codingRound || sqlRound) && round.questions.length ? String(round.questions.length) : '');
   const target = wholeOrNull(targetText, 50);
-  const marksEach = wholeOrNull(eachText, ROUNDS_LIMITS.marksMax);
-  const room = Math.max(0, (codingRound && target ? target : ROUNDS_LIMITS.questionsMax) - round.questions.length);
-  const setMarksEach = (v: string) => {
-    const n = wholeOrNull(v, ROUNDS_LIMITS.marksMax);
-    set({ marksEach: v, ...(n ? { questions: round.questions.map((q) => ({ ...q, marks: String(n) })) } : {}) });
-  };
+  const room = Math.max(0, ((codingRound || sqlRound) && target ? target : ROUNDS_LIMITS.questionsMax) - round.questions.length);
   const [addKind, setAddKind] = useState<QuestionKind>(ROUND_TYPES[round.type].kinds[0]!);
   const set = (patch: Partial<RoundDraft>) => onChange({ ...round, ...patch });
   const path = `rounds.${index}`;
@@ -335,8 +338,8 @@ export function RoundCard({
 
           {round.type === 'AI_INTERVIEW' && <InterviewProtectionSettings jobId={jobId} roundId={round.id} readOnly={disabled} />}
 
-          {codingRound && (
-            <fieldset className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-3" disabled={disabled}>
+          {(codingRound || sqlRound) && (
+            <fieldset className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-2" disabled={disabled}>
               <legend className="px-1 text-sm font-semibold">Problems in this round</legend>
               <label className="flex flex-col gap-1 text-sm font-medium">
                 Number of questions
@@ -352,24 +355,8 @@ export function RoundCard({
                 />
                 {targetText && !target && <span className="text-xs text-danger">A whole number from 1 to 50.</span>}
               </label>
-              <label className="flex flex-col gap-1 text-sm font-medium">
-                Marks per question
-                <input
-                  type="number"
-                  min={1}
-                  max={ROUNDS_LIMITS.marksMax}
-                  placeholder="e.g. 10"
-                  className={inputClass}
-                  value={eachText}
-                  aria-invalid={!!eachText && !marksEach}
-                  onChange={(e) => setMarksEach(e.target.value)}
-                />
-                {eachText && !marksEach && <span className="text-xs text-danger">A whole number from 1 to {ROUNDS_LIMITS.marksMax}.</span>}
-              </label>
               <div className="flex flex-col justify-end gap-0.5 text-sm">
-                <span className="font-medium">
-                  {target && marksEach ? `Total: ${target * marksEach} marks` : 'Total: set both numbers'}
-                </span>
+                <span className="font-medium">Total: {totalMarks} marks</span>
                 <span className={`text-xs ${target && round.questions.length !== target ? 'text-danger' : 'text-muted'}`}>
                   {target
                     ? round.questions.length < target
@@ -380,6 +367,7 @@ export function RoundCard({
                     : `${round.questions.length} added`}
                 </span>
               </div>
+              <CodingPlan jobId={jobId} variant={sqlRound ? 'sql' : 'dsa'} round={round} target={target} marksEach={null} disabled={disabled} onChange={onChange} />
             </fieldset>
           )}
 
@@ -394,7 +382,7 @@ export function RoundCard({
                     <Button
                       onClick={() => {
                         const q = newQuestion('CODING');
-                        set({ questions: [...round.questions, marksEach ? { ...q, marks: String(marksEach) } : q] });
+                        set({ questions: [...round.questions, q] });
                       }}
                       disabled={room <= 0}
                     >
@@ -409,14 +397,17 @@ export function RoundCard({
                   </span>
                 ) : (
                   <span className="ml-auto flex flex-wrap items-center gap-2">
-                    <select aria-label="Question type to add" className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm" value={addKind} onChange={(e) => setAddKind(e.target.value as QuestionKind)}>
-                      {KIND_KEYS.map((k) => (
-                        <option key={k} value={k}>
-                          {QUESTION_KINDS[k].label}
-                        </option>
-                      ))}
-                    </select>
-                    <Button onClick={() => set({ questions: [...round.questions, newQuestion(addKind)] })} disabled={round.questions.length >= ROUNDS_LIMITS.questionsMax}>
+                    {/* SQL rounds are coding only: every question is one SQL query, so there is no type to choose */}
+                    {!sqlRound && (
+                      <select aria-label="Question type to add" className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm" value={addKind} onChange={(e) => setAddKind(e.target.value as QuestionKind)}>
+                        {KIND_KEYS.map((k) => (
+                          <option key={k} value={k}>
+                            {QUESTION_KINDS[k].label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <Button onClick={() => set({ questions: [...round.questions, newQuestion(sqlRound ? 'CODING' : addKind)] })} disabled={round.questions.length >= ROUNDS_LIMITS.questionsMax}>
                       + Add question
                     </Button>
                     <Button onClick={() => setAiOpen(true)} disabled={aiOpen || round.questions.length >= ROUNDS_LIMITS.questionsMax}>
@@ -433,9 +424,10 @@ export function RoundCard({
                 round={round}
                 mode={codingPanel}
                 room={room}
-                marksEach={marksEach}
+                marksEach={null}
                 onClose={() => setCodingPanel(null)}
-                onAdd={(qs) => set({ questions: [...round.questions, ...qs].slice(0, ROUNDS_LIMITS.questionsMax) })}
+                // "Marks per question" then shows the common value only while every problem has the same marks
+                onAdd={(qs) => set({ marksEach: undefined, questions: [...round.questions, ...qs].slice(0, ROUNDS_LIMITS.questionsMax) })}
               />
             )}
 

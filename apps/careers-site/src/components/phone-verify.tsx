@@ -1,7 +1,7 @@
 'use client';
 
 import Script from 'next/script';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CONTENT } from '@/content';
 import { ApiError, sendOtp, verifyOtp } from '@/lib/api';
 import { Button, Field, Spinner, describedBy, inputClass } from './ui';
@@ -17,6 +17,11 @@ type OtpState = 'idle' | 'sending' | 'sent' | 'verifying' | 'verified';
 interface Props {
   companySlug: string;
   phone: string;
+  /**
+   * Apply form: the email typed in the form; the code is emailed there and is only valid with that email.
+   * Left out ("my data" page): the code goes to the email saved with this phone's application.
+   */
+  email?: string;
   onPhoneChange: (phone: string) => void;
   /** Called with the signed phone proof once verified, or null when the number changes. */
   onVerified: (otpToken: string | null) => void;
@@ -28,36 +33,51 @@ interface Props {
 const T = CONTENT.form;
 
 /** Mobile number + "Send code" + 6-digit code. Used by the apply form and the "my data" page. */
-export function PhoneVerify({ companySlug, phone, onPhoneChange, onVerified, error, disabled }: Props) {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function PhoneVerify({ companySlug, phone, email, onPhoneChange, onVerified, error, disabled }: Props) {
   const [state, setState] = useState<OtpState>('idle');
   const [code, setCode] = useState('');
   const [note, setNote] = useState('');
   const [ownError, setOwnError] = useState('');
   const shownError = ownError || error;
+  const emailTo = email?.trim().toLowerCase();
+  // the email the current code was sent to: a different email in the form needs a new code
+  const [sentFor, setSentFor] = useState<string | undefined>(emailTo);
+
+  const reset = () => {
+    setState('idle');
+    setCode('');
+    setNote('');
+    onVerified(null);
+  };
 
   const changePhone = (value: string) => {
     onPhoneChange(value);
-    if (state !== 'idle') {
-      // A new number must be verified again.
-      setState('idle');
-      setCode('');
-      setNote('');
-      onVerified(null);
-    }
+    if (state !== 'idle') reset(); // A new number must be verified again.
   };
+
+  const emailChanged = email !== undefined && state !== 'idle' && emailTo !== sentFor;
+  useEffect(() => {
+    if (emailChanged) reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the email changes
+  }, [emailChanged]);
 
   const send = async () => {
     setOwnError('');
     const captchaToken = TURNSTILE_SITE_KEY
       ? (document.querySelector<HTMLInputElement>('[name="cf-turnstile-response"]')?.value ?? '')
       : undefined;
+    if (email !== undefined && !EMAIL_RE.test(emailTo ?? '')) return setOwnError(T.otp.needEmail);
     if (TURNSTILE_SITE_KEY && !captchaToken) return setOwnError(T.otp.captcha);
     const before = state;
     setState('sending');
     try {
-      const res = await sendOtp(companySlug, phone, captchaToken);
+      const res = await sendOtp(companySlug, phone, emailTo, captchaToken);
+      setSentFor(emailTo);
       setState('sent');
-      setNote(res.devCode ? `${T.otp.sent} ${T.otp.devNotice(res.devCode)}` : T.otp.sent);
+      const sent = res.sentTo === 'email' ? T.otp.sentEmail(emailTo) : T.otp.sent;
+      setNote(res.devCode ? `${sent} ${T.otp.devNotice(res.devCode)}` : sent);
     } catch (err) {
       // A failed "Resend" (e.g. "wait 30 seconds") keeps the code box: the code sent earlier still works.
       setState(before === 'sent' ? 'sent' : 'idle');
@@ -72,7 +92,7 @@ export function PhoneVerify({ companySlug, phone, onPhoneChange, onVerified, err
     setOwnError('');
     setState('verifying');
     try {
-      const res = await verifyOtp(companySlug, phone, code);
+      const res = await verifyOtp(companySlug, phone, code, emailTo);
       setState('verified');
       setNote('');
       onVerified(res.otpToken);

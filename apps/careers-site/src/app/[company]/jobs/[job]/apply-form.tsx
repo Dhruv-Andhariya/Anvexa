@@ -186,6 +186,7 @@ export function ApplyForm({ companySlug, jobSlug, experience }: Props) {
           key={phoneKey}
           companySlug={companySlug}
           phone={draft.phone}
+          email={draft.email}
           onPhoneChange={(v) => set('phone', v)}
           onVerified={(token) => {
             setOtpToken(token);

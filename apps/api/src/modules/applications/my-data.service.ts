@@ -120,7 +120,15 @@ export class MyDataService {
     }
     const company = await this.jobs.company(parsed.data.companySlug);
     if (!company) throw applicationsError(HttpStatus.NOT_FOUND, 'COMPANY_NOT_FOUND', 'Company not found.');
-    if (!this.otp.checkProof(parsed.data.otpToken, company.tenantId, parsed.data.phone)) {
+    const proof = this.otp.checkProof(parsed.data.otpToken, company.tenantId, parsed.data.phone);
+    // A code sent by email must have gone to the email saved with this student's application.
+    const saved = proof?.email
+      ? await this.db.candidate.findUnique({
+          where: { tenantId_phone: { tenantId: company.tenantId, phone: parsed.data.phone } },
+          select: { email: true },
+        })
+      : null;
+    if (!proof || (saved && saved.email.trim().toLowerCase() !== proof.email)) {
       throw applicationsError(HttpStatus.UNAUTHORIZED, 'PHONE_NOT_VERIFIED', 'Please verify your phone number again.');
     }
     return { tenantId: company.tenantId, phone: parsed.data.phone };

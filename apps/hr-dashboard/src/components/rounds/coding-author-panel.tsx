@@ -1,6 +1,6 @@
 'use client';
 
-import { codingCsvTemplate, type AuthoredCodingProblem, type CodingProblemsResult } from '@hireflow/contracts';
+import { ROUNDS_LIMITS, codingCsvTemplate, type AuthoredCodingProblem, type CodingProblemsResult, type Difficulty } from '@hireflow/contracts';
 import { useRef, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { fromAuthored, type QuestionDraft, type RoundDraft } from '@/lib/rounds';
@@ -9,6 +9,25 @@ import { Button, Spinner, inputClass } from '../ui';
 import { QuestionEditor } from './question-editor';
 
 const ORIGIN: Record<AuthoredCodingProblem['origin'], string> = { ai: 'Written by AI', document: 'From your file', csv: 'From your CSV' };
+
+/** HR's own settings for one problem the AI writes (used when more than one problem is asked for). */
+interface ProblemSlot {
+  difficulty: Difficulty;
+  topics: string;
+  marks: string;
+}
+
+const topicList = (s: string) =>
+  s
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+
+const wholeMarks = (s: string): number | null => {
+  const n = Number(s);
+  return s.trim() && Number.isInteger(n) && n >= 1 && n <= ROUNDS_LIMITS.marksMax ? n : null;
+};
 
 /**
  * DSA coding round: problems written by the AI, or read from HR's PDF / Word / CSV file. Every test output of an AI
@@ -37,6 +56,20 @@ export function CodingAuthorPanel({
   const [count, setCount] = useState(Math.min(5, Math.max(1, room || 1)));
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>('MEDIUM');
   const [topics, setTopics] = useState('');
+  // more than one problem: each has its own difficulty, topics and marks, and the AI writes them one by one
+  const newSlot = (): ProblemSlot => ({ difficulty: 'MEDIUM', topics: '', marks: marksEach ? String(marksEach) : '' });
+  const [slots, setSlots] = useState<ProblemSlot[]>(() => Array.from({ length: count }, newSlot));
+  const perProblem = count > 1;
+  const changeCount = (n: number) => {
+    setCount(n);
+    setSlots((s) => (s.length >= n ? s.slice(0, n) : [...s, ...Array.from({ length: n - s.length }, newSlot)]));
+  };
+  const setSlot = (i: number, patch: Partial<ProblemSlot>) => setSlots((s) => s.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const slotMarksBad = slots.some((s) => s.marks.trim() && !wholeMarks(s.marks));
+  // which problem the AI is writing now (per-problem generation), for the progress line
+  const [progress, setProgress] = useState(0);
+  // the problems carry HR's own marks (per-problem settings): "Marks per question" of the round does not overwrite them
+  const [ownMarks, setOwnMarks] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<CodingProblemsResult | null>(null);
@@ -46,9 +79,16 @@ export function CodingAuthorPanel({
   const [editing, setEditing] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
-  const show = (r: CodingProblemsResult) => {
+  /** Shows the problems; `marks[i]` = HR's own marks for problem i (per-problem settings), else its own. */
+  const show = (r: CodingProblemsResult, marks: (number | null)[] = []) => {
     setResult(r);
-    setDrafts(r.problems.map(fromAuthored));
+    setDrafts(
+      r.problems.map((p, i) => {
+        const d = fromAuthored(p);
+        const m = marks[i];
+        return m ? { ...d, marks: String(m) } : d;
+      }),
+    );
     setEditing(null);
     setPicked(new Set(r.problems.map((_, i) => i).slice(0, room)));
   };
@@ -56,6 +96,7 @@ export function CodingAuthorPanel({
     setBusy(true);
     setError('');
     setResult(null);
+    setOwnMarks(false);
     try {
       show(await action());
     } catch (err) {
@@ -64,19 +105,51 @@ export function CodingAuthorPanel({
       setBusy(false);
     }
   };
+  const existingTitles = () => round.questions.map((q) => q.coding?.title || q.text).filter(Boolean);
   const generate = () =>
-    run(() =>
-      generateCodingProblems(jobId, {
-        count,
-        difficulty,
-        topics: topics
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .slice(0, 10),
-        avoid: round.questions.map((q) => q.coding?.title || q.text).filter(Boolean).slice(0, 100),
-      }),
-    );
+    run(() => generateCodingProblems(jobId, { count, difficulty, topics: topicList(topics), avoid: existingTitles().slice(0, 100) }));
+
+  /**
+   * Per-problem settings: one AI request per problem (its own difficulty and topics), one after the other so each one
+   * avoids the problems already written. A failed problem does not lose the ones already written.
+   */
+  const generateEach = async () => {
+    setBusy(true);
+    setError('');
+    setResult(null);
+    const problems: AuthoredCodingProblem[] = [];
+    const marks: (number | null)[] = [];
+    const dropped: CodingProblemsResult['dropped'] = [];
+    const avoid = existingTitles();
+    try {
+      for (const [i, slot] of slots.entries()) {
+        setProgress(i + 1);
+        const r = await generateCodingProblems(jobId, { count: 1, difficulty: slot.difficulty, topics: topicList(slot.topics), avoid: avoid.slice(-100) });
+        for (const p of r.problems) {
+          problems.push(p);
+          marks.push(wholeMarks(slot.marks));
+          const d = fromAuthored(p);
+          avoid.push(d.coding?.title || d.text);
+        }
+        dropped.push(...r.dropped.map((d) => ({ ...d, title: `Problem ${i + 1}: ${d.title}` })));
+        if (!r.problems.length && !r.dropped.length) dropped.push({ title: `Problem ${i + 1}`, reason: 'The AI did not write a usable problem this time.' });
+      }
+    } catch (err) {
+      const why = err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
+      setError(problems.length ? `${why} The problems written before this are shown below.` : why);
+    } finally {
+      if (problems.length || dropped.length) {
+        show({ problems, dropped }, marks);
+        setOwnMarks(true);
+      }
+      setProgress(0);
+      setBusy(false);
+    }
+  };
+  let busyText = 'Writing the problems and checking every test output on the code runner… (up to a minute)';
+  if (mode !== 'ai') busyText = 'Reading the file…';
+  else if (progress) busyText = `Writing problem ${progress} of ${count} and checking its test outputs on the code runner… (up to a minute each)`;
+
   const upload = (file: File | undefined) => {
     if (file) void run(() => importCodingProblems(jobId, file));
   };
@@ -99,32 +172,90 @@ export function CodingAuthorPanel({
       </div>
 
       {mode === 'ai' ? (
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Problems
-            <select className={`${inputClass} w-24`} value={count} onChange={(e) => setCount(Number(e.target.value))} disabled={busy}>
-              {[1, 2, 3, 4, 5].filter((n) => n <= Math.max(1, room)).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Problems
+              <select className={`${inputClass} w-24`} value={count} onChange={(e) => changeCount(Number(e.target.value))} disabled={busy}>
+                {[1, 2, 3, 4, 5].filter((n) => n <= Math.max(1, room)).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!perProblem && (
+              <>
+                <label className="flex flex-col gap-1 text-sm font-medium">
+                  Difficulty
+                  <select className={`${inputClass} w-32`} value={difficulty} onChange={(e) => setDifficulty(e.target.value as typeof difficulty)} disabled={busy}>
+                    <option value="EASY">Easy</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HARD">Hard</option>
+                  </select>
+                </label>
+                <label className="flex min-w-56 flex-1 flex-col gap-1 text-sm font-medium">
+                  Topics (optional, comma separated)
+                  <input className={inputClass} placeholder="e.g. arrays, strings, hashing" value={topics} onChange={(e) => setTopics(e.target.value)} disabled={busy} maxLength={600} />
+                </label>
+                <Button variant="primary" onClick={() => void generate()} disabled={busy}>
+                  {busy && <Spinner />} Generate
+                </Button>
+              </>
+            )}
+          </div>
+
+          {perProblem && (
+            <fieldset className="flex flex-col gap-2" disabled={busy}>
+              <legend className="mb-1 text-xs text-muted">Settings for each problem (the AI writes them one by one)</legend>
+              {slots.map((s, i) => (
+                <div key={i} className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-2">
+                  <span className="self-center text-sm font-semibold">Problem {i + 1}</span>
+                  <label className="flex flex-col gap-1 text-xs font-medium">
+                    Difficulty
+                    <select
+                      className={`${inputClass} w-28 py-1`}
+                      value={s.difficulty}
+                      onChange={(e) => setSlot(i, { difficulty: e.target.value as Difficulty })}
+                    >
+                      <option value="EASY">Easy</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HARD">Hard</option>
+                    </select>
+                  </label>
+                  <label className="flex min-w-48 flex-1 flex-col gap-1 text-xs font-medium">
+                    Topics (optional, comma separated)
+                    <input
+                      className={`${inputClass} py-1`}
+                      placeholder={i === 0 ? 'e.g. arrays' : 'e.g. strings, hashing'}
+                      value={s.topics}
+                      maxLength={600}
+                      onChange={(e) => setSlot(i, { topics: e.target.value })}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium">
+                    Marks
+                    <input
+                      type="number"
+                      min={1}
+                      max={ROUNDS_LIMITS.marksMax}
+                      placeholder="AI's"
+                      className={`${inputClass} w-20 py-1`}
+                      value={s.marks}
+                      aria-invalid={!!s.marks.trim() && !wholeMarks(s.marks)}
+                      onChange={(e) => setSlot(i, { marks: e.target.value })}
+                    />
+                  </label>
+                </div>
               ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Difficulty
-            <select className={`${inputClass} w-32`} value={difficulty} onChange={(e) => setDifficulty(e.target.value as typeof difficulty)} disabled={busy}>
-              <option value="EASY">Easy</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="HARD">Hard</option>
-            </select>
-          </label>
-          <label className="flex min-w-56 flex-1 flex-col gap-1 text-sm font-medium">
-            Topics (optional, comma separated)
-            <input className={inputClass} placeholder="e.g. arrays, strings, hashing" value={topics} onChange={(e) => setTopics(e.target.value)} disabled={busy} maxLength={600} />
-          </label>
-          <Button variant="primary" onClick={() => void generate()} disabled={busy}>
-            {busy && <Spinner />} Generate
-          </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="primary" onClick={() => void generateEach()} disabled={busy || slotMarksBad}>
+                  {busy && <Spinner />} Generate {count} problems
+                </Button>
+                {slotMarksBad && <span className="text-xs text-danger">Marks: a whole number from 1 to {ROUNDS_LIMITS.marksMax}, or leave empty.</span>}
+              </div>
+            </fieldset>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -154,7 +285,7 @@ export function CodingAuthorPanel({
         </div>
       )}
 
-      {busy && <p className="text-xs text-muted">{mode === 'ai' ? 'Writing the problems and checking every test output on the code runner… (up to a minute)' : 'Reading the file…'}</p>}
+      {busy && <p className="text-xs text-muted">{busyText}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -254,7 +385,8 @@ export function CodingAuthorPanel({
                 variant="primary"
                 disabled={!picked.size || picked.size > room}
                 onClick={() => {
-                  onAdd(drafts.filter((_, i) => picked.has(i)).map((d) => (marksEach ? { ...d, marks: String(marksEach) } : d)));
+                  // per-problem settings keep each problem's own marks; otherwise the round's "Marks per question" applies
+                  onAdd(drafts.filter((_, i) => picked.has(i)).map((d) => (marksEach && !ownMarks ? { ...d, marks: String(marksEach) } : d)));
                   onClose();
                 }}
               >

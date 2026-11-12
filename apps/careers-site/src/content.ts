@@ -66,7 +66,7 @@ export const CONTENT = {
       resume: 'Upload resume',
     },
     hints: {
-      phone: 'Indian mobile number. We send a code to confirm it is yours.',
+      phone: 'Indian mobile number. We email you a code to confirm your details.',
       resume: 'PDF or Word (.docx), up to 5 MB.',
       degree: 'For example B.E., B.Tech, BCA, MCA',
       projectUrl: 'A project you built: live website, GitHub repo, or a demo video.',
@@ -80,7 +80,10 @@ export const CONTENT = {
       resend: 'Send a new code',
       verify: 'Verify',
       verified: 'Phone verified ✓',
-      sent: 'We sent a code to your phone. It is valid for 10 minutes.',
+      sent: 'We sent you a code. It is valid for 10 minutes.',
+      sentEmail: (email: string | undefined) =>
+        `We emailed a 6-digit code to ${email || 'the email you applied with'}. It is valid for 10 minutes. Check your spam folder too.`,
+      needEmail: 'Enter a valid email above first: we send the code there.',
       devNotice: (code: string) => `Demo mode: no SMS is sent. Your code is ${code}.`,
       needed: 'Verify your mobile number first.',
       captcha: 'Please complete the "I am human" check first.',

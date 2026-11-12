@@ -5,6 +5,8 @@ export interface PhoneProof {
   tenantId: string;
   phone: string;
   exp: number;
+  /** The email the code was sent to (when codes go by email). */
+  email?: string;
 }
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString('base64url');
@@ -25,6 +27,7 @@ export function verifyPhoneProof(secret: string, token: string, now = Date.now()
   try {
     const proof = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as PhoneProof;
     if (typeof proof.tenantId !== 'string' || typeof proof.phone !== 'string' || typeof proof.exp !== 'number') return undefined;
+    if (proof.email !== undefined && typeof proof.email !== 'string') return undefined;
     return proof.exp * 1000 > now ? proof : undefined;
   } catch {
     return undefined;
