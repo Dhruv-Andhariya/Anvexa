@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { isRoundSkipped } from '@hireflow/contracts';
+import { backgroundJobsOn } from '../../common/feature-flags';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
@@ -37,7 +38,7 @@ const int = (v: string | undefined, dflt: number, min: number, max: number) => {
 };
 
 export const roundEngineWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): RoundEngineWorkerConfig => ({
-  enabled: on(env.ROUND_ENGINE_PROCESSING, true) && env.NODE_ENV !== 'test' && !env.VITEST,
+  enabled: backgroundJobsOn(env) && on(env.ROUND_ENGINE_PROCESSING, true) && env.NODE_ENV !== 'test' && !env.VITEST,
   pollMs: int(env.ROUND_ENGINE_POLL_MS, 5000, 1000, 600_000),
   autoInvite: on(env.AUTO_ROUND_INVITES, true),
   baseUrl: assessmentBaseUrlFromEnv(env),

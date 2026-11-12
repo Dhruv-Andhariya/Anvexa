@@ -11,7 +11,7 @@ import {
   type RefreshLinksResult,
   type UnpublishResult,
 } from '@hireflow/contracts';
-import { isFeatureOn } from '../../common/feature-flags';
+import { backgroundJobsOn, isFeatureOn } from '../../common/feature-flags';
 import { ScreeningSettingsService } from '../ats/settings';
 import { AuditService } from '../audit';
 import { RoundsConfigService } from '../rounds-config';
@@ -51,7 +51,7 @@ export const publisherConfigFromEnv = (): PublisherConfig => ({
   attempts: 3,
   baseDelayMs: 1_000,
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  autoRefreshLinks: process.env.PUBLISHER_AUTO_REFRESH_LINKS !== 'false' && process.env.NODE_ENV !== 'test',
+  autoRefreshLinks: backgroundJobsOn() && process.env.PUBLISHER_AUTO_REFRESH_LINKS !== 'false' && process.env.NODE_ENV !== 'test',
 });
 
 /**

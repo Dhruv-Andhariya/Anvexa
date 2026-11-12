@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { GD_LIMITS } from '@hireflow/contracts';
-import { isFeatureOn } from '../../common/feature-flags';
+import { backgroundJobsOn, isFeatureOn } from '../../common/feature-flags';
 import { AuditService } from '../audit';
 import { GdLiveService } from './gd-live.service';
 import { GdMailService } from './gd-mail.service';
@@ -37,7 +37,7 @@ const int = (v: string | undefined, dflt: number, min: number, max: number) => {
 };
 
 export const gdWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): GdWorkerConfig => ({
-  enabled: on(env.GD_PROCESSING, true) && isFeatureOn('group_discussion', env) && env.NODE_ENV !== 'test' && !env.VITEST,
+  enabled: backgroundJobsOn(env) && on(env.GD_PROCESSING, true) && isFeatureOn('group_discussion', env) && env.NODE_ENV !== 'test' && !env.VITEST,
   pollMs: int(env.GD_POLL_MS, 10_000, 1000, 600_000),
   livePollMs: int(env.GD_LIVE_POLL_MS, 1000, 250, 10_000),
   autoSchedule: on(env.AUTO_GD_SCHEDULE, true),

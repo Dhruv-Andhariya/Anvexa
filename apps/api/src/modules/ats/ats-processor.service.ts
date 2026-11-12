@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { isBelowRequiredExperience, jdContentSchema, jobFormSchema, type ScreeningDecision } from '@hireflow/contracts';
 import { Prisma } from '@prisma/client';
-import { isFeatureOn } from '../../common/feature-flags';
+import { backgroundJobsOn, isFeatureOn } from '../../common/feature-flags';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
 import { RESUME_STORAGE, type ResumeStorage } from '../applications';
@@ -29,8 +29,8 @@ export interface AtsProcessorConfig {
 export const ATS_PROCESSOR_CONFIG = Symbol('ATS_PROCESSOR_CONFIG');
 
 export const atsProcessorConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): AtsProcessorConfig => ({
-  enabled: isFeatureOn('ats', env) && !['off', 'false', '0'].includes((env.ATS_PROCESSING ?? '').trim().toLowerCase()) && env.NODE_ENV !== 'test',
-  emailsEnabled: isFeatureOn('ats', env) && env.NODE_ENV !== 'test',
+  enabled: backgroundJobsOn(env) && isFeatureOn('ats', env) && !['off', 'false', '0'].includes((env.ATS_PROCESSING ?? '').trim().toLowerCase()) && env.NODE_ENV !== 'test',
+  emailsEnabled: backgroundJobsOn(env) && isFeatureOn('ats', env) && env.NODE_ENV !== 'test',
   pollMs: Number(env.ATS_POLL_MS) > 0 ? Number(env.ATS_POLL_MS) : 5_000,
   concurrency: Number(env.ATS_CONCURRENCY) > 0 ? Math.min(Number(env.ATS_CONCURRENCY), 10) : 2,
   maxAttempts: 5,
