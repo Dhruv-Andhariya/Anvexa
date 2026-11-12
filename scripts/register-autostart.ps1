@@ -5,9 +5,9 @@
 #     the AI screening link again - with the new address - to every student whose earlier link stopped working.
 # Remove again:  Unregister-ScheduledTask -TaskName 'ANVEXA public apply link' -Confirm:$false
 
-$script = Join-Path $PSScriptRoot 'start-public.ps1'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+# Through wscript + start-public-hidden.vbs: powershell.exe itself flashes a console window every 5 minutes.
+$script = Join-Path $PSScriptRoot 'start-public-hidden.vbs'
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "//B //NoLogo `"$script`""
 $atLogon = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $every5 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
 # Laptop on battery must still run it; a run still busy when the next one is due is not started twice.

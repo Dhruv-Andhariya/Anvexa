@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
-import { isFeatureOn } from '../../common/feature-flags';
+import { backgroundJobsOn, isFeatureOn } from '../../common/feature-flags';
 import { CurrentLinkCheck, LINK_STILL_OPENS, isTemporaryTunnel, linkStillOpens } from '../../common/public-link';
 import { MAILER, MailError, type Mailer } from '../applications';
 import { AuditService } from '../audit';
@@ -42,7 +42,7 @@ const int = (v: string | undefined, dflt: number, min: number, max: number) => {
 };
 
 export const aiInterviewWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): AiInterviewWorkerConfig => ({
-  enabled: on(env.AI_INTERVIEW_PROCESSING, true) && isFeatureOn('ai_interview', env) && env.NODE_ENV !== 'test' && !env.VITEST,
+  enabled: backgroundJobsOn(env) && on(env.AI_INTERVIEW_PROCESSING, true) && isFeatureOn('ai_interview', env) && env.NODE_ENV !== 'test' && !env.VITEST,
   pollMs: int(env.AI_INTERVIEW_POLL_MS, 10_000, 1000, 600_000),
   autoInvite: on(env.AUTO_AI_INTERVIEW_INVITES, true),
   autoDecide: on(env.AUTO_AI_INTERVIEW_DECISIONS, true),

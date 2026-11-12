@@ -23,3 +23,12 @@ export function featureFlag(name: string): Type<CanActivate> {
   }
   return FeatureFlagGuard;
 }
+
+/**
+ * BACKGROUND_JOBS=off: this API runs no background work at all - no workers (ATS, rounds, AI interview, GD), no queued
+ * emails, no rewriting of the Apply link in job posts. For a teammate's laptop that shares the live database: only the
+ * one hosting laptop (whose public tunnels are in the links) may send emails to candidates. Default on.
+ */
+export function backgroundJobsOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !['off', 'false', '0', 'no'].includes((env.BACKGROUND_JOBS ?? '').trim().toLowerCase());
+}
