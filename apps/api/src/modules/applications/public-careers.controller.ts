@@ -61,14 +61,14 @@ export class PublicCareersController {
     return found.view;
   }
 
-  /** POST /api/v1/public/otp/send - body { companySlug, phone }. */
+  /** POST /api/v1/public/otp/send - body { companySlug, phone, email? }: emails the code (see OtpService). */
   @Post('otp/send')
   @HttpCode(200)
   async sendOtp(@Body() body: unknown, @Ip() ip: string) {
     this.limiter.check('otp-send', ip);
     const req = parse(otpSendRequestSchema, body);
     await this.captcha.check(req.captchaToken, ip);
-    return this.otp.send(await this.tenantOf(req.companySlug), req.phone);
+    return this.otp.send(await this.tenantOf(req.companySlug), req.phone, req.email);
   }
 
   /** POST /api/v1/public/otp/verify - body { companySlug, phone, code }; returns { otpToken }. */
@@ -77,7 +77,7 @@ export class PublicCareersController {
   async verifyOtp(@Body() body: unknown, @Ip() ip: string) {
     this.limiter.check('otp-verify', ip);
     const req = parse(otpVerifyRequestSchema, body);
-    return this.otp.verify(await this.tenantOf(req.companySlug), req.phone, req.code);
+    return this.otp.verify(await this.tenantOf(req.companySlug), req.phone, req.code, req.email);
   }
 
   /** POST /api/v1/public/applications - multipart: companySlug, jobSlug, application (JSON), resume (file). */

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApplicationsService, candidateEmailKey, uniqueViolation } from '../../src/modules/applications/applications.service';
 import { MyDataService } from '../../src/modules/applications/my-data.service';
 import { OtpService } from '../../src/modules/applications/otp/otp.service';
+import { signPhoneProof } from '../../src/modules/applications/otp/otp-token';
 import {
   DatabaseResumeStorage,
   ResumeStorageError,
@@ -79,6 +80,22 @@ describe('OtpService.send', () => {
     const otp = new OtpService(db as never, { kind: 'dev', send: async () => {} }, 'x'.repeat(32));
     await Promise.all([otp.send(TENANT, '+919876543210'), otp.send(TENANT, '+919876543211')]);
     expect(rows).toHaveLength(2);
+  });
+
+  it('emails the code (not shown on screen) when email is set up, and binds proofs to that email', async () => {
+    const { db } = fakeDb();
+    const sms = { kind: 'dev' as const, send: vi.fn().mockResolvedValue(undefined) };
+    const mailer = { enabled: true, send: vi.fn().mockResolvedValue(undefined) };
+    const otp = new OtpService(db as never, sms, 'x'.repeat(32), mailer);
+    const res = await otp.send(TENANT, '+919876543210', ' Student@Example.com ');
+
+    expect(res).toEqual({ expiresInSeconds: 600, sentTo: 'email' });
+    expect(sms.send).not.toHaveBeenCalled();
+    expect(mailer.send).toHaveBeenCalledWith('student@example.com', expect.objectContaining({ text: expect.stringMatching(/\b\d{6}\b/) }));
+
+    const token = signPhoneProof('x'.repeat(32), { tenantId: TENANT, phone: '+919876543210', exp: Date.now() / 1000 + 60, email: 'student@example.com' });
+    expect(otp.checkProof(token, TENANT, '+919876543210', 'STUDENT@example.com')).toBeTruthy();
+    expect(otp.checkProof(token, TENANT, '+919876543210', 'someone@else.com')).toBeUndefined();
   });
 });
 

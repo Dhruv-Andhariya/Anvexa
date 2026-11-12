@@ -81,7 +81,7 @@ export class ApplicationsService {
     if (found.view.status !== 'LIVE') throw jobClosed();
     const tenantId = found.company.tenantId;
 
-    if (!this.otp.checkProof(form.otpToken, tenantId, form.phone)) {
+    if (!this.otp.checkProof(form.otpToken, tenantId, form.phone, form.email)) {
       throw applicationsError(HttpStatus.UNAUTHORIZED, 'PHONE_NOT_VERIFIED', 'Please verify your phone number again.');
     }
 

@@ -92,12 +92,15 @@ export type ApplyFormInput = z.input<typeof applyFormSchema>;
 export const otpSendRequestSchema = z.object({
   companySlug: z.string().min(1),
   phone: phoneSchema,
+  /** Where to email the code (apply form). Left out = the email saved with this phone's application (my-data). */
+  email: z.string().trim().toLowerCase().email('Enter a valid email').optional(),
   /** Cloudflare Turnstile token. Required only when the server has CAPTCHA turned on. */
   captchaToken: z.string().max(2048).optional(),
 });
 export const otpVerifyRequestSchema = z.object({
   companySlug: z.string().min(1),
   phone: phoneSchema,
+  email: z.string().trim().toLowerCase().email('Enter a valid email').optional(),
   code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
 });
 

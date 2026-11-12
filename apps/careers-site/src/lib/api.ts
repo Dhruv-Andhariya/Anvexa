@@ -65,11 +65,12 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const sendOtp = (companySlug: string, phone: string, captchaToken?: string) =>
-  postJson<{ expiresInSeconds: number; devCode?: string }>('/public/otp/send', { companySlug, phone, captchaToken });
+/** `email` = where to send the code (apply form); left out = the email saved with this phone's application. */
+export const sendOtp = (companySlug: string, phone: string, email?: string, captchaToken?: string) =>
+  postJson<{ expiresInSeconds: number; devCode?: string; sentTo?: 'email' }>('/public/otp/send', { companySlug, phone, email, captchaToken });
 
-export const verifyOtp = (companySlug: string, phone: string, code: string) =>
-  postJson<{ otpToken: string }>('/public/otp/verify', { companySlug, phone, code });
+export const verifyOtp = (companySlug: string, phone: string, code: string, email?: string) =>
+  postJson<{ otpToken: string }>('/public/otp/verify', { companySlug, phone, code, email });
 
 /** Uploads with XMLHttpRequest so slow connections get a real progress bar. */
 export function submitApplication(form: FormData, onProgress: (pct: number) => void): Promise<ApplicationReceipt> {

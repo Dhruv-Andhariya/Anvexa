@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: `${apiUrl}/:path*` }];
   },
+  // The proxy above gives up after 30 s by default ("socket hang up" -> "Something went wrong"), but AI work through
+  // the API takes longer: generating coding problems (AI worker up to 120 s + running each solution), JDs, questions.
+  // Same limit as apps/candidate-app.
+  experimental: { proxyTimeout: 240_000 },
   // Dev server opened through a Cloudflare quick tunnel: allow its JS / HMR requests.
   allowedDevOrigins: ["*.trycloudflare.com"],
 };

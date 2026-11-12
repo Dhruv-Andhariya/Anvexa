@@ -19,7 +19,9 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
   const [count, setCount] = useState('5');
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
   const [topics, setTopics] = useState('');
-  const [kinds, setKinds] = useState<QuestionKind[]>(ROUND_TYPES[round.type].kinds);
+  // SQL rounds are coding only (each question is one SQL query): no question types to tick
+  const fixedKinds: QuestionKind[] | null = round.type === 'SQL' ? ['CODING'] : null;
+  const [kinds, setKinds] = useState<QuestionKind[]>(fixedKinds ?? ROUND_TYPES[round.type].kinds);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // the suggestions as editable questions: what HR edits here is exactly what is added
@@ -103,20 +105,22 @@ export function AiGeneratePanel({ jobId, round, onAdd, onClose }: { jobId: strin
         </label>
       </div>
 
-      <fieldset className="flex flex-wrap gap-3 text-sm">
-        <legend className="mb-1 text-xs text-muted">Question types</legend>
-        {ALL_KINDS.map((k) => (
-          <label key={k} className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={kinds.includes(k)}
-              disabled={busy}
-              onChange={() => setKinds(kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k])}
-            />
-            {QUESTION_KINDS[k].label}
-          </label>
-        ))}
-      </fieldset>
+      {!fixedKinds && (
+        <fieldset className="flex flex-wrap gap-3 text-sm">
+          <legend className="mb-1 text-xs text-muted">Question types</legend>
+          {ALL_KINDS.map((k) => (
+            <label key={k} className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={kinds.includes(k)}
+                disabled={busy}
+                onChange={() => setKinds(kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k])}
+              />
+              {QUESTION_KINDS[k].label}
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <div>
         <Button variant="primary" onClick={run} disabled={busy || !countOk || !kinds.length}>
