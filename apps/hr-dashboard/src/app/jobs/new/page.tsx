@@ -8,7 +8,7 @@ export default function NewJobPage() {
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <p className="text-sm font-medium text-muted">Step 2</p>
-        <h1 className="text-xl font-semibold tracking-tight">Create a job</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Create a job</h1>
         <p className="mt-1 text-sm text-muted">
           Enter the job requirements. Anvexa combines them with your company profile and drafts a job description for
           you to review and approve.

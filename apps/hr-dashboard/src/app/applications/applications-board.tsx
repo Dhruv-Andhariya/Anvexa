@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { listJobApplications, listPublishableJobs, resumeDownloadUrl } from '@/lib/publisher-api';
+import { EmptyApplicationsArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const messageOf = (err: unknown) =>
   err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
@@ -61,20 +63,21 @@ export function ApplicationsBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Applications</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Applications</h1>
         <p className="mt-1 text-sm text-muted">
           Everyone who applied through your careers page or job posts. Resumes download as files. See the ATS details on Shortlisted Students.
         </p>
       </div>
 
       {jobs.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No published jobs yet</p>
-          <p className="text-sm text-muted">Publish a job first — applications for it will show up here.</p>
-          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Go to publish →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyApplicationsArt}
+          eyebrow="Applications"
+          steps={['Approve a job description', 'Publish it to your channels', 'Applications arrive here automatically']}
+          title="No published jobs yet"
+          description="Publish a job first — applications for it will show up here."
+          action={{ href: '/publish', label: 'Go to publish' }}
+        />
       ) : (
         <>
           <label className="flex max-w-xl flex-col gap-1.5 text-sm font-medium">
@@ -148,10 +151,14 @@ function JobApplicationsList({ jobId }: { jobId: string }) {
   }
   if (data.applications.length === 0) {
     return (
-      <Card>
-        <p className="font-medium">No applications yet</p>
-        <p className="mt-1 text-sm text-muted">Share the apply link from the publish page to start getting applications.</p>
-      </Card>
+      <EmptyState
+        art={EmptyApplicationsArt}
+        eyebrow="Applications"
+        steps={['Copy the apply link from the Publish page', 'Share it on LinkedIn and job boards', 'Resumes land here as people apply']}
+        title="No applications yet"
+        description="Share the apply link from the publish page to start getting applications."
+        action={{ href: '/publish', label: 'Go to publish' }}
+      />
     );
   }
 
@@ -248,7 +255,7 @@ function ApplicationCard({ app, jobId }: { app: HrApplication; jobId: string }) 
         {links.length > 0 && (
           <p className="flex flex-wrap gap-3">
             {links.map((l) => (
-              <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+              <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                 {l.label} ↗
               </a>
             ))}

@@ -1,49 +1,75 @@
 @import "tailwindcss";
 
 /*
- * Neutral, minimal palette: white workspace, light-grey sidebar, black / grey text, subtle borders and hovers.
- * The Anvexa purple (--brand) is used sparingly (the logo mark). "accent" is the strong neutral used for primary
- * buttons and selected states, so every existing component follows the new look without page-by-page changes.
+ * Anvexa navy theme: a soft blue-grey workspace, white cards and sidebar, deep navy (--accent) for primary buttons,
+ * the logo and the selected sidebar row. Every component reads these tokens, so the whole dashboard follows them.
+ * The four "tone" pairs colour the stat-tile icon chips (blue, amber, green, sky).
  */
 :root {
-  --background: #ffffff;
+  --background: #f4f7fc;
   --surface: #ffffff;
-  --sidebar: #f9f9f9;
-  --foreground: #0d0d0d;
-  --muted: #6b6b6b;
-  --border: #e5e5e5;
-  --border-strong: #d9d9d9;
-  --hover: #ececec;
-  --active: #e8e8e8;
-  --accent: #0d0d0d;
+  --sidebar: #ffffff;
+  --foreground: #0f1b33;
+  --muted: #5d6b82;
+  --border: #e3e9f2;
+  --border-strong: #cfd9e8;
+  --hover: #f0f4fa;
+  --active: #e8effa;
+  --accent: #0f3b78;
+  --accent-hover: #0a2d5e;
   --accent-foreground: #ffffff;
-  --accent-soft: #f3f3f3;
-  --brand: #6e56cf;
+  --accent-soft: #eaf1fb;
+  --brand: #0f3b78;
   --danger: #c4321e;
   --danger-soft: #fdf0ee;
   --success: #17804b;
-  --success-soft: #eef7f1;
+  --success-soft: #eaf7ef;
+  --warning: #b8640b;
+  --warning-soft: #fdf3e6;
+  --tone-blue: #1d4f91;
+  --tone-blue-soft: #e9f0fb;
+  --tone-amber: #c06a12;
+  --tone-amber-soft: #fdf1e4;
+  --tone-green: #17924f;
+  --tone-green-soft: #e7f7ee;
+  --tone-sky: #2f7fd8;
+  --tone-sky-soft: #e8f2fd;
+  --card-shadow: 0 1px 2px rgb(15 27 51 / 0.04), 0 4px 16px -6px rgb(15 59 120 / 0.08);
+  --card-shadow-hover: 0 2px 4px rgb(15 27 51 / 0.05), 0 12px 28px -10px rgb(15 59 120 / 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #212121;
-    --surface: #212121;
-    --sidebar: #181818;
-    --foreground: #ececec;
-    --muted: #a3a3a3;
-    --border: #363636;
-    --border-strong: #444444;
-    --hover: #2f2f2f;
-    --active: #333333;
-    --accent: #ececec;
-    --accent-foreground: #0d0d0d;
-    --accent-soft: #2a2a2a;
-    --brand: #8b74e6;
+    --background: #0a1120;
+    --surface: #111a2c;
+    --sidebar: #0d1526;
+    --foreground: #e6edf8;
+    --muted: #93a2bb;
+    --border: #1f2b42;
+    --border-strong: #2b3a56;
+    --hover: #17223a;
+    --active: #1b2a48;
+    --accent: #4f86e0;
+    --accent-hover: #6a9aea;
+    --accent-foreground: #ffffff;
+    --accent-soft: #16264a;
+    --brand: #4f86e0;
     --danger: #f08070;
     --danger-soft: #3a1f1c;
     --success: #5fcf93;
-    --success-soft: #17291f;
+    --success-soft: #142a20;
+    --warning: #f0a556;
+    --warning-soft: #33240f;
+    --tone-blue: #7fa8ee;
+    --tone-blue-soft: #18284a;
+    --tone-amber: #f0a556;
+    --tone-amber-soft: #33240f;
+    --tone-green: #5fcf93;
+    --tone-green-soft: #142a20;
+    --tone-sky: #6cb4f5;
+    --tone-sky-soft: #132a44;
+    --card-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px -8px rgb(0 0 0 / 0.5);
+    --card-shadow-hover: 0 2px 4px rgb(0 0 0 / 0.35), 0 14px 30px -10px rgb(0 0 0 / 0.6);
   }
 }
 
@@ -58,6 +84,7 @@
   --color-hover: var(--hover);
   --color-active: var(--active);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-soft: var(--accent-soft);
   --color-brand: var(--brand);
@@ -65,7 +92,52 @@
   --color-danger-soft: var(--danger-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-tone-blue: var(--tone-blue);
+  --color-tone-blue-soft: var(--tone-blue-soft);
+  --color-tone-amber: var(--tone-amber);
+  --color-tone-amber-soft: var(--tone-amber-soft);
+  --color-tone-green: var(--tone-green);
+  --color-tone-green-soft: var(--tone-green-soft);
+  --color-tone-sky: var(--tone-sky);
+  --color-tone-sky-soft: var(--tone-sky-soft);
+  --shadow-card: var(--card-shadow);
+  --shadow-card-hover: var(--card-shadow-hover);
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --animate-fade-up: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-float: float 5s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* no sideways page scroll ("clip", not "hidden": hidden would break the sticky sidebar) */
@@ -77,6 +149,10 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 /* simple tables: hairline separators, grey headers */

@@ -86,17 +86,17 @@ export function LiveDashboard({ batchId }: { batchId: string }) {
   const header = (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <Link href={`/group-discussion?round=${encodeURIComponent(data.roundId)}`} className="text-sm text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href={`/group-discussion?round=${encodeURIComponent(data.roundId)}`} className="text-sm text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           ← Group Discussion
         </Link>
-        <h1 className="text-xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-bold tracking-tight">
           {data.eventName} · Group {data.number}
         </h1>
         <p className="text-sm text-muted">
           {data.jobTitle} · {data.roundName} · starts {dateTime.format(new Date(data.startsAt))}, room closes {time.format(new Date(data.joinClosesAt))}
         </p>
       </div>
-      <Link href={`/group-discussion/results/${encodeURIComponent(batchId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+      <Link href={`/group-discussion/results/${encodeURIComponent(batchId)}`} className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
         Results →
       </Link>
     </div>

@@ -16,6 +16,7 @@ import {
   InboxIcon,
   LogOutIcon,
   MenuIcon,
+  PlusCircleIcon,
   PlusIcon,
   SendIcon,
   SettingsIcon,
@@ -121,12 +122,15 @@ export function AppShell({ session, onChanged, children }: { session: Session; o
 }
 
 const iconButton =
-  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20';
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30';
 
-/** Anvexa's mark: the one place the brand colour appears in the chrome. */
+/** Anvexa's mark: a navy tile with a soft glow. */
 function Logo() {
   return (
-    <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-[13px] font-bold text-white">
+    <span
+      aria-hidden="true"
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-hover text-[14px] font-bold text-white shadow-md shadow-accent/30"
+    >
       A
     </span>
   );
@@ -171,7 +175,7 @@ function SidebarContent({
       <div className={`flex items-center gap-1 px-2 pt-2 ${collapsed ? 'flex-col' : ''}`}>
         <Link
           href={home}
-          className={`flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-[15px] font-semibold tracking-tight hover:bg-hover ${collapsed ? 'justify-center px-0' : 'flex-1'}`}
+          className={`flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-[17px] font-bold tracking-tight hover:bg-hover ${collapsed ? 'justify-center px-0' : 'flex-1'}`}
           aria-label="Anvexa home"
         >
           <Logo />
@@ -192,23 +196,13 @@ function SidebarContent({
       </div>
 
       {usable && (
-        <div className="px-2 pt-3">
-          <Tip label="New job" show={collapsed}>
-            <Link
-              href="/jobs/new"
-              aria-current={pathname === '/jobs/new' ? 'page' : undefined}
-              className={`flex items-center gap-2.5 rounded-lg border border-border-strong bg-background text-sm font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 ${collapsed ? 'h-9 w-9 justify-center' : 'h-9 w-full px-3'}`}
-              aria-label="New job"
-            >
-              <PlusIcon />
-              {!collapsed && <span>New job</span>}
-            </Link>
-          </Tip>
+        <div className="px-2 pt-4">
+          <NavLink item={{ href: '/jobs/new', label: 'New job', icon: PlusCircleIcon }} collapsed={collapsed} active={pathname === '/jobs/new'} />
         </div>
       )}
 
       {/* main navigation */}
-      <nav aria-label="Main" className="mt-3 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2">
+      <nav aria-label="Main" className="mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2">
         {main.map((n) => (
           <NavLink key={n.href} item={n} collapsed={collapsed} active={isActive(pathname, n)} />
         ))}
@@ -216,7 +210,7 @@ function SidebarContent({
       </nav>
 
       {/* bottom: settings, team, profile */}
-      <div className="flex flex-col gap-0.5 border-t border-border px-2 py-2">
+      <div className="flex flex-col gap-0.5 border-t border-border px-2 py-3">
         {bottom.map((n) => (
           <NavLink key={n.href} item={n} collapsed={collapsed} active={isActive(pathname, n)} />
         ))}
@@ -296,13 +290,13 @@ function ProfileMenu({ session, onChanged, collapsed }: { session: Session; onCh
           aria-label={collapsed ? `Account: ${session.user.name}` : undefined}
           className={`${navRowClass(false, collapsed)} ${collapsed ? '' : 'h-auto py-1.5'}`}
         >
-          <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-active text-[11px] font-semibold text-foreground">
+          <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11px] font-bold text-accent ring-1 ring-accent/15">
             {initials(session.user.name)}
           </span>
           {!collapsed && (
             <>
               <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-                <span className="truncate font-medium">{session.user.name}</span>
+                <span className="truncate font-semibold text-foreground">{session.user.name}</span>
                 <span className="truncate text-xs text-muted">{session.company?.name ?? role}</span>
               </span>
               <ChevronDownIcon className={`h-4 w-4 text-muted transition-transform ${open ? '' : 'rotate-180'}`} />
@@ -313,7 +307,7 @@ function ProfileMenu({ session, onChanged, collapsed }: { session: Session; onCh
       {open && (
         <div
           role="menu"
-          className={`absolute bottom-full z-50 mb-1 flex w-64 flex-col rounded-xl border border-border bg-background p-1.5 shadow-lg ${collapsed ? 'left-0' : 'left-0 right-0 w-auto'}`}
+          className={`absolute bottom-full z-50 mb-1 flex w-64 flex-col rounded-xl border border-border bg-surface p-1.5 shadow-card-hover ${collapsed ? 'left-0' : 'left-0 right-0 w-auto'}`}
         >
           <div className="px-2.5 py-2">
             <p className="truncate text-sm font-medium">{session.user.name}</p>

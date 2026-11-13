@@ -39,7 +39,7 @@ export function AcceptInvitation({ token }: { token: string }) {
       <Card className="flex flex-col gap-3">
         <h1 className="text-lg font-semibold">Invitation unavailable</h1>
         <p className="text-sm text-muted">{loadError}</p>
-        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href="/login" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           Go to log in
         </Link>
       </Card>
@@ -78,7 +78,7 @@ export function AcceptInvitation({ token }: { token: string }) {
     <Card>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="invite-heading">
         <div>
-          <h1 id="invite-heading" className="text-xl font-semibold tracking-tight">
+          <h1 id="invite-heading" className="text-2xl font-bold tracking-tight">
             Join {invite.companyName}
           </h1>
           <p className="mt-1 text-sm text-muted">

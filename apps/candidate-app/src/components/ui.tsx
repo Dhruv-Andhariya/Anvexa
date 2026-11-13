@@ -9,8 +9,8 @@ export const inputClass =
 type Variant = 'primary' | 'secondary' | 'ghost';
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-accent-foreground hover:opacity-90',
-  secondary: 'border border-border bg-surface text-foreground hover:bg-accent-soft',
+  primary: 'bg-accent text-accent-foreground shadow-sm shadow-accent/25 hover:bg-accent-hover hover:shadow-md hover:shadow-accent/25',
+  secondary: 'border border-border bg-surface text-foreground hover:bg-accent-soft hover:border-accent/30',
   ghost: 'text-muted hover:text-foreground hover:bg-accent-soft',
 };
 

@@ -8,6 +8,8 @@ import { Button, Card, ErrorNotice, Spinner, inputClass } from '@/components/ui'
 import { ApiError } from '@/lib/api';
 import { downloadCsv, getPiBoard, updatePiCall } from '@/lib/pipeline-api';
 import { listAssessmentJobs } from '@/lib/rounds-api';
+import { EmptyInterviewArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 const pct = (n: number | null) => (n === null ? '—' : `${n}%`);
@@ -57,19 +59,21 @@ export function PersonalInterviewBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Personal interview</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Personal interview</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students who cleared the technical interview, best overall score first. Call them, then record the outcome: a selected or rejected student&apos;s
           status updates everywhere.
         </p>
       </div>
       {jobs.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No jobs with assessment rounds yet</p>
-          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Open the Publish page →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyInterviewArt}
+          eyebrow="Personal interview"
+          steps={['Students clear the technical interview', 'Call them for a personal interview', 'Record the outcome: selected or rejected']}
+          title="No jobs with assessment rounds yet"
+          description="Students who clear the technical interview land here, ready for their personal interview call."
+          action={{ href: '/publish', label: 'Open the Publish page' }}
+        />
       ) : (
         <>
           <label className="flex max-w-xl flex-col gap-1.5 text-sm font-medium">
@@ -198,7 +202,7 @@ function CandidateCard({ rank, c, jobId, onSaved }: { rank: number; c: PiCandida
             </p>
             <p className="text-sm text-muted">
               {c.phone ? (
-                <a href={`tel:${c.phone.replace(/[^\d+]/g, '')}`} className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                <a href={`tel:${c.phone.replace(/[^\d+]/g, '')}`} className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                   {c.phone}
                 </a>
               ) : (

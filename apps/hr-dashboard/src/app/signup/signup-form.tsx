@@ -103,7 +103,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
         <form noValidate onSubmit={submitCode} className="flex flex-col gap-4" aria-labelledby="verify-heading">
           <div>
             <p className="text-sm font-medium text-muted">Step 1 of 2</p>
-            <h1 id="verify-heading" className="text-xl font-semibold tracking-tight">
+            <h1 id="verify-heading" className="text-2xl font-bold tracking-tight">
               Verify your email
             </h1>
             <p className="mt-1 text-sm text-muted">
@@ -129,7 +129,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
             {busy ? 'Creating account…' : 'Verify and create account'}
           </Button>
           <div className="flex justify-between text-sm">
-            <button type="button" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground" disabled={busy} onClick={() => void submit()}>
+            <button type="button" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent" disabled={busy} onClick={() => void submit()}>
               Send a new code
             </button>
             <button
@@ -154,7 +154,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="signup-heading">
         <div>
           <p className="text-sm font-medium text-muted">Step 1 of 2</p>
-          <h1 id="signup-heading" className="text-xl font-semibold tracking-tight">
+          <h1 id="signup-heading" className="text-2xl font-bold tracking-tight">
             Create your account
           </h1>
           <p className="mt-1 text-sm text-muted">Next you will register your company and become its Company Admin.</p>
@@ -212,7 +212,7 @@ export function SignupForm({ initialEmail, noAccount }: { initialEmail?: string;
         </Button>
         <p className="text-sm text-muted">
           Already on Anvexa?{' '}
-          <Link href="/login" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href="/login" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Log in
           </Link>
         </p>

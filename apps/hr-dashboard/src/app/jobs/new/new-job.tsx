@@ -161,7 +161,7 @@ export function NewJob() {
         </div>
         <CompanyFacts profile={company.profile} />
         {isCompanyAdmin(session) && (
-          <Link href="/company?next=/jobs/new" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href="/company?next=/jobs/new" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Edit company profile
           </Link>
         )}

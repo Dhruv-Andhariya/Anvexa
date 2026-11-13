@@ -40,7 +40,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
   return (
     <Card>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="reset-heading">
-        <h1 id="reset-heading" className="text-xl font-semibold tracking-tight">
+        <h1 id="reset-heading" className="text-2xl font-bold tracking-tight">
           Choose a new password
         </h1>
         <Field id="password" label="New password" required error={errors.password} hint={`At least ${PASSWORD_LIMITS.min} characters.`}>
@@ -82,7 +82,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
           {busy && <Spinner />}
           {busy ? 'Saving…' : 'Change password'}
         </Button>
-        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href="/login" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           Back to log in
         </Link>
       </form>

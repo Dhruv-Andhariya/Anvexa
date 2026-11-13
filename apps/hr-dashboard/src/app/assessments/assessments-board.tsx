@@ -10,6 +10,8 @@ import { downloadCsv, getPipelineStatuses } from '@/lib/pipeline-api';
 import { getJobAssessments, listAssessmentJobs } from '@/lib/rounds-api';
 import { GdRecordings } from './gd-recordings';
 import { OUTCOME_STYLE, OUTCOME_TEXT, STAGE_STYLE, STAGE_TEXT, pill, scoreText } from './assessment-styles';
+import { EmptyAssessmentArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 /** Menu steps that open this board on one kind of round (Assessments menu in the header). */
 export const BOARD_STEPS = {
@@ -82,7 +84,7 @@ export function AssessmentsBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{step ? `Assessments · ${BOARD_STEPS[step].title}` : roundFilter ? 'Assessments · one round' : 'Assessments'}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{step ? `Assessments · ${BOARD_STEPS[step].title}` : roundFilter ? 'Assessments · one round' : 'Assessments'}</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Every round of the hiring process: resume (ATS) score, AI voice screening, and each assessment round. Pick a job to see every shortlisted student,
           their result in each round, and open a student for the full review.
@@ -90,13 +92,14 @@ export function AssessmentsBoard() {
       </div>
 
       {jobs.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No assessments yet</p>
-          <p className="text-sm text-muted">A job shows up here once you create its assessment rounds on the Publish page.</p>
-          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Open the Publish page →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyAssessmentArt}
+          eyebrow="Assessments"
+          steps={['Open a job on the Publish page', 'Add its assessment rounds', 'Follow every student\'s results here']}
+          title="No assessments yet"
+          description="A job shows up here once you create its assessment rounds on the Publish page."
+          action={{ href: '/publish', label: 'Open the Publish page' }}
+        />
       ) : (
         <>
           <label className="flex max-w-xl flex-col gap-1.5 text-sm font-medium">
@@ -193,7 +196,7 @@ function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: 
         <Card className="flex flex-col items-start gap-2">
           <p className="font-medium">{data.roundsStatus === 'DRAFT' ? 'The rounds of this job are still a draft' : 'This job has no assessment rounds yet'}</p>
           <p className="text-sm text-muted">Set up its rounds, questions and passing criteria on the Publish page.</p>
-          <Link href={`/publish?job=${encodeURIComponent(jobId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href={`/publish?job=${encodeURIComponent(jobId)}`} className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Open the Publish page →
           </Link>
         </Card>
@@ -211,11 +214,11 @@ function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: 
                   : `This job has no ${BOARD_STEPS[step!].title.toLowerCase()}. Add one on the Publish page (rounds editor).`}
           </p>
           {(step === 'sql' || focus?.type === 'SQL') && (
-            <Link href="/sql-questions" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+            <Link href="/sql-questions" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
               SQL question bank →
             </Link>
           )}
-          <Link href={`/assessments?job=${encodeURIComponent(jobId)}`} className="ml-auto text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href={`/assessments?job=${encodeURIComponent(jobId)}`} className="ml-auto text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Every round →
           </Link>
         </Card>
@@ -239,7 +242,7 @@ function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: 
                   <p className="text-xs text-muted">Pass: {r.passRuleText ?? '—'}</p>
                 )}
                 {r.type === 'GROUP_DISCUSSION' && (
-                  <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="text-xs font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                  <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="text-xs font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                     Manage groups →
                   </Link>
                 )}
@@ -294,11 +297,12 @@ function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: 
           </div>
 
           {students.length === 0 ? (
-            <Card>
-              <p className="text-sm text-muted">
-                {data.students.length ? 'No student matches these filters.' : 'No student has reached the assessment rounds of this job yet.'}
-              </p>
-            </Card>
+            <EmptyState
+              compact
+              art={EmptyAssessmentArt}
+              title={data.students.length ? 'No student matches these filters' : 'No students here yet'}
+              description={data.students.length ? 'Try clearing a filter.' : 'No student has reached the assessment rounds of this job yet.'}
+            />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border bg-surface">
               <table className="w-full min-w-[720px] text-sm">
@@ -328,7 +332,7 @@ function JobResults({ jobId, tab, onTab, step, roundId }: { jobId: string; tab: 
                   {students.map((s) => (
                     <tr key={s.applicationId} className="border-b border-border last:border-0 hover:bg-accent-soft/40">
                       <td className="px-3 py-2">
-                        <Link href={`/assessments/${encodeURIComponent(s.applicationId)}`} className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                        <Link href={`/assessments/${encodeURIComponent(s.applicationId)}`} className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                           {s.name}
                         </Link>
                         <p className="text-xs text-muted">
@@ -447,7 +451,7 @@ function RoundsTab({ data, jobId }: { data: JobAssessments; jobId: string }) {
               <span className="font-medium">{r.name}</span>
               <span className={`${pill} border-border text-muted`}>{ROUND_TYPES[r.type].label}</span>
               {r.type === 'GROUP_DISCUSSION' && (
-                <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="ml-auto text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                <Link href={`/group-discussion?round=${encodeURIComponent(r.id)}`} className="ml-auto text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                   Manage groups, topic and live room →
                 </Link>
               )}
@@ -488,7 +492,7 @@ function RoundsTab({ data, jobId }: { data: JobAssessments; jobId: string }) {
       <p className="text-sm text-muted">
         {data.locked ? 'Students have started these rounds, so they are locked.' : 'To change the rounds or their questions, '}
         {!data.locked && (
-          <Link href={`/publish?job=${encodeURIComponent(jobId)}`} className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href={`/publish?job=${encodeURIComponent(jobId)}`} className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             open the Publish page
           </Link>
         )}

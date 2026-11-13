@@ -16,8 +16,12 @@ export function Tip({ label, show, children }: { label: string; show: boolean; c
   );
 }
 
-/** One sidebar row: subtle grey hover, light-grey active background, icons only when collapsed. */
+/** One sidebar row: soft blue hover; the active row is tinted navy with a bar on the sidebar's edge. */
 export const navRowClass = (active: boolean, collapsed: boolean) =>
-  `flex h-9 items-center gap-2.5 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 ${
+  `relative flex h-9 items-center gap-2.5 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 ${
     collapsed ? 'w-9 justify-center' : 'w-full px-2.5'
-  } ${active ? 'bg-active font-medium text-foreground' : 'text-foreground/80 hover:bg-hover hover:text-foreground'}`;
+  } ${
+    active
+      ? 'bg-accent-soft font-semibold text-accent before:absolute before:-left-2 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-accent'
+      : 'text-foreground/75 hover:bg-hover hover:text-foreground'
+  }`;
