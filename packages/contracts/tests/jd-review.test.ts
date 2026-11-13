@@ -27,7 +27,7 @@ const jd = (over: Partial<JdContent> = {}): JdContent => ({
     'Build LLM-powered workflows with LangChain and integrate retrieval where it fits the use case.',
     'Design vector retrieval with Qdrant for the AI features that need it.',
     'Work with MongoDB and MySQL to meet the data persistence needs of these workflows.',
-    'Review technical approaches, troubleshoot production issues and drive improvements across AI workflows.',
+    'Review technical approaches, troubleshoot issues and drive improvements across AI workflows.',
   ],
   requirements: [
     '4-6 years of experience building AI or machine learning systems.',
@@ -69,9 +69,9 @@ describe('reviewJd', () => {
     const good = jd({
       summary: 'An entry-level AI Engineer role in Pune.',
       responsibilities: [
-        'Implement Python components for deep learning features under the guidance of senior engineers.',
+        'Implement Python components for deep learning features.',
         'Assist in training and testing computer vision models.',
-        'Debug issues found during review and fix them.',
+        'Debug issues in the Python code and fix them.',
       ],
       requirements: ['0-1 years of experience.', 'Python, deep learning and computer vision fundamentals.'],
     });
@@ -90,8 +90,8 @@ describe('reviewJd', () => {
       summary: 'A mid-level AI Engineer role in Pune.',
       responsibilities: [
         'Develop and maintain Python services for LLM features built with LangChain.',
-        'Integrate Qdrant-based retrieval into existing application workflows.',
-        'Troubleshoot and optimise retrieval quality and latency.',
+        'Integrate Qdrant-based retrieval into the LangChain workflows.',
+        'Troubleshoot and optimise retrieval quality in the Qdrant-backed features.',
       ],
       requirements: ['2-4 years of experience.', 'Python, LangChain and Qdrant.'],
     });
@@ -115,8 +115,9 @@ describe('reviewJd', () => {
 
     const manager = jd({ responsibilities: [...jd().responsibilities, 'Manage a team of engineers and run performance reviews.'] });
     expect(reviewJd(form(), manager).find((i) => i.message.includes('people-management'))).toBeDefined();
-    // a lead role may include it
-    expect(reviewJd(form({ experienceMin: 8, experienceMax: 12 }), { ...manager, requirements: ['8-12 years of experience.'] })).toEqual([]);
+    // a lead role may include it when HR asks for it
+    const lead = form({ experienceMin: 8, experienceMax: 12, shortDescription: 'Manages a team of engineers and runs their performance reviews.' });
+    expect(reviewJd(lead, { ...manager, requirements: ['8-12 years of experience.'] })).toEqual([]);
   });
 
   // Test 4 - unsupported technology
@@ -203,10 +204,74 @@ describe('reviewJd', () => {
     const prose = jd({
       responsibilities: [
         ...jd().responsibilities,
-        'Bring a high degree of ownership to each node of the pipeline and spark discussion on trade-offs.',
+        'Bring a high degree of ownership to each node of the AI workflows and spark discussion on trade-offs.',
       ],
     });
     expect(reviewJd(form(), prose)).toEqual([]);
+  });
+
+  it('flags how-the-person-works statements HR did not make, in the summary and the duties', () => {
+    const f = form({ experienceMin: 3, experienceMax: 5, mustHaveSkills: ['Python', 'Machine Learning', 'LLM'] });
+    const styled = jd({
+      summary: 'As an AI Engineer, you will build machine learning models in Python, working independently on your assigned tasks.',
+      responsibilities: ['Develop machine learning models in Python.', 'Build LLM applications and document your work for the team.'],
+      requirements: ['3-5 years of experience.'],
+    });
+    const issue = reviewJd(f, styled).find((i) => i.code === 'UNSUPPORTED_CONTEXT')!;
+    expect(issue.severity).toBe('error');
+    expect(issue.terms[0]).toMatch(/how the person works/);
+    // fine when HR wrote it
+    const said = form({ ...f, shortDescription: 'Works independently on assigned tasks and documents their work for the team.' });
+    expect(codes(reviewJd(said, styled))).not.toContain('UNSUPPORTED_CONTEXT');
+  });
+
+  it('flags environment, scale and team claims HR did not make', () => {
+    const f = form({ experienceMin: 3, experienceMax: 5, mustHaveSkills: ['Python', 'Machine Learning', 'LLM'] });
+    const padded = jd({
+      responsibilities: [
+        'Develop machine learning models in Python and deploy them to production.',
+        'Integrate LLM features into existing systems through APIs.',
+        'Troubleshoot accuracy and latency issues and work with the product team on fixes.',
+      ],
+      requirements: ['3-5 years of experience.'],
+    });
+    const issue = reviewJd(f, padded).find((i) => i.code === 'UNSUPPORTED_CONTEXT')!;
+    expect(issue.severity).toBe('error');
+    expect(issue.terms).toEqual(
+      expect.arrayContaining(['production', 'deployment', 'latency / performance at scale', 'existing systems', 'APIs', 'other teams / stakeholders']),
+    );
+    expect(isCorrectable(issue)).toBe(true);
+    // the same words are fine when HR wrote them
+    const said = form({ ...f, shortDescription: 'Deploy models to production, expose them through APIs and keep latency low. Work with the product team on existing systems.' });
+    expect(codes(reviewJd(said, padded))).not.toContain('UNSUPPORTED_CONTEXT');
+    // ...or when a skill HR named implies them
+    const rest = form({ ...f, mustHaveSkills: ['Python', 'REST', 'Docker'] });
+    const impliedJd = jd({ responsibilities: ['Build REST APIs in Python and deploy them with Docker.'], requirements: ['3-5 years of experience.'] });
+    expect(codes(reviewJd(rest, impliedJd))).not.toContain('UNSUPPORTED_CONTEXT');
+  });
+
+  it('flags every duty that comes from no skill, title or additional requirement', () => {
+    const f = form({ experienceMin: 3, experienceMax: 5, mustHaveSkills: ['Python', 'Machine Learning', 'LLM'] });
+    const grounded = jd({
+      summary: 'As an AI Engineer, you will develop machine learning models in Python and build LLM applications.',
+      responsibilities: [
+        'Develop machine learning models in Python and evaluate the results.',
+        'Build applications on large language models and improve their answers.',
+      ],
+      requirements: ['3-5 years of experience.'],
+    });
+    expect(reviewJd(f, grounded)).toEqual([]);
+    const invented = jd({
+      ...grounded,
+      responsibilities: [...grounded.responsibilities, 'Evaluate alternative approaches and recommend the best methods to ship.'],
+    });
+    const issue = reviewJd(f, invented).find((i) => i.code === 'UNGROUNDED_DUTY')!;
+    expect(issue.terms).toEqual(['Evaluate alternative approaches and recommend the best methods to ship.']);
+    expect(isCorrectable(issue)).toBe(true);
+    // a duty taken from HR's additional requirements is grounded
+    const fromHr = form({ ...f, shortDescription: 'The person will build chatbots for internal support tickets.' });
+    const withHrDuty = jd({ ...grounded, responsibilities: [...grounded.responsibilities, 'Build chatbots that answer internal support tickets.'] });
+    expect(codes(reviewJd(fromHr, withHrDuty))).not.toContain('UNGROUNDED_DUTY');
   });
 
   it('correctable issues and score', () => {

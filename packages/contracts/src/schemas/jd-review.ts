@@ -47,6 +47,8 @@ export type JdReviewCode =
   | 'UNSUPPORTED_WORK_MODE'
   | 'UNSUPPORTED_LOCATION'
   | 'EXPERIENCE_MISMATCH'
+  | 'UNSUPPORTED_CONTEXT'
+  | 'UNGROUNDED_DUTY'
   | 'SENIORITY_MISMATCH'
   | 'SKILL_CHECKLIST'
   | 'GENERIC_LANGUAGE'
@@ -290,6 +292,83 @@ const CITIES: string[][] = [
   ['Boston'], ['Toronto'], ['Singapore'], ['Dubai'], ['Berlin'], ['Amsterdam'], ['Sydney'], ['Tokyo'], ['Paris'],
 ];
 
+/**
+ * Claims about the work environment, scale, systems or other people that an AI writer adds to make a duty sound
+ * concrete ("in production", "low latency", "existing systems", "product team"). They are job facts: allowed only
+ * when HR's input says them, or a skill HR named implies them (`impliedBy`: "REST" -> APIs, "Docker" -> deployment).
+ */
+interface ContextClaim extends FactPattern {
+  impliedBy?: RegExp;
+}
+const c = (label: string, source: string, impliedBy?: string): ContextClaim => ({
+  ...f(label, source),
+  ...(impliedBy ? { impliedBy: word(impliedBy) } : {}),
+});
+const CONTEXT_CLAIMS: ContextClaim[] = [
+  c('production', '(?:in|into|to|for|on) production|production(?:[- ]ready| systems?| environments?| issues?| load| quality| use)', 'mlops|devops|sre'),
+  c('deployment', 'deploy(?:s|ed|ing|ment|ments)?', 'docker|kubernetes|k8s|ci\\s?/\\s?cd|devops|mlops|helm|terraform|jenkins|github actions'),
+  c('latency / performance at scale', 'latency|throughput|at scale|scalab(?:le|ility)|high[- ]availability|real[- ]time'),
+  c('existing systems', 'existing (?:systems?|applications?|application workflows?|services?|products?|platforms?|codebase|infrastructure|backend)'),
+  c('pipelines', 'pipelines?', 'etl|elt|airflow|spark|pyspark|kafka|dbt|ci\\s?/\\s?cd|mlops|data engineering|jenkins|github actions'),
+  c('APIs', 'APIs?', 'rest(?:ful)?|graphql|grpc|fastapi|flask|django|express(?:\\.js)?|nest\\.?js|spring(?: boot)?|\\.net|asp\\.net|laravel|rails|node\\.?js'),
+  c('cloud', 'cloud', 'aws|azure|gcp|google cloud|serverless|kubernetes'),
+  c('dashboards', 'dashboards?', 'tableau|power\\s?bi|looker|grafana|kibana|metabase|superset|streamlit'),
+  c('A/B testing', 'a/b test(?:s|ing)?'),
+  c('other teams / stakeholders', 'cross[- ]functional|stakeholders?|(?:product|design|business|backend|frontend|infra(?:structure)?|platform|data|qa|ops|sales|marketing) (?:teams?|managers?|leads?|owners?)'),
+  c('customers / users', 'customers?|clients?|end[- ]users?'),
+  // how the person works is a job fact too - it never follows from the experience range alone
+  c(
+    'how the person works (independence, supervision, guidance, reviews, documentation, team discussions)',
+    'independent(?:ly)?|(?:minimal|without|little|close) supervision|under (?:the )?(?:guidance|supervision|direction)|with guidance|guidance (?:from|of)|' +
+      'mentor(?:s|ed|ing)?|code reviews?|design reviews?|review(?:s|ing)? (?:the )?(?:code|designs?|pull requests|work of)|team discussions?|' +
+      'document (?:your|their) work|organi[sz]e (?:your|their) (?:own )?time|go-to (?:person|expert)|assigned (?:tasks?|areas?|work)',
+  ),
+];
+
+/** Words in a title that say nothing about the work itself. */
+const GENERIC_TITLE_WORDS = new Set(
+  'engineer engineers developer developers senior junior lead principal associate intern trainee staff manager specialist analyst executive head the and of for'.split(' '),
+);
+/**
+ * Common words and generic work verbs that do not make a sentence of HR's additional requirements a "source" for a
+ * duty - otherwise "build" in HR's text would ground every "Build ..." line the AI invents.
+ */
+const STOP_WORDS = new Set(
+  [
+    'about above after again against along also among because before being below between both could during each every',
+    'from have having into itself more most other ought over same should some such than that their them then there',
+    'these they this those through under until very were what when where which while will with within would your must',
+    'work works working role roles person people candidate candidates experience years able ability good strong',
+    'build builds building develop develops developing design designs designing create creates creating write writes',
+    'writing maintain maintains maintaining ensure ensures support supports supporting improve improves improving',
+    'implement implements implementing deliver delivers delivering manage manages managing handle handles handling',
+    'perform performs provide provides using should across within based related various multiple',
+  ]
+    .join(' ')
+    .split(' '),
+);
+/** Short forms of skills HR often types, so "LLM" also matches "large language models". */
+const SKILL_ALIASES: Record<string, string[]> = {
+  llm: ['large language models?', 'llms'],
+  llms: ['large language models?', 'llm'],
+  ml: ['machine learning'],
+  'machine learning': ['ml'],
+  dl: ['deep learning'],
+  'deep learning': ['dl'],
+  nlp: ['natural language processing'],
+  'natural language processing': ['nlp'],
+  cv: ['computer vision'],
+  'computer vision': ['cv'],
+  genai: ['generative ai', 'gen ai'],
+  'generative ai': ['genai', 'gen ai'],
+  rag: ['retrieval[- ]augmented generation', 'retrieval'],
+};
+/** A skill as written by HR, its plural, and its common short / long form. */
+const skillRegex = (skill: string) => {
+  const key = skill.trim().toLowerCase();
+  return word([`${esc(skill.trim())}s?`, ...(SKILL_ALIASES[key] ?? [])].join('|'));
+};
+
 const GENERIC_PHRASES: string[] = [
   'dynamic environment', 'dynamic team', 'fast-paced', 'fast paced', 'passionate', 'rockstar', 'rock star', 'ninja', 'guru',
   'exciting opportunity', 'unlock your potential', 'cutting-edge', 'cutting edge', 'leverage', 'innovative and collaborative',
@@ -415,7 +494,42 @@ export function reviewJd(form: JobForm, jd: JdContent, company?: CompanyFacts | 
     add('error', 'EXPERIENCE_MISMATCH', `States ${list(wrongYears.map((y) => `"${y}"`))}, but the experience range is ${range}.`, wrongYears);
   }
 
-  // 7. seniority depth
+  // 7a. claims about the environment, scale, systems or other teams that HR did not make
+  const context = unsupportedFacts(CONTEXT_CLAIMS.filter((claim) => !claim.impliedBy?.test(input)));
+  if (context.length) {
+    add(
+      'error',
+      'UNSUPPORTED_CONTEXT',
+      `Mentions ${list(context)}, which the job requirements and company profile do not mention. Remove these words or rewrite the sentence without them.`,
+      context,
+    );
+  }
+
+  // 7b. duties with no source in HR's input - every responsibility needs one
+  const sources: RegExp[] = [
+    ...form.mustHaveSkills.map(skillRegex),
+    ...[form.title, form.department ?? '']
+      .flatMap((t) => t.split(/[\s/,&-]+/))
+      .filter((w) => w.length >= 2 && !GENERIC_TITLE_WORDS.has(w.toLowerCase()))
+      .map((w) => literal(w)),
+    ...uniq(
+      (form.shortDescription ?? '')
+        .toLowerCase()
+        .match(/[a-z][a-z+#.]{4,}/g)
+        ?.filter((w) => !STOP_WORDS.has(w)) ?? [],
+    ).map((w) => literal(w)),
+  ];
+  const ungrounded = jd.responsibilities.filter((r) => !sources.some((s) => s.test(r)));
+  if (ungrounded.length) {
+    add(
+      'warning',
+      'UNGROUNDED_DUTY',
+      `${ungrounded.length > 1 ? `${ungrounded.length} responsibilities are` : 'A responsibility is'} not based on any skill, the title or the additional requirements HR entered: ${list(ungrounded.map((r) => `"${r}"`))}. Base every duty on the must-have skills or HR's additional requirements, or remove it.`,
+      ungrounded,
+    );
+  }
+
+  // 8. seniority depth
   const level = seniorityFor(form);
   const duties = [jd.summary, ...jd.responsibilities].join('\n');
   const found = (signals: RegExp[]) => uniq(signals.flatMap((r) => duties.match(r)?.[0] ?? []));
@@ -442,7 +556,7 @@ export function reviewJd(form: JobForm, jd: JdContent, company?: CompanyFacts | 
     }
   }
 
-  // 8. one shallow responsibility per skill
+  // 9. one shallow responsibility per skill
   const skills = form.mustHaveSkills.map((s) => ({ skill: s, regex: literal(s) }));
   const single = jd.responsibilities
     .map((r) => skills.filter((s) => s.regex.test(r)).map((s) => s.skill))
@@ -452,13 +566,13 @@ export function reviewJd(form: JobForm, jd: JdContent, company?: CompanyFacts | 
     add('warning', 'SKILL_CHECKLIST', 'The responsibilities read like the skill list rewritten one skill per line. Describe the work the role does instead.', uniq(single));
   }
 
-  // 9. buzzwords
+  // 10. buzzwords
   const generic = uniq(GENERIC_REGEX.flatMap((r) => text.match(r)?.[0] ?? []));
   if (generic.length) {
     add('warning', 'GENERIC_LANGUAGE', `Uses generic phrases (${list(generic.map((g) => `"${g}"`))}). Plain, specific wording reads better.`, generic);
   }
 
-  // 10. the same opening verb again and again
+  // 11. the same opening verb again and again
   const openers = jd.responsibilities.map((r) => r.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, '') ?? '');
   const counts = new Map<string, number>();
   for (const o of openers) if (o) counts.set(o, (counts.get(o) ?? 0) + 1);
@@ -472,7 +586,11 @@ export function reviewJd(form: JobForm, jd: JdContent, company?: CompanyFacts | 
 
 /** Issues worth one automatic regeneration (all factual errors, plus the main writing problems). */
 export const isCorrectable = (issue: JdReviewIssue) =>
-  issue.severity === 'error' || issue.code === 'SKILL_CHECKLIST' || issue.code === 'SENIORITY_MISMATCH' || issue.code === 'GENERIC_LANGUAGE';
+  issue.severity === 'error' ||
+  issue.code === 'UNGROUNDED_DUTY' ||
+  issue.code === 'SKILL_CHECKLIST' ||
+  issue.code === 'SENIORITY_MISMATCH' ||
+  issue.code === 'GENERIC_LANGUAGE';
 
 /** Lower is better: each invented fact counts far more than a writing warning. Used to keep the better of two drafts. */
 export const reviewScore = (issues: JdReviewIssue[]) =>
