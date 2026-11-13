@@ -154,7 +154,7 @@ export function AssessmentsMenu({ variant = 'header', collapsed = false }: { var
             aria-expanded={open}
             aria-label={open ? 'Hide the steps of a job' : 'Show the steps of a job'}
             onClick={() => setOpen(!open)}
-            className="absolute right-1 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
+            className="absolute right-1 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
           >
             <ChevronDownIcon className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
           </button>

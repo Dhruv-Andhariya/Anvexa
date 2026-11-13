@@ -79,10 +79,10 @@ export function ResultsBoard({ batchId }: { batchId: string }) {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link href={`/group-discussion?round=${encodeURIComponent(data.roundId)}`} className="text-sm text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href={`/group-discussion?round=${encodeURIComponent(data.roundId)}`} className="text-sm text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             ← Group Discussion
           </Link>
-          <h1 className="text-xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight">
             Results · {data.eventName} · Group {data.number}
           </h1>
           <p className="text-sm text-muted">
@@ -94,7 +94,7 @@ export function ResultsBoard({ batchId }: { batchId: string }) {
             </p>
           )}
         </div>
-        <Link href={`/group-discussion/live/${encodeURIComponent(batchId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href={`/group-discussion/live/${encodeURIComponent(batchId)}`} className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           Live page →
         </Link>
       </div>

@@ -18,6 +18,8 @@ import { ApiError } from '@/lib/api';
 import { fetchResumeBlob, listCandidates, listScreeningJobs, retryScreening, sendDecisionEmails, setDecision } from '@/lib/ats-api';
 import { resumeDownloadUrl } from '@/lib/publisher-api';
 import { canEmail, emailKindFor, VIEWS, type AutoEmails } from './shortlisted';
+import { EmptyShortlistArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 const date = (iso: string) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }).format(new Date(iso));
@@ -81,7 +83,7 @@ export function ShortlistedBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Shortlisted Students</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Shortlisted Students</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students whose resume met the job’s minimum ATS score. Decision emails go out automatically as soon as a resume
           is screened: shortlisted students get the shortlist email with their AI screening link, the others the
@@ -90,12 +92,14 @@ export function ShortlistedBoard() {
       </div>
 
       {jobs.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No approved jobs yet</p>
-          <Link href="/jobs" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Go to jobs →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyShortlistArt}
+          eyebrow="AI screening"
+          steps={['Publish an approved job', 'Candidates apply with their resumes', 'AI scores them and shortlists the best']}
+          title="No shortlisted candidates yet"
+          description="Approve and publish a job — Anvexa screens every application with AI and shortlists the best candidates here."
+          action={{ href: '/jobs', label: 'Go to jobs' }}
+        />
       ) : (
         <>
           <label className="flex max-w-xl flex-col gap-1.5 text-sm font-medium">
@@ -239,10 +243,12 @@ function CandidateList({
 
 
       {data.candidates.length === 0 ? (
-        <Card>
-          <p className="font-medium">{VIEWS.find((v) => v.key === view)!.empty}</p>
-          {data.counts.total === 0 && <p className="mt-1 text-sm text-muted">No applications for this job yet.</p>}
-        </Card>
+        <EmptyState
+          compact
+          art={EmptyShortlistArt}
+          title={VIEWS.find((v) => v.key === view)!.empty}
+          description={data.counts.total === 0 ? 'No applications for this job yet.' : undefined}
+        />
       ) : (
         <ul className="flex flex-col gap-3">
           {data.candidates.map((c) => (

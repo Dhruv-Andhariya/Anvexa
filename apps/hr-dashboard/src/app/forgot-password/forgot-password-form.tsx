@@ -36,13 +36,13 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
     return (
       <Card>
         <div className="flex flex-col gap-4" role="status">
-          <h1 className="text-xl font-semibold tracking-tight">Check your email</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
           <p className="text-sm">
             If <span className="font-medium">{sentTo}</span> has an Anvexa account, we have sent it a link to reset the
             password. The link works once and expires in 1 hour.
           </p>
           <p className="text-sm text-muted">No email after a few minutes? Check the spam folder, or try again.</p>
-          <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href="/login" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Back to log in
           </Link>
         </div>
@@ -53,7 +53,7 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
   return (
     <Card>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="forgot-heading">
-        <h1 id="forgot-heading" className="text-xl font-semibold tracking-tight">
+        <h1 id="forgot-heading" className="text-2xl font-bold tracking-tight">
           Forgot password
         </h1>
         <p className="text-sm text-muted">Enter the email you log in with. We will email you a link to choose a new password.</p>
@@ -72,7 +72,7 @@ export function ForgotPasswordForm({ initialEmail }: { initialEmail: string }) {
           {busy && <Spinner />}
           {busy ? 'Sending…' : 'Send reset link'}
         </Button>
-        <Link href="/login" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href="/login" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           Back to log in
         </Link>
       </form>

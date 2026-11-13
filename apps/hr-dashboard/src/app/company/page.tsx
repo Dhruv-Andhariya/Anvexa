@@ -10,7 +10,7 @@ export default async function CompanyPage({ searchParams }: { searchParams: Prom
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <p className="text-sm font-medium text-muted">Step 1</p>
-        <h1 className="text-xl font-semibold tracking-tight">Company profile</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Company profile</h1>
         <p className="mt-1 text-sm text-muted">
           Save your company details once. Anvexa adds them to every job description automatically.
         </p>

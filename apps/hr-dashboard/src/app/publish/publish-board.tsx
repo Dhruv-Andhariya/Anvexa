@@ -25,6 +25,8 @@ import {
   retryPublish,
   saveChannelSetting,
 } from '@/lib/publisher-api';
+import { EmptyPublishArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const messageOf = (err: unknown) =>
   err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
@@ -128,7 +130,7 @@ export function PublishBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Publish jobs</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Publish jobs</h1>
         <p className="mt-1 text-sm text-muted">
           Approved jobs from your job list. Publishing puts the approved job description on your
           careers page and LinkedIn, with one apply link and your company careers page link.
@@ -141,15 +143,14 @@ export function PublishBoard() {
       {linkResult && <LinkResultNotice {...linkResult} />}
 
       {ordered.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No approved jobs yet</p>
-          <p className="text-sm text-muted">
-            Approve a job description first — it will appear here, ready to publish.
-          </p>
-          <Link href="/jobs" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Go to jobs →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyPublishArt}
+          eyebrow="Publishing"
+          steps={['Create a job and generate its description', 'Approve the AI-written description', 'Publish to your careers page and job boards']}
+          title="Nothing ready to publish yet"
+          description="Approve a job description first — it will appear here, ready to go live on your careers page and job boards."
+          action={{ href: '/jobs', label: 'Go to jobs' }}
+        />
       ) : (
         <ul className="flex flex-col gap-4">
           {ordered.map((job) => (
@@ -427,7 +428,7 @@ function Applications({ job }: { job: PublishableJob }) {
           {' · '}
           <Link
             href={`/applications?job=${encodeURIComponent(job.jobId)}`}
-            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
+            className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent"
           >
             View applications →
           </Link>

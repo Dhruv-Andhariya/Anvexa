@@ -153,7 +153,7 @@ export function CompanyEditor({ next }: { next?: string }) {
           </p>
         )}
         {saved && !next && (
-          <Link href="/jobs/new" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href="/jobs/new" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Create a job →
           </Link>
         )}

@@ -107,7 +107,7 @@ export function JobReview({ id, autoGenerate }: { id: string; autoGenerate: bool
     return loadError.notFound ? (
       <Card className="flex flex-col items-start gap-3">
         <h1 className="text-lg font-semibold">Job not found</h1>
-        <Link href="/jobs" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href="/jobs" className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           ← Back to jobs
         </Link>
       </Card>
@@ -182,7 +182,7 @@ export function JobReview({ id, autoGenerate }: { id: string; autoGenerate: bool
             ← Jobs
           </Link>
           <div className="mt-1 flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight">{job.title}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{job.title}</h1>
             <StatusBadge status={job.status} />
           </div>
           <p className="mt-1 text-sm text-muted">

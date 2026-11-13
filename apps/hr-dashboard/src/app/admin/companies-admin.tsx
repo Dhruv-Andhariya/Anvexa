@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, ErrorNotice, Spinner } from '@/components/ui';
 import { ApiError, listCompanies } from '@/lib/api';
+import { EmptyCompaniesArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const message = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 
@@ -53,7 +55,7 @@ export function CompaniesAdmin() {
           {companies.map((c) => (
             <tr key={c.id} className="border-b border-border last:border-0 hover:bg-accent-soft/50">
               <td className="px-5 py-3">
-                <Link href={`/admin/companies/${c.id}`} className="font-medium hover:text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                <Link href={`/admin/companies/${c.id}`} className="font-medium hover:text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                   {c.name}
                 </Link>
                 <span className="ml-2 text-xs text-muted">{c.slug}</span>
@@ -66,8 +68,8 @@ export function CompaniesAdmin() {
           ))}
           {companies.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-5 py-8 text-center text-muted">
-                No companies have registered yet.
+              <td colSpan={5} className="p-0">
+                <EmptyState bare compact art={EmptyCompaniesArt} title="No companies yet" description="Companies appear here as soon as they register on Anvexa." />
               </td>
             </tr>
           )}

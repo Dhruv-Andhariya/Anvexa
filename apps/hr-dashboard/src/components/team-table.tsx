@@ -1,6 +1,8 @@
 import type { Invitation, Member } from '@hireflow/contracts';
 import type { ReactNode } from 'react';
 import { ROLE_LABEL } from '@/lib/roles';
+import { EmptyTeamArt } from './empty-art';
+import { EmptyState } from './empty-state';
 
 /** Members and pending invitations of one company (Team page and the Platform Admin company page). */
 export function TeamTable({
@@ -47,8 +49,8 @@ export function TeamTable({
           ))}
           {members.length + invitations.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-muted">
-                No members yet.
+              <td colSpan={5} className="p-0">
+                <EmptyState bare compact art={EmptyTeamArt} title="No members yet" description="Invite your teammates to start hiring together." />
               </td>
             </tr>
           )}

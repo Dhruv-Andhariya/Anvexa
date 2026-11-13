@@ -228,7 +228,7 @@ export function JdView({ jd, form }: { jd: JdContent; form?: JobForm }) {
           <h4 className={sectionHeading}>{COMPANY_LINK_HEADING}</h4>
           <p className="text-[15px]">
             Learn more about us at{' '}
-            <a href={jd.companyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+            <a href={jd.companyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
               {jd.companyUrl}
             </a>
           </p>
@@ -239,7 +239,7 @@ export function JdView({ jd, form }: { jd: JdContent; form?: JobForm }) {
           <h4 className={sectionHeading}>{HOW_TO_APPLY_HEADING}</h4>
           <p className="text-[15px]">
             See all our openings and apply at{' '}
-            <a href={jd.careersUrl} target="_blank" rel="noreferrer noopener" className="break-all text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+            <a href={jd.careersUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
               {jd.careersUrl}
             </a>
           </p>

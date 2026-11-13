@@ -56,11 +56,11 @@ export function StudentReview({ applicationId }: { applicationId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/assessments?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+        <Link href={`/assessments?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
           ← {data.jobTitle} assessments
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">{c.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{c.name}</h1>
           <span className={`${pill} ${STAGE_STYLE[data.stage]}`}>{STAGE_TEXT[data.stage]}</span>
         </div>
         <p className="mt-1 text-sm text-muted">

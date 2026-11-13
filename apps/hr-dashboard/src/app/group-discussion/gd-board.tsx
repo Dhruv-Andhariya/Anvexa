@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Button, Card, ErrorNotice, Field, Spinner, inputClass } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { cancelGdEvent, createGdEvent, getGdRound, listGdRounds, setGdBatchTopic } from '@/lib/gd-api';
+import { EmptyDiscussionArt } from '@/components/empty-art';
+import { EmptyState } from '@/components/empty-state';
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
 const pill = 'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium';
@@ -104,7 +106,7 @@ export function GdBoard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Group Discussion</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Group Discussion</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Students who pass the round before a group discussion wait here automatically. Schedule a GD to split them into
           groups: each group gets its own time slot, room and topic, and an AI moderator runs the discussion.
@@ -112,16 +114,19 @@ export function GdBoard() {
       </div>
 
       {rounds.length === 0 ? (
-        <Card className="flex flex-col items-start gap-2">
-          <p className="font-medium">No group discussion rounds yet</p>
-          <p className="text-sm text-muted">
-            Add a round of type <span className="font-medium">Group Discussion</span> to a job on the Publish page. Its questions
-            are the discussion topics.
-          </p>
-          <Link href="/publish" className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
-            Open the Publish page →
-          </Link>
-        </Card>
+        <EmptyState
+          art={EmptyDiscussionArt}
+          eyebrow="Group discussion"
+          steps={['Add a Group Discussion round to a job', 'Write the discussion topics', 'Schedule batches and watch them live']}
+          title="No group discussion rounds yet"
+          description={
+            <>
+              Add a round of type <span className="font-medium text-foreground">Group Discussion</span> to a job on the Publish page. Its
+              questions are the discussion topics.
+            </>
+          }
+          action={{ href: '/publish', label: 'Open the Publish page' }}
+        />
       ) : (
         <>
           <label className="flex max-w-xl flex-col gap-1.5 text-sm font-medium">
@@ -194,7 +199,7 @@ function RoundPanel({ roundId, onChanged }: { roundId: string; onChanged: () => 
               ? 'Students only reach the group discussion once the job\'s rounds are complete.'
               : 'Each question of the Group Discussion round is a topic. Add at least one before scheduling.'}
           </p>
-          <Link href={`/publish?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href={`/publish?job=${encodeURIComponent(data.jobId)}`} className="text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Open the Publish page →
           </Link>
         </Card>
@@ -452,11 +457,11 @@ function EventCard({ event, topics, onUpdated }: { event: GdEvent; topics: GdTop
                 <span className={`${pill} border-border text-muted`}>{BATCH[b.status]}</span>
               </div>
               <div className="flex gap-3 text-xs font-medium">
-                <Link href={`/group-discussion/live/${encodeURIComponent(b.id)}`} className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                <Link href={`/group-discussion/live/${encodeURIComponent(b.id)}`} className="text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                   {b.status === 'LOBBY_OPEN' || b.status === 'IN_PROGRESS' ? '● Join live' : 'Live page'}
                 </Link>
                 {b.status === 'COMPLETED' && (
-                  <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+                  <Link href={`/group-discussion/results/${encodeURIComponent(b.id)}`} className="text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
                     Results
                   </Link>
                 )}

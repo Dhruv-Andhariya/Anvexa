@@ -85,7 +85,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
     return (
       <Card>
         <form noValidate onSubmit={submitCode} className="flex flex-col gap-4" aria-labelledby="code-heading">
-          <h1 id="code-heading" className="text-xl font-semibold tracking-tight">
+          <h1 id="code-heading" className="text-2xl font-bold tracking-tight">
             Check your email
           </h1>
           <p className="text-sm text-muted">
@@ -110,7 +110,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
             {busy ? 'Checking…' : 'Verify and log in'}
           </Button>
           <div className="flex justify-between text-sm">
-            <button type="button" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground" disabled={busy} onClick={() => void submit()}>
+            <button type="button" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent" disabled={busy} onClick={() => void submit()}>
               Send a new code
             </button>
             <button
@@ -133,7 +133,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
   return (
     <Card>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4" aria-labelledby="login-heading">
-        <h1 id="login-heading" className="text-xl font-semibold tracking-tight">
+        <h1 id="login-heading" className="text-2xl font-bold tracking-tight">
           Log in
         </h1>
         <GoogleButton next={next} />
@@ -159,7 +159,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
         </Field>
         <Link
           href={email.trim() ? `/forgot-password?email=${encodeURIComponent(email.trim())}` : '/forgot-password'}
-          className="-mt-2 self-end text-sm font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
+          className="-mt-2 self-end text-sm font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent"
         >
           Forgot password?
         </Link>
@@ -175,7 +175,7 @@ export function LoginForm({ next, passwordReset, oauthError }: { next?: string; 
         </Button>
         <p className="text-sm text-muted">
           New company on Anvexa?{' '}
-          <Link href="/signup" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+          <Link href="/signup" className="font-medium text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
             Create an account
           </Link>
           . Joining your company&apos;s existing team? Ask your Company Admin for an invitation link.
