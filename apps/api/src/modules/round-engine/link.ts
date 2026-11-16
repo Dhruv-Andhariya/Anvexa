@@ -14,11 +14,12 @@ export function assessmentBaseUrlFromEnv(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * Base URL of the DSA coding page (candidate-app /dsa/[token]): DSA_ASSESSMENT_URL, or - when that is empty -
- * `${CANDIDATE_APP_URL}/dsa/{token}`. Same rules as the assessment link: http(s) only, and in production never localhost.
+ * Base URL of the DSA / SQL coding page (careers site /dsa/[token]): DSA_ASSESSMENT_URL, or - when that is empty -
+ * `${CAREERS_SITE_URL}/dsa/{token}`, so every candidate round lives on the careers site's one public address.
+ * Same rules as the assessment link: http(s) only, and in production never localhost.
  */
 export function dsaBaseUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  return baseUrlFrom(env.DSA_ASSESSMENT_URL, env.CANDIDATE_APP_URL, '/dsa/{token}', env);
+  return baseUrlFrom(env.DSA_ASSESSMENT_URL, env.CAREERS_SITE_URL, '/dsa/{token}', env);
 }
 
 function baseUrlFrom(explicitRaw: string | undefined, rootRaw: string | undefined, path: string, env: NodeJS.ProcessEnv): string | null {

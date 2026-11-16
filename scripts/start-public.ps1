@@ -1,8 +1,7 @@
 # Starts the whole local stack and opens the public links (Cloudflare quick tunnels) - safe to run more than once.
 #   1. Docker Desktop  2. Postgres / Redis / Mailpit  3. cloudflared tunnel -> careers site :3300, URL written to
-#   CAREERS_SITE_URL in .env; when a code runner is set up (PISTON_URL in .env) a second tunnel -> candidate app
-#   :3001 (DSA coding round), URL written to CANDIDATE_APP_URL  4. pnpm dev (API :4000, HR :3000, careers :3300,
-#   candidate app :3001)  5. AI worker :8000
+#   CAREERS_SITE_URL in .env (every candidate page, the DSA / SQL coding round included, is on the careers site)
+#   4. pnpm dev (API :4000, HR :3000, careers :3300)  5. AI worker :8000
 #   6. GD worker :8010 + AI moderator bot (workers/gd-agent)
 # A quick tunnel gets a NEW random https://<words>.trycloudflare.com URL every time cloudflared starts, so Apply links
 # in posts made before a restart point to the old URL. The API edits those posts at start (same post, new link);
@@ -122,19 +121,13 @@ Say "public URL: $publicUrl"
 $changed = SetEnv 'CAREERS_SITE_URL' $publicUrl
 if ($changed) { Say 'CAREERS_SITE_URL updated in .env - the API will update the Apply link in existing posts when it starts' }
 
-# DSA coding round: its invitations are emailed only while CANDIDATE_APP_URL is public, and only a working code runner
-# makes the test fair (without one every submission fails and the student is graded 0 -> rejection email).
+# DSA / SQL coding rounds run on the careers site too (/dsa/<token>), so they use the tunnel above - no second tunnel.
+# A tunnel left over from the old candidate app (:3001) is closed. Only a working code runner makes a DSA test fair
+# (without one every submission fails and the student is graded 0 -> rejection email).
 # Piston itself: infra/piston/start-piston.ps1 (docs/dsa-piston-hosting.md).
-$dsaUrl = $null
-if (EnvValue 'PISTON_URL') {
-  $dsaUrl = Tunnel 3001 (Join-Path $logs 'cloudflared-dsa.log')
-  if ($dsaUrl) { Say "DSA coding test URL: $dsaUrl" } else { Say 'ERROR: no tunnel for the DSA coding test - its invitations wait' }
-} else {
-  TunnelProcess 3001 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Say 'PISTON_URL is not set in .env: DSA coding round invitations wait until a code runner is set up'
-}
-# localhost is never emailed, so without a tunnel coding invitations wait (round-engine link.ts)
-if (SetEnv 'CANDIDATE_APP_URL' $(if ($dsaUrl) { $dsaUrl } else { 'http://localhost:3001' })) { $changed = $true; Say 'CANDIDATE_APP_URL updated in .env' }
+TunnelProcess 3001 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+if (EnvValue 'PISTON_URL') { Say "DSA / SQL coding test links: $publicUrl/dsa/<token>" }
+else { Say 'PISTON_URL is not set in .env: DSA coding answers cannot be run until a code runner is set up' }
 
 # HR dashboard from anywhere: its own quick tunnel. HR_DASHBOARD_URL is the base of the links the API emails to HR
 # (password reset, team invites), so it follows the tunnel. The dashboard calls the API through its own /api/v1 proxy.
@@ -151,11 +144,11 @@ if ((EnvValue 'HR_PUBLIC_TUNNEL') -eq 'on') {
   TunnelProcess 3000 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   if (SetEnv 'HR_DASHBOARD_URL' 'http://localhost:3000') { $changed = $true; Say 'HR_DASHBOARD_URL set back to http://localhost:3000 in .env' }
 }
-if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new URL'; 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
+if ($changed -and (Listening 4000)) { Say 'restarting dev servers for the new URL'; 4000, 3000, 3300 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
 
 # 4. API + dashboards (pnpm is not on PATH on this laptop, so the pinned version runs through npx)
-if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (Listening 3001))) {
-  if (Listening 4000) { 4000, 3000, 3300, 3001 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
+if (-not (Listening 4000) -or -not (Listening 3300)) {
+  if (Listening 4000) { 4000, 3000, 3300 | ForEach-Object { StopPort $_ }; Start-Sleep 3 }
   # The database client is generated from apps/api/prisma/schema: after a `git pull` with schema changes a stale
   # client stops the API from compiling. Nothing holds the engine file now (the API is stopped), so regenerate it.
   Push-Location (Join-Path $root 'apps\api')
@@ -172,7 +165,6 @@ if (-not (Listening 4000) -or -not (Listening 3300) -or ($dsaUrl -and -not (List
     -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $PSScriptRoot 'serve-public.ps1')`""
 }
 if (-not (WaitFor 'API + careers site' 900 { (Listening 4000) -and (Listening 3300) })) { exit 1 }
-if ($dsaUrl) { WaitFor 'candidate app (DSA)' 300 { Listening 3001 } | Out-Null }
 WaitFor 'HR dashboard' 300 { Listening 3000 } | Out-Null
 
 # 5. AI worker (JD generation); the apply link works without it
@@ -200,12 +192,7 @@ WaitFor "public link $publicUrl" 120 {
   try { (Invoke-WebRequest "$publicUrl" -UseBasicParsing -TimeoutSec 20).StatusCode -eq 200 } catch { $false }
 } | Out-Null
 Say "Apply links now start with: $publicUrl"
-if ($dsaUrl) {
-  WaitFor "DSA coding test $dsaUrl" 120 {
-    try { (Invoke-WebRequest "$dsaUrl" -UseBasicParsing -TimeoutSec 20).StatusCode -lt 500 } catch { [bool]$_.Exception.Response }
-  } | Out-Null
-  Say "DSA coding test links now start with: $dsaUrl/dsa/"
-}
+Say "Every candidate round (assessment, DSA / SQL, screening, GD, interview) is on the same address: $publicUrl"
 if ($hrUrl) {
   WaitFor "HR dashboard $hrUrl" 120 {
     try { (Invoke-WebRequest "$hrUrl/login" -UseBasicParsing -TimeoutSec 20).StatusCode -lt 500 } catch { [bool]$_.Exception.Response }

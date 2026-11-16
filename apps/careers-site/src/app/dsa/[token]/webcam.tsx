@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Spinner } from '@/components/ui';
+import { Button, Card, Spinner } from '@/components/dsa-ui';
 import type { ProctorInputType } from '@/lib/dsa-api';
 
 // ---------------------------------------------------------------- camera

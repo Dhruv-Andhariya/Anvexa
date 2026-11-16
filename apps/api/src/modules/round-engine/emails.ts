@@ -25,7 +25,7 @@ export interface InviteEmailInput extends CandidateEmailBase {
   link: string;
   linkExpiresAt: Date;
   cameraRequired: boolean;
-  /** A DSA coding round (candidate-app page) instead of a multiple-choice test: the wording changes, nothing else. */
+  /** A DSA / SQL coding round (careers site /dsa page) instead of a multiple-choice test: the wording changes, nothing else. */
   coding?: boolean;
   /** Coding rounds: which kind of problems ('sql' = SQL queries only, 'code' = programs only, 'mixed' = both). */
   codingKind?: 'code' | 'sql' | 'mixed';

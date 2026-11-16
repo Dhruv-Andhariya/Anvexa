@@ -21,7 +21,7 @@ export interface RoundEngineWorkerConfig {
   autoInvite: boolean;
   /** Base of the assessment link (ASSESSMENT_URL or CAREERS_SITE_URL/assessment/{token}); null = not set up. */
   baseUrl: string | null;
-  /** Base of the DSA coding page link (DSA_ASSESSMENT_URL or CANDIDATE_APP_URL/dsa/{token}); null = not set up. */
+  /** Base of the DSA coding page link (DSA_ASSESSMENT_URL or CAREERS_SITE_URL/dsa/{token}); null = not set up. */
   dsaBaseUrl: string | null;
   linkDays: number;
   /** Local testing only (e.g. Mailpit): also email links whose host is localhost (ROUND_ALLOW_LOCAL_LINKS). */
@@ -93,7 +93,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
   onApplicationBootstrap() {
     if (!this.config.enabled) return;
     if (!this.config.baseUrl) this.logger.warn('assessment link not set up (ASSESSMENT_URL / CAREERS_SITE_URL): invitations wait in the queue');
-    if (!this.config.dsaBaseUrl) this.logger.warn('DSA link not set up (DSA_ASSESSMENT_URL / CANDIDATE_APP_URL): coding round invitations wait in the queue');
+    if (!this.config.dsaBaseUrl) this.logger.warn('DSA link not set up (DSA_ASSESSMENT_URL / CAREERS_SITE_URL): coding round invitations wait in the queue');
     this.timer = setInterval(() => void this.tick(), this.config.pollMs);
     this.timer.unref();
   }
@@ -174,7 +174,7 @@ export class RoundEngineWorker implements OnApplicationBootstrap, OnModuleDestro
       const base = coding ? this.config.dsaBaseUrl : this.config.baseUrl;
       // never a broken link in a candidate's inbox: hold the invitation until a public link exists
       if (!base) {
-        throw new WaitingForLinkError(coding ? 'Waiting for the DSA link to be set up (DSA_ASSESSMENT_URL or CANDIDATE_APP_URL).' : 'Waiting for the assessment link to be set up (ASSESSMENT_URL or CAREERS_SITE_URL).');
+        throw new WaitingForLinkError(coding ? 'Waiting for the DSA link to be set up (DSA_ASSESSMENT_URL or CAREERS_SITE_URL).' : 'Waiting for the assessment link to be set up (ASSESSMENT_URL or CAREERS_SITE_URL).');
       }
       if (!this.config.allowLocalLinks && !isPublicLink(base)) {
         throw new WaitingForLinkError('Waiting for a public assessment link (start the public link or deploy the site); it is sent automatically then.');

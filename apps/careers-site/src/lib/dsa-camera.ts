@@ -1,6 +1,6 @@
 /**
- * Webcam for the monitored SQL assessment (same helpers as the careers site's online test, apps/careers-site/src/lib/
- * camera.ts). The video stays in the browser: it is shown to the candidate and analysed on their computer, never
+ * Webcam for the monitored DSA / SQL coding page (/dsa/[token]); same helpers as the online test's lib/camera.ts,
+ * plus the coding page's own messages. The video stays in the browser: it is shown to the candidate and analysed on their computer, never
  * recorded or uploaded. The page reports only short EVENTS about it.
  */
 

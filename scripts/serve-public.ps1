@@ -1,4 +1,4 @@
-# Serves the stack for the PUBLIC links (called by start-public.ps1). The three web apps run as PRODUCTION builds
+# Serves the stack for the PUBLIC links (called by start-public.ps1). The two web apps run as PRODUCTION builds
 # (next build + next start): a development server sends ~10 MB of unminified JavaScript per page and compiles each
 # page on its first visit, which over a quick tunnel takes about a minute - students saw "site can't be reached".
 # The API keeps running in watch mode. If a web build fails, everything falls back to `pnpm dev` (slow, but working).
@@ -16,7 +16,7 @@ function Hidden($command, $log) {
   Start-Process -WindowStyle Hidden -WorkingDirectory $root powershell.exe -ArgumentList '-NoProfile', '-Command', "`$env:PUBLISHER_AUTO_REFRESH_LINKS='true'; $command *> '$log'"
 }
 
-$apps = @(@{ name = 'careers-site'; port = 3300 }, @{ name = 'candidate-app'; port = 3001 }, @{ name = 'hr-dashboard'; port = 3000 })
+$apps = @(@{ name = 'careers-site'; port = 3300 }, @{ name = 'hr-dashboard'; port = 3000 })
 $filters = ($apps | ForEach-Object { "--filter=$($_.name)" }) -join ' '
 Invoke-Expression "$pnpm turbo run build $filters" *> (Join-Path $logs 'build.log')
 $built = $LASTEXITCODE -eq 0

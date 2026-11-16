@@ -34,7 +34,8 @@ HR signs up ─► registers company ─► creates job ─► AI writes JD ─�
 | Audit log | `apps/api/src/modules/audit` | ✅ Minimal (write only, no UI) |
 | Resume parsing / ATS scoring | `workers/ai-worker` | 🟡 Mock endpoints (fixed shapes, fake data) |
 | Round engine (conducting rounds for students), proctoring, scheduler, evaluator, feedback, notifications, analytics | `apps/api/src/modules/*`, `packages/rounds/*` | ⬜ Empty folders, not started |
-| Candidate app, admin console | `apps/candidate-app`, `apps/admin-console` | ⬜ Not started |
+| Candidate round pages (assessment, DSA / SQL coding, AI screening, GD, AI interview) | `apps/careers-site` (`/assessment`, `/dsa`, `/screening`, `/gd`, `/interview`) | ✅ Built — all on :3300 |
+| Admin console | `apps/admin-console` | ⬜ Not started |
 
 ---
 
@@ -126,7 +127,7 @@ CSV export). Guide: [docs/HIRING_PIPELINE.md](docs/HIRING_PIPELINE.md).
 | App | URL | What it is |
 |---|---|---|
 | HR dashboard | http://localhost:3000 | HR / Company Admin web app |
-| Careers site | http://localhost:3300 | Public job pages + apply form |
+| Careers site | http://localhost:3300 | Public job pages + apply form + every candidate round page (assessment, DSA / SQL, screening, GD, interview) |
 | API | http://localhost:4000/api/v1/health | NestJS backend |
 | AI worker | http://localhost:8000/docs | Python FastAPI, JD generation |
 | Mailpit | http://localhost:8025 | Fake inbox for local emails |

@@ -94,7 +94,6 @@ The HR user's web app.
 ### Other apps (⬜ empty for now)
 | App | Port | Owner | For |
 |---|---|---|---|
-| `candidate-app/` | 3100 | I3 | Candidates taking rounds / tracking status |
 | `admin-console/` | 3200 | I1 | Super-admin / company admin |
 | `careers-site/` | 3300 | I3 | Public job listings and apply page |
 

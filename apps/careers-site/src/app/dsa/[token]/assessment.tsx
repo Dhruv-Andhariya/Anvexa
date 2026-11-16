@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Button, Card, Spinner, inputClass } from '@/components/ui';
+import { Badge, Button, Card, Spinner, inputClass } from '@/components/dsa-ui';
 import {
   ApiError,
   LANGUAGE_LABELS,

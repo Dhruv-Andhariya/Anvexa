@@ -2,7 +2,7 @@ import { PROCTOR_TERMINATION_MESSAGE } from '@hireflow/contracts';
 import { useEffect, useState } from 'react';
 import type { AssessmentState, FinalResult, NextStep } from '@/lib/dsa-api';
 import { LANGUAGE_LABELS, continueAfterRound } from '@/lib/dsa-api';
-import { Badge, Button, Card, Spinner } from '@/components/ui';
+import { Badge, Button, Card, Spinner } from '@/components/dsa-ui';
 import { difficultyTone } from './problem-panel';
 import { CameraCheck, type CameraMonitor } from './camera-monitor';
 

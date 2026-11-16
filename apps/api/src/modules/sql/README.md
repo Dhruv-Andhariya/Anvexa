@@ -9,7 +9,7 @@
 
 A SQL round is **not** a separate page or pipeline. A round question holding a SQL problem counts as an online coding
 problem (`isDsaQuestion` in contracts), so the round engine runs a SQL round exactly like a DSA round: invitation email,
-personal link to the candidate app's coding page (`/dsa/[token]`), timer, proctoring (two warnings, the third
+personal link to the careers site's coding page (`/dsa/[token]`), timer, proctoring (two warnings, the third
 violation ends the attempt), scoring, result in the assessments module, next-round / outcome email. This module adds
 what is SQL-specific:
 

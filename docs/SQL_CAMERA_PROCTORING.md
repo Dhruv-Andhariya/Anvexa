@@ -58,9 +58,9 @@ order.
 
 ## Setup
 
-- `pnpm --filter candidate-app dev` / `build` first runs `scripts/prepare-face-model.mjs`. It copies the WASM runtime
+- `pnpm --filter careers-site dev` / `build` first runs `scripts/prepare-face-model.mjs`. It copies the WASM runtime
   from the installed package and downloads the face model (3.7 MB) once, checking it against a pinned SHA-256. Both
-  are served by the candidate app itself from `public/mediapipe` (git-ignored), never from a CDN.
+  are served by the careers site itself from `public/mediapipe` (git-ignored), never from a CDN.
 - The candidate page's `Permissions-Policy` allows `camera=(self)`. The camera needs https (or localhost).
 - Env (`.env.example`): `DSA_PROCTOR_CAMERA` (`sql` | `all` | `off`), `DSA_PROCTOR_CAMERA_STRIKES` (`on` | `off`),
   `DSA_PROCTOR_CAMERA_COOLDOWN_MS`. The thresholds are in `CAMERA_RULES_DEFAULTS`.

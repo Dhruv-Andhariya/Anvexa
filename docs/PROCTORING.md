@@ -1,7 +1,7 @@
 # Proctoring of the DSA and SQL assessments
 
 This document is the reference for the integrity monitoring of the **DSA (coding) and SQL rounds** on the candidate
-coding page (`apps/candidate-app`, route `/dsa/[token]`). It covers what the system detects, how warnings and
+coding page (`apps/careers-site`, route `/dsa/[token]`). It covers what the system detects, how warnings and
 termination work, where the data lives, the API, configuration, testing and known limits.
 
 Other rounds have their own monitoring and are **not** covered here: the online aptitude test (round engine
@@ -32,7 +32,7 @@ A terminated attempt is graded on what was submitted and **waits for HR's integr
 ## 2. How it works
 
 ```
- Candidate's browser (apps/candidate-app)                API (apps/api, modules/dsa)                    HR dashboard
+ Candidate's browser (apps/careers-site)                API (apps/api, modules/dsa)                    HR dashboard
  ─────────────────────────────────────────              ───────────────────────────────                ────────────
  webcam ─► MediaPipe Face Landmarker (≈5 fps)  ┐
         └► MediaPipe Object Detector (≈1 fps)  ├─► CameraRuleEngine ──► grouped alert ─┐
@@ -68,7 +68,7 @@ All rules live in `packages/contracts/src/schemas/camera-proctoring.ts` (`Camera
 TypeScript, unit-tested with synthetic frames, and used by both the page and the tests.
 
 Models are served by the app itself from `public/mediapipe`, never a third-party CDN. They are downloaded once and
-verified against a pinned SHA-256 by `apps/candidate-app/scripts/prepare-face-model.mjs`:
+verified against a pinned SHA-256 by `apps/careers-site/scripts/prepare-face-model.mjs`:
 
 | Model | Used for | Rate |
 | --- | --- | --- |
@@ -296,7 +296,7 @@ They are tested with synthetic frames, not yet tuned on real recordings (§12).
 
 ```powershell
 pnpm install
-node apps/candidate-app/scripts/prepare-face-model.mjs          # models -> apps/candidate-app/public/mediapipe (also runs before dev/build)
+node apps/careers-site/scripts/prepare-face-model.mjs          # models -> apps/careers-site/public/mediapipe (also runs before dev/build)
 cd packages/contracts; npx tsc -p tsconfig.json                 # the API uses the built contracts
 
 # tests
@@ -350,7 +350,7 @@ open a candidate's coding link, allow the camera, then hold a phone in view for 
 | HR review | `apps/api/src/modules/dsa/proctoring/proctoring-hr.service.ts`, `dsa-hr.controller.ts` |
 | Termination enforcement | `apps/api/src/modules/dsa/dsa.service.ts` |
 | Attempt termination, integrity review | `apps/api/src/modules/round-engine/round-engine.service.ts` (`terminateCoding`) |
-| Camera loop, models | `apps/candidate-app/src/app/dsa/[token]/camera-monitor.tsx`, `face-model.ts` |
-| Warning dialog | `apps/candidate-app/src/app/dsa/[token]/proctoring.tsx` |
+| Camera loop, models | `apps/careers-site/src/app/dsa/[token]/camera-monitor.tsx`, `face-model.ts` |
+| Warning dialog | `apps/careers-site/src/app/dsa/[token]/proctoring.tsx` |
 | HR incident history and review | `apps/hr-dashboard/src/components/online-test-panel.tsx` |
 | Tests | `packages/contracts/tests/camera-proctoring.test.ts`, `apps/api/tests/dsa-proctoring-warnings.test.ts`, `apps/api/tests/sql/sql-camera-proctoring.test.ts` |

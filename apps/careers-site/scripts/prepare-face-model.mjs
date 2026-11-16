@@ -1,4 +1,5 @@
-// Puts the face model, the object model and their runtime next to the candidate app (public/mediapipe), so the page never loads them from
+// Puts the face model, the object model and their runtime next to the careers site (public/mediapipe) for the DSA / SQL
+// coding page (/dsa/[token]), so the page never loads them from
 // a third-party CDN: the WASM runtime comes from the installed @mediapipe/tasks-vision package, the model is downloaded
 // once and checked against a pinned SHA-256 (a changed or corrupted file is refused). Runs before `dev` and `build`.
 import { createHash } from 'node:crypto';

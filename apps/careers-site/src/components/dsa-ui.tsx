@@ -1,6 +1,8 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
-// Same primitives as apps/hr-dashboard/src/components/ui.tsx so both apps share one visual language.
+// UI primitives of the DSA / SQL coding page (/dsa/[token]), moved here from the former apps/candidate-app.
+// Same primitives as apps/hr-dashboard/src/components/ui.tsx (Badge, Card, Button variants), which the careers site's
+// own components/ui.tsx does not have.
 
 export const inputClass =
   'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 ' +
