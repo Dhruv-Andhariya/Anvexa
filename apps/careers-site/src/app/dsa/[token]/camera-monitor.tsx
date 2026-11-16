@@ -3,7 +3,7 @@
 import type { FaceLandmarker, ObjectDetector } from '@mediapipe/tasks-vision';
 import { CameraRuleEngine, type CameraAlert } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Spinner } from '@/components/ui';
+import { Button, Card, Spinner } from '@/components/dsa-ui';
 import {
   CAMERA_MESSAGES,
   cameraProblemOf,
@@ -13,7 +13,7 @@ import {
   watchCameraPermission,
   type CameraPermission,
   type CameraProblem,
-} from '@/lib/camera';
+} from '@/lib/dsa-camera';
 import { loadFaceLandmarker, loadObjectDetector, toDetections, toMeasures } from './face-model';
 
 /** Frames analysed per second; slowed down on weak computers so the page stays responsive. */

@@ -167,12 +167,14 @@ describe('which rounds the engine runs as a DSA round', () => {
 });
 
 describe('the DSA link', () => {
-  it('is taken from DSA_ASSESSMENT_URL or CANDIDATE_APP_URL, and never localhost in production', () => {
-    expect(dsaBaseUrlFromEnv({ CANDIDATE_APP_URL: 'https://cand.example.com/' })).toBe('https://cand.example.com/dsa/{token}');
-    expect(dsaBaseUrlFromEnv({ DSA_ASSESSMENT_URL: 'https://x.example.com/dsa/{token}', CANDIDATE_APP_URL: 'https://other' })).toBe('https://x.example.com/dsa/{token}');
+  it('is taken from DSA_ASSESSMENT_URL or the careers site (CAREERS_SITE_URL), and never localhost in production', () => {
+    expect(dsaBaseUrlFromEnv({ CAREERS_SITE_URL: 'https://careers.example.com/' })).toBe('https://careers.example.com/dsa/{token}');
+    expect(dsaBaseUrlFromEnv({ DSA_ASSESSMENT_URL: 'https://x.example.com/dsa/{token}', CAREERS_SITE_URL: 'https://other' })).toBe('https://x.example.com/dsa/{token}');
     expect(dsaBaseUrlFromEnv({})).toBeNull();
-    expect(dsaBaseUrlFromEnv({ CANDIDATE_APP_URL: 'http://localhost:3001', NODE_ENV: 'production' })).toBeNull();
-    expect(dsaBaseUrlFromEnv({ CANDIDATE_APP_URL: 'ftp://x' })).toBeNull();
+    expect(dsaBaseUrlFromEnv({ CAREERS_SITE_URL: 'http://localhost:3300', NODE_ENV: 'production' })).toBeNull();
+    expect(dsaBaseUrlFromEnv({ CAREERS_SITE_URL: 'ftp://x' })).toBeNull();
+    // the old candidate app's address is no longer used
+    expect(dsaBaseUrlFromEnv({ CANDIDATE_APP_URL: 'https://cand.example.com' })).toBeNull();
   });
 });
 
@@ -228,7 +230,7 @@ describe('after AI screening: the DSA invitation email', () => {
 
   it('a localhost DSA link is held back (a candidate could never open it) unless local links are allowed', async () => {
     store.completedScreenings.push({ tenantId: TENANT, applicationId: APP, jobId: JOB, roundId: saved[0]!.id });
-    const local = worker({ dsaBaseUrl: 'http://localhost:3001/dsa/{token}' });
+    const local = worker({ dsaBaseUrl: 'http://localhost:3300/dsa/{token}' });
     await local.w.discover();
     await local.w.sendInvites();
     expect(local.mailer.sent).toHaveLength(0);

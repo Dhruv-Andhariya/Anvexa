@@ -2,7 +2,7 @@
 
 import type { CameraAlert, ProctorCandidateWarning } from '@hireflow/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card } from '@/components/ui';
+import { Button, Card } from '@/components/dsa-ui';
 import { ApiError, sendProctorEvents, type ProctorEventInput, type ProctorInputType, type ProctoringConfig } from '@/lib/dsa-api';
 import { NOTICE_TEXT, classifyKey } from './proctoring-rules';
 

@@ -1,6 +1,6 @@
 # DSA coding assessment — integration notes
 
-Isolated DSA assessment module for Anvexa: candidate route `/dsa/[token]` in `apps/candidate-app`, backend module `apps/api/src/modules/dsa`, code execution through a self-hosted **Piston** runner on the hosting PC (see [dsa-piston-hosting.md](dsa-piston-hosting.md)).
+Isolated DSA assessment module for Anvexa: candidate route `/dsa/[token]` in `apps/careers-site`, backend module `apps/api/src/modules/dsa`, code execution through a self-hosted **Piston** runner on the hosting PC (see [dsa-piston-hosting.md](dsa-piston-hosting.md)).
 
 > **Status in one paragraph.** The module is **wired into the round engine** as a DSA round of a job's selection process: HR picks bank problems in the rounds editor, students are invited by email after the AI voice screening (or the previous round), take the test on the candidate page with real sandboxed execution on Piston, and the result, the cleared email or the rejection email follow automatically. Sessions, results and the monitoring record are in the database. The whole flow is described in [DSA_ASSESSMENT_ROUND.md](DSA_ASSESSMENT_ROUND.md). Sections below that talk about demo tokens describe the demo mode (`DSA_DEMO_MODE=on`). Judge0, used in an earlier iteration, was dropped (it could not run on this machine's cgroup v2) and its client code was removed.
 
@@ -36,7 +36,7 @@ Modified (the only shared file touched):
 
 - `apps/api/src/app.module.ts`: **one import line and one entry in `imports`** (`DsaModule`). Needs review by whoever owns the file. Nothing else in `apps/api` was changed.
 
-### Candidate app (`apps/candidate-app`)
+### Candidate app (`apps/careers-site`)
 
 Created: `src/lib/dsa-api.ts` (typed client), `src/components/ui.tsx` (Button, Badge, Card, Spinner, `inputClass` — copied from `apps/hr-dashboard/src/components/ui.tsx`), `src/app/favicon.ico` (copy of the HR dashboard's), and under `src/app/dsa/[token]/`: `assessment.tsx`, `problem-panel.tsx`, `code-editor.tsx`, `results-panel.tsx`, `screens.tsx`.
 
@@ -51,7 +51,7 @@ Deleted: `src/lib/questions.ts` and `src/lib/public-questions.ts`. They were an 
 ### Outside the repository
 
 - `infra/piston/` (`piston.env`, `start-piston.ps1`): the runner's settings and an idempotent start/verify script. Piston runs as Docker container `hireflow-piston` with volume `hireflow_piston_data`.
-- `apps/candidate-app/next.config.ts`: forwards only `/api/v1/dsa/*` to the API, long proxy timeout, privacy headers.
+- `apps/careers-site/next.config.ts`: forwards only `/api/v1/dsa/*` to the API, long proxy timeout, privacy headers.
 
 ---
 
@@ -167,7 +167,7 @@ stdin format used by the current harnesses: int array → `"<len> v1 v2 ..."` on
 
 ## 4. The invitation token (wired)
 
-The link in the email is `https://<candidate-app>/dsa/<token>`; the token is the round engine's invitation token (32 random bytes, only its SHA-256 stored in `round_invites`). The page sends it to the API unchanged.
+The link in the email is `https://<careers-site>/dsa/<token>` (until November 2026: the separate candidate app on port 3001); the token is the round engine's invitation token (32 random bytes, only its SHA-256 stored in `round_invites`). The page sends it to the API unchanged.
 
 Seams, all bound in `dsa.module.ts` (the real implementation is the default; `DSA_DEMO_MODE=on` binds the demo ones):
 
@@ -180,7 +180,7 @@ Seams, all bound in `dsa.module.ts` (the real implementation is the default; `DS
 
 The demo tokens are refused when `NODE_ENV=production` unless `DSA_ALLOW_DEMO_TOKENS=on`, and `DSA_DEMO_TOKENS` (long random tokens) replaces the two well-known ones.
 
-Still true for production: **CORS** in `apps/api/src/main.ts` allows only `localhost` origins, which does not matter for the candidate app because the browser calls the candidate app itself (same origin) and the app forwards `/api/v1/dsa/*`; and `NEXT_PUBLIC_API_URL` / `API_INTERNAL_URL` are baked in at build time.
+Still true for production: **CORS** in `apps/api/src/main.ts` allows only `localhost` origins, which does not matter for the careers site because the browser calls the careers site itself (same origin) and the app forwards `/api/v1/dsa/*`; and `NEXT_PUBLIC_API_URL` / `API_INTERNAL_URL` are baked in at build time.
 
 ---
 
@@ -206,7 +206,7 @@ Full hosting, startup and troubleshooting guide: **[dsa-piston-hosting.md](dsa-p
 | **assessments** | `record()` receives marks per problem, `isCorrect`, the best code and a summary; pass or fail is decided in `grading.ts` only. |
 | **notifications / email** | The round engine's existing invitation, cleared and rejection emails (coding wording for the invitation). |
 | **proctoring** (the older module) | Not used. The DSA page has its own browser monitoring (this module's `proctoring/`); HR reads it through `/dsa-hr`. |
-| **contracts** | `schemas/dsa-bank.ts` (bank list, marker rules, `isDsaRound`, the HR review shape). The candidate page's own response types are still mirrored by hand in `apps/candidate-app/src/lib/dsa-api.ts`. |
+| **contracts** | `schemas/dsa-bank.ts` (bank list, marker rules, `isDsaRound`, the HR review shape). The candidate page's own response types are still mirrored by hand in `apps/careers-site/src/lib/dsa-api.ts`. |
 
 ---
 
@@ -240,7 +240,7 @@ The one skipped test is `dsa-piston-load.test.ts`, which is opt-in (it fires up 
 
 ### Browser tests (scratchpad Puppeteer scripts driving real Chrome; **not in the repo**)
 
-Run against the production build of the candidate app (browser calls the same origin, which forwards `/api/v1/dsa/*`), with the API running on Piston:
+Run against the production build of the careers site (browser calls the same origin, which forwards `/api/v1/dsa/*`), with the API running on Piston:
 
 - Assessment UI regression: **34 / 34** (intro, timer and server sync, three tabs, language list and starter code, navigation with drafts, Run and Submit, hidden rows without details, wrong answer partial score, Java compile error, reload keeps the timer, finish and result screens, invalid token, mobile width, expiry of a 1-minute assessment, 18 captured responses with no hidden data, no console errors).
 - Proctoring: **56 / 56** with `DSA_PROCTOR_MAX_STRIKES=0` (the script deliberately triggers about 19 violations). The scripts' step labels still say "real Judge0"; that text is stale, the runs used Piston.

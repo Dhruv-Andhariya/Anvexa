@@ -3,7 +3,7 @@
 Students answer SQL problems on the same proctored coding page as the DSA round. HR manages the questions in a
 database-backed SQL question bank and picks them for a job's SQL round. Code: `apps/api/src/modules/sql` (bank,
 sandbox; [README](../apps/api/src/modules/sql/README.md)), the dsa module (coding page API), the round engine (invites,
-grading, emails), `apps/candidate-app/src/app/dsa/[token]` (page), `apps/hr-dashboard/src/app/sql-questions` (bank).
+grading, emails), `apps/careers-site/src/app/dsa/[token]` (page), `apps/hr-dashboard/src/app/sql-questions` (bank).
 
 ## 1. How it fits in
 
@@ -83,7 +83,7 @@ Marks per question = marks × datasets passed / datasets. The best submission co
 2. No new service to run: SQLite is part of Node.js. It needs a current release with the `node:sqlite` authorizer
    (tested on Node 26). An older Node refuses to run queries rather than run them unlocked.
 3. Env (all optional): `FEATURE_SQL`, `SQL_RUNNER_CONCURRENCY`, `SQL_RUNNER_HEAP_MB` (see `.env.example`). The DSA
-   settings also apply: `DSA_ROUNDS`, `CANDIDATE_APP_URL`, `DSA_PROCTOR_MAX_STRIKES`.
+   settings also apply: `DSA_ROUNDS`, `CAREERS_SITE_URL`, `DSA_PROCTOR_MAX_STRIKES`.
 4. HR: **SQL questions → Add the 15 starter questions**. Then in a job's rounds editor, add a SQL round with
    coding questions from the bank, set the time limit and pass rule, and mark the rounds complete.
 

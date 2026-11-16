@@ -4,13 +4,13 @@ import type { CameraEventType, ProctorCandidateWarning } from '@hireflow/contrac
 /**
  * Browser: same-origin /api/v1/dsa/*, forwarded to the API by next.config.ts, so the page works from its public link
  * (tunnel or deployment) on the candidate's own computer - never the API's localhost address, which only exists on the
- * machine running it. NEXT_PUBLIC_CANDIDATE_API_URL overrides this when the API has its own public URL.
- * Server (rendering, if any): straight to the API, like the careers site.
+ * machine running it. NEXT_PUBLIC_CAREERS_API_URL overrides this when the API has its own public URL (same as lib/api.ts).
+ * Server (rendering, if any): straight to the API.
  */
 export const API_URL =
   typeof window === 'undefined'
     ? process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'
-    : process.env.NEXT_PUBLIC_CANDIDATE_API_URL || '/api/v1';
+    : process.env.NEXT_PUBLIC_CAREERS_API_URL || '/api/v1';
 
 // These types mirror apps/api/src/modules/dsa (dsa.service.ts, evaluator.ts, question.types.ts).
 export type Language = 'python' | 'java' | 'cpp' | 'sql';

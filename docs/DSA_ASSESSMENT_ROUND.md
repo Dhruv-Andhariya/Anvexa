@@ -5,7 +5,8 @@ rounds editor, the round engine invites students automatically, students take it
 install, and the result decides who moves on and who gets a rejection email.
 
 Code: `apps/api/src/modules/dsa` (candidate page API, problem bank, scoring, proctoring), `apps/api/src/modules/round-engine`
-(invitation, clock, result, emails), `apps/candidate-app` (the coding page, `/dsa/[token]`). Code execution:
+(invitation, clock, result, emails), `apps/careers-site` (the coding page, `/dsa/[token]`, on the same site and port 3300 as every
+other candidate round; until November 2026 it was a separate app, `apps/candidate-app` on port 3001). Code execution:
 [`dsa-piston-hosting.md`](dsa-piston-hosting.md). Proctoring details: [`dsa-proctoring-implementation.md`](dsa-proctoring-implementation.md).
 Module notes (questions, harnesses, older Judge0 history): [`dsa-integration-notes.md`](dsa-integration-notes.md).
 
@@ -103,18 +104,18 @@ The first student who starts locks the questions and the pass rule for the whole
 2. **Piston** (the code runner) on the machine that hosts the API: `powershell -File infra\piston\start-piston.ps1`
    (details, capacity and troubleshooting: [`dsa-piston-hosting.md`](dsa-piston-hosting.md)). Piston has no login and is published on
    `127.0.0.1` only; never expose it.
-3. **Candidate app**: `pnpm --filter candidate-app build` with `NEXT_PUBLIC_API_URL=/api/v1` and `API_INTERNAL_URL=<API>/api/v1`, then
-   `start` (port 3001). It forwards only `/api/v1/dsa/*` to the API. `NEXT_PUBLIC_*` and the API address are baked in at build time.
-4. **Public address**: the DSA link in the email is `DSA_ASSESSMENT_URL` or `${CANDIDATE_APP_URL}/dsa/{token}`. Invitations are
+3. **Careers site**: `pnpm --filter careers-site build` with `NEXT_PUBLIC_API_URL=/api/v1` and `API_INTERNAL_URL=<API>/api/v1`, then
+   `start` (port 3300). Of the API it forwards only `/api/v1/public/*` and `/api/v1/dsa/*`. `NEXT_PUBLIC_*` and the API address are baked in at build time.
+4. **Public address**: the DSA link in the email is `DSA_ASSESSMENT_URL` or `${CAREERS_SITE_URL}/dsa/{token}`. Invitations are
    emailed only when that address is public (not localhost): until then they wait in the queue and go out automatically
    afterwards. `ROUND_ALLOW_LOCAL_LINKS=on` is for local tests with Mailpit.
-5. Install: `pnpm install` (the lockfile now has the candidate app).
+5. Install: `pnpm install`.
 
 ### Settings (`.env.example` has them all)
 | Variable | Default | Meaning |
 |---|---|---|
 | `DSA_ROUNDS` | on | off = DSA rounds are run by HR (no invitation, no automatic result) |
-| `CANDIDATE_APP_URL` / `DSA_ASSESSMENT_URL` | localhost / empty | where the coding page lives; the emailed link |
+| `CAREERS_SITE_URL` / `DSA_ASSESSMENT_URL` | localhost / empty | where the coding page lives; the emailed link |
 | `PISTON_URL` | `http://127.0.0.1:2000` | the code runner (API only) |
 | `DSA_PROCTOR_MAX_STRIKES` | 2 | suspicious actions allowed before the next one ends the test |
 | `DSA_SHOW_SCORE` | off | on = candidates see their score on the last page |
@@ -126,7 +127,7 @@ The first student who starts locks the questions and the pass rule for the whole
 The existing `AUTO_ROUND_INVITES`, `ASSESSMENT_LINK_DAYS`, `ROUND_ENGINE_PROCESSING` and `ROUND_ENGINE_POLL_MS` apply to DSA rounds too.
 
 ### Order of starting
-Docker Desktop and Piston, then the API (with the settings above), the candidate app, the tunnel or deployment, then check
+Docker Desktop and Piston, then the API (with the settings above), the careers site, the tunnel or deployment, then check
 one link before inviting students (the "remote access test" in the hosting guide).
 
 ## 7. Data kept and privacy
@@ -154,7 +155,7 @@ Run on the development machine, 2026-11-02, against a throwaway local Postgres (
 | HR dashboard tests | 75 passed |
 | Type checks (api, contracts, hr-dashboard, candidate-app), API build, candidate-app production build | clean |
 
-**Full stack in a real browser** (compiled API + production candidate app + Piston + Postgres + Mailpit, the worker running by itself):
+**Full stack in a real browser** (compiled API + production careers site + Piston + Postgres + Mailpit, the worker running by itself):
 three students with a completed AI screening each received the invitation email by themselves; each opened their own
 link in Chrome; A solved Easy + Medium (30 of 60), B solved Easy (10 of 60), C solved Easy in a 1-minute round and let
 the time run out. Result: A got "Congratulations… the next stage is the Personal Interview", B and C got the rejection

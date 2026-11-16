@@ -1,5 +1,5 @@
 import type { Difficulty, PublicQuestion, PublicSqlProblem } from '@/lib/dsa-api';
-import { Badge } from '@/components/ui';
+import { Badge } from '@/components/dsa-ui';
 import { SqlTable } from './sql-table';
 
 export const difficultyTone = (d: Difficulty | string) =>

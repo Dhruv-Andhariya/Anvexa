@@ -8,7 +8,7 @@ Candidates and teammates install **nothing**: no Piston, Docker, Python, Java or
 ## 1. Architecture
 
 ```
-Candidate's browser ──HTTPS──▶ Cloudflare tunnel / your domain ──▶ candidate-app (Next.js, :3001)
+Candidate's browser ──HTTPS──▶ Cloudflare tunnel / your domain ──▶ careers-site (Next.js, :3300)
                                                                        │  only /api/v1/dsa/* is forwarded
                                                                        ▼
                                                               Anvexa API (NestJS, :4100)
@@ -73,14 +73,14 @@ Run from the repository root in PowerShell.
    ```powershell
    $env:NEXT_PUBLIC_API_URL = '/api/v1'
    $env:API_INTERNAL_URL    = 'http://127.0.0.1:4100/api/v1'
-   pnpm --filter candidate-app build
-   pnpm --filter candidate-app exec next start -p 3001
+   pnpm --filter careers-site build
+   pnpm --filter careers-site exec next start -p 3300
    ```
 
-4. **Public address.** Expose only the candidate app:
+4. **Public address.** Expose only the careers site:
 
    ```powershell
-   cloudflared tunnel --url http://127.0.0.1:3001
+   cloudflared tunnel --url http://127.0.0.1:3300
    ```
 
    Copy the printed `https://….trycloudflare.com` URL. Links are `https://<that-host>/dsa/<token>`.
@@ -89,7 +89,7 @@ Run from the repository root in PowerShell.
 
 5. **Check before sending links** (§5).
 
-Shutdown: stop the tunnel first (candidates see an error page instead of a half-working one), then wait until no candidate is mid-assessment, then the API and candidate app. Sessions are **in memory**: restarting the API loses every running assessment and every proctoring record.
+Shutdown: stop the tunnel first (candidates see an error page instead of a half-working one), then wait until no candidate is mid-assessment, then the API and the careers site. Sessions are **in memory**: restarting the API loses every running assessment and every proctoring record.
 
 ---
 
@@ -197,7 +197,7 @@ Planning rule of thumb for this hardware: a class of about 20 students is fine i
 | Start script says the port is published beyond localhost | Run with `-Recreate`. Do not edit the `-p` mapping. |
 | Start script says Piston is on the Anvexa network | Run with `-Recreate`; do not attach it to `hireflow_default`. |
 | Public link shows an old or dead page after a restart | The quick-tunnel URL changed. Send the new one, or move to a named tunnel. |
-| Page loads, API calls fail with 500 after about 30 s | The candidate app was built without the proxy setting, or `API_INTERNAL_URL` was wrong at build time. Rebuild with §3 step 3. |
+| Page loads, API calls fail with 500 after about 30 s | the careers site was built without the proxy setting, or `API_INTERNAL_URL` was wrong at build time. Rebuild with §3 step 3. |
 | Friendly "invalid link" page for a token that should work | The API was restarted without the same `DSA_DEMO_TOKENS`, or `NODE_ENV=production` without `DSA_ALLOW_DEMO_TOKENS=on`. |
 | Admin proctoring routes answer 404 | Closed by design: `DSA_ADMIN_API_KEY` is not set on the API, or the `x-dsa-admin-key` header differs. |
 | Docker Desktop will not start after a reboot | Start it manually once, then rerun the start script. |

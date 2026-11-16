@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   },
   // The proxy above gives up after 30 s by default ("socket hang up" -> "Something went wrong"), but AI work through
   // the API takes longer: generating coding problems (AI worker up to 120 s + running each solution), JDs, questions.
-  // Same limit as apps/candidate-app.
+  // Same limit as the careers site (apps/careers-site/next.config.ts).
   experimental: { proxyTimeout: 240_000 },
   // Dev server opened through a Cloudflare quick tunnel: allow its JS / HMR requests.
   allowedDevOrigins: ["*.trycloudflare.com"],

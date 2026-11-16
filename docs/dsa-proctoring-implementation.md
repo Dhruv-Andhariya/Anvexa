@@ -6,7 +6,7 @@ Browser-based integrity monitoring for the DSA coding assessment: full-screen mo
 
 > **What this is, and is not.** It is *browser-level detection and deterrence*. A normal web page cannot lock down a computer. It cannot see other applications, block operating-system shortcuts (Alt+Tab, the Windows key, Ctrl+T/W), stop a second device, or know why the browser reported an event. Every record is an **observation for a human reviewer, never proof of cheating**, and nothing here changes a candidate's score. See [Security limitations](#7-security-limitations).
 >
-> **Webcam (2026-11-04, `DSA_PROCTOR_CAMERA`, default on).** The webcam must be on to start and for the whole attempt. A face detector (MediaPipe BlazeFace, running in the candidate's browser, one frame a second) reports `NO_FACE` (no face for 8 s), `MULTIPLE_FACES` (more than one face for 3 s, high severity) and `CAMERA_OFF` (the camera stopped or its permission was withdrawn; the page is blocked until it is back on). Each is one warning, at most once per episode. The video never leaves the device; only these events reach the server. Code: `apps/candidate-app/src/app/dsa/[token]/webcam.tsx`. The detector is served by the candidate app itself (runtime copied to `public/mediapipe/wasm` before dev / build by `scripts/copy-face-detector.mjs`, model committed in `public/models`), overridable with `NEXT_PUBLIC_FACE_WASM_URL` / `NEXT_PUBLIC_FACE_MODEL_URL`; if it cannot load, only the camera-on check runs. Consent version `dsa-proctoring-v2`.
+> **Webcam (2026-11-04, `DSA_PROCTOR_CAMERA`, default on).** The webcam must be on to start and for the whole attempt. A face detector (MediaPipe BlazeFace, running in the candidate's browser, one frame a second) reports `NO_FACE` (no face for 8 s), `MULTIPLE_FACES` (more than one face for 3 s, high severity) and `CAMERA_OFF` (the camera stopped or its permission was withdrawn; the page is blocked until it is back on). Each is one warning, at most once per episode. The video never leaves the device; only these events reach the server. Code: `apps/careers-site/src/app/dsa/[token]/webcam.tsx`. The detector is served by the careers site itself (runtime copied to `public/mediapipe/wasm` before dev / build by `scripts/copy-face-detector.mjs`, model committed in `public/models`), overridable with `NEXT_PUBLIC_FACE_WASM_URL` / `NEXT_PUBLIC_FACE_MODEL_URL`; if it cannot load, only the camera-on check runs. Consent version `dsa-proctoring-v2`.
 >
 > **Allowed warnings (default 3).** The first 3 suspicious events (any violation below: a screenshot key, a tab switch, leaving full screen, a copy attempt, the webcam turning off, no face or a second face in view, and so on, one per real action) are tolerated and shown to the candidate as warnings. **The next one ends the assessment immediately**, including leaving full screen, and the work submitted so far is kept. See [Allowed warnings](#allowed-warnings-the-two-strike-rule). Set `DSA_PROCTOR_MAX_STRIKES=0` for no limit.
 
@@ -17,7 +17,7 @@ Related: [dsa-integration-notes.md](dsa-integration-notes.md) (the assessment mo
 ## 1. Architecture
 
 ```
-Candidate browser (apps/candidate-app, /dsa/[token])            API (apps/api/src/modules/dsa)
+Candidate browser (apps/careers-site, /dsa/[token])            API (apps/api/src/modules/dsa)
   IntroScreen: notice + consent + "Start in full screen"
       │ click → requestFullscreen()  (needs the user gesture)
       │ POST /dsa/:token/proctor/start   {consent, consentVersion, fullscreen} ─►  ProctoringService.start  (consent stored)
@@ -41,7 +41,7 @@ Design decisions:
 
 Backend, `apps/api/src/modules/dsa/`: `dsa.tokens.ts` (shared clock token), `proctoring/proctoring.types.ts`, `proctoring.policy.ts`, `proctoring.store.ts`, `proctoring.dto.ts`, `proctoring.service.ts`, `proctoring.controller.ts` (candidate routes), `proctoring-admin.controller.ts` (HR routes). Modified: `dsa.service.ts` (consent gating, ending, auto-end, state), `dsa.module.ts` (providers/controllers), `session/session.store.ts` (finish reason `disqualified`).
 
-Frontend, `apps/candidate-app/src/`: `lib/dsa-api.ts` (types, `startProctoring`, `sendProctorEvents`), `app/dsa/[token]/proctoring.tsx` (hook, full-screen helpers, gate, notice), `proctoring-rules.ts` (key classification), and edits to `assessment.tsx`, `screens.tsx` (consent screen, end message), `code-editor.tsx` (`data-code-editor` marker).
+Frontend, `apps/careers-site/src/`: `lib/dsa-api.ts` (types, `startProctoring`, `sendProctorEvents`), `app/dsa/[token]/proctoring.tsx` (hook, full-screen helpers, gate, notice), `proctoring-rules.ts` (key classification), and edits to `assessment.tsx`, `screens.tsx` (consent screen, end message), `code-editor.tsx` (`data-code-editor` marker).
 
 Tests, `apps/api/tests/`: `dsa-proctoring.test.ts`, `dsa-proctoring.e2e.test.ts`.
 

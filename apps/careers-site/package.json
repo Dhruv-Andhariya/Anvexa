@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node scripts/copy-face-detector.mjs",
+    "predev": "node scripts/copy-face-detector.mjs && node scripts/prepare-face-model.mjs",
     "dev": "next dev -p 3300",
-    "prebuild": "node scripts/copy-face-detector.mjs",
+    "prebuild": "node scripts/copy-face-detector.mjs && node scripts/prepare-face-model.mjs",
     "build": "next build",
     "start": "next start -p 3300",
     "lint": "eslint",

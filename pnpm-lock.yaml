@@ -76,43 +76,6 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.5)(lightningcss@1.32.0)(terser@5.51.2)
 
-  apps/candidate-app:
-    dependencies:
-      '@hireflow/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@mediapipe/tasks-vision':
-        specifier: 0.10.21
-        version: 0.10.21
-      next:
-        specifier: 15.5.27
-        version: 15.5.27(@types/node@20.19.43)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      react:
-        specifier: 19.1.0
-        version: 19.1.0
-      react-dom:
-        specifier: 19.1.0
-        version: 19.1.0(react@19.1.0)
-    devDependencies:
-      '@tailwindcss/postcss':
-        specifier: ^4
-        version: 4.3.3
-      '@types/node':
-        specifier: ^20
-        version: 20.19.43
-      '@types/react':
-        specifier: ^19
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.3.0(@types/react@19.3.0)
-      tailwindcss:
-        specifier: ^4
-        version: 4.3.3
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
   apps/careers-site:
     dependencies:
       '@hireflow/contracts':

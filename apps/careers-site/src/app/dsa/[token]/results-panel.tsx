@@ -1,5 +1,5 @@
 import type { CaseResult, CaseStatus, RunResponse, SubmitResponse } from '@/lib/dsa-api';
-import { Badge, Spinner } from '@/components/ui';
+import { Badge, Spinner } from '@/components/dsa-ui';
 import { SqlTable } from './sql-table';
 
 export interface PanelResult {

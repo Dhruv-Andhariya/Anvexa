@@ -10,4 +10,5 @@ export function middleware(request: NextRequest) {
   return NextResponse.next({ request: { headers: withTrustedClientIp(request.headers, process.env.TRUSTED_CLIENT_IP_HEADER) } });
 }
 
-export const config = { matcher: '/api/v1/public/:path*' };
+// /api/v1/dsa/*: the DSA / SQL coding page's API calls get the same treatment.
+export const config = { matcher: ['/api/v1/public/:path*', '/api/v1/dsa/:path*'] };

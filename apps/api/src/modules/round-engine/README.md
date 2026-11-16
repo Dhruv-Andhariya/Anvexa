@@ -15,7 +15,7 @@ A round runs online (`roundKind`) in one of two ways, both with a score-based pa
 
 - **TEST**: only MCQ / true-false questions. The candidate takes it on the careers site (`/assessment/[token]`).
 - **CODING (DSA round)**: every question is a **DSA bank problem** (a CODING question with the topic `dsa:<id>`, picked in
-  the rounds editor; `isDsaRound` in contracts). The candidate takes it on the candidate app (`/dsa/[token]`), served by
+  the rounds editor; `isDsaRound` in contracts). The candidate takes it on the careers site (`/dsa/[token]`, port 3300), served by
   the `dsa` module. Same invitation, clock, result and next-step machinery; the engine only stores the candidate's
   progress (`round_attempts.coding_state`) and turns it into marks. Switch off with `DSA_ROUNDS=off`. Guide:
   [`docs/DSA_ASSESSMENT_ROUND.md`](../../../../../docs/DSA_ASSESSMENT_ROUND.md).
