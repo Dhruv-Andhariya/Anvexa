@@ -520,20 +520,25 @@ export class GdResultsService {
         }
       }
       const selected = s.finalDecision === 'SELECTED';
-      // selected: the next round follows (an online round's / the AI interview's invitation, or the Stage 2 overall check)
+      // the next round follows (an online round's / the AI interview's invitation, or the Stage 2 overall check):
+      // after "selected", and also after "not selected" when the job averages its technical rounds (AVERAGE_OF_ROUNDS) -
+      // then the GD is one score of the average, and the student goes on (only students who took part have a score)
       let nextStepEmails = false;
-      if (selected && round && this.engine) {
+      let carriedOn = false;
+      if (round && this.engine && (selected || ATTENDED.includes(s.attendance))) {
         try {
-          const step = await this.engine.continueAfterExternalRound(tenantId, s.applicationId, round.id, true);
+          const step = await this.engine.continueAfterExternalRound(tenantId, s.applicationId, round.id, selected);
+          carriedOn = !selected && !!step;
           // the next round's invitation ("Shortlisted: ...") or the overall-criterion rejection IS the student's email
-          nextStepEmails = !!step && !(step.kind === 'EMAIL' && step.email !== 'REJECTED');
+          nextStepEmails = !!step && (!selected || !(step.kind === 'EMAIL' && step.email !== 'REJECTED'));
         } catch (err) {
           this.logger.warn(`GD next step not queued application=${s.applicationId} (${err instanceof Error ? err.message : 'unknown'})`);
         }
       }
-      // one email per student: not selected -> the GD rejection (unless the job switched rejection emails off);
+      // one email per student: not selected -> the GD rejection (unless the job switched rejection emails off, or the
+      // student goes on under AVERAGE_OF_ROUNDS - then the next step's email is theirs);
       // selected -> the GD "selected" email only when nothing automatic follows (next round run by HR / last round)
-      if (selected ? !nextStepEmails : rejectionEmails) await this.mail.queueResult(tenantId, batchId, s.participantId, selected, s.email);
+      if (selected ? !nextStepEmails : rejectionEmails && !carriedOn) await this.mail.queueResult(tenantId, batchId, s.participantId, selected, s.email);
     }
     await this.activityLog(tenantId, batchId, actor, 'CONFIRMED', null, { selected: view.students.filter((s) => s.finalDecision === 'SELECTED').length });
     await this.audit.record({ tenantId, actorUserId: actor?.id ?? null, action: 'gd.selection_confirmed', subjectType: 'gd_batch', subjectId: batchId, metadata: { automatic: !actor } });

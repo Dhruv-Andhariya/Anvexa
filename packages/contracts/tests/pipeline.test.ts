@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PIPELINE_SETTINGS,
   pipelineSettingsSchema,
   pipelineStatusOf,
   rubricScoreProblems,
@@ -120,5 +121,43 @@ describe('settings and rubric validation', () => {
     expect(rubricScoreProblems(rubric, ok.slice(0, 3))).toEqual(['Score "Listening".']);
     expect(rubricScoreProblems(rubric, [...ok, { parameter: 'Humour', marks: 1 }])).toEqual(['"Humour" is not a parameter of this rubric.']);
     expect(rubricScoreProblems(rubric, [...ok, { parameter: 'Content', marks: 1 }])).toEqual(['"Content" is scored twice.']);
+  });
+});
+
+describe('Stage 2 AVERAGE_OF_ROUNDS (the default): DSA / SQL / GD judged together at the end', () => {
+  const AVG: PipelineSettings = { stage2Rule: 'AVERAGE_OF_ROUNDS', stage2MinPercent: null, rejectionEmails: true };
+  /** result with its round's pass mark (same unit as score) */
+  const r = (outcome: 'PASSED' | 'FAILED', score: number, maxScore: number, passMark: number): PipelineResult => ({ outcome, score, maxScore, passMark });
+
+  it('is the default, and needs no minimum percentage', () => {
+    expect(pipelineSettingsSchema.parse({ stage2Rule: 'AVERAGE_OF_ROUNDS' })).toMatchObject({ stage2Rule: 'AVERAGE_OF_ROUNDS', stage2MinPercent: null });
+    expect(DEFAULT_PIPELINE_SETTINGS.stage2Rule).toBe('AVERAGE_OF_ROUNDS');
+  });
+
+  it('3 rounds: average of the 3 percentages >= average of the 3 pass marks, a failed round included', () => {
+    // GD 21/30 = 70 % (pass 15 = 50 %), SQL 9/20 = 45 % FAILED (pass 12 = 60 %), DSA 24/30 = 80 % (pass 15 = 50 %)
+    const m = { apt: pass(8, 10), gd: r('PASSED', 21, 30, 15), sql: r('FAILED', 9, 20, 12), dsa: r('PASSED', 24, 30, 15) };
+    expect(stage2Verdict(rounds, of(m), AVG)).toMatchObject({ decided: true, passed: true, allRoundsPassed: false, averagePercent: 65, requiredPercent: 53.33 });
+    // the same student is shortlisted: status is not "rejected at the SQL round"
+    expect(pipelineStatusOf(rounds, of(m), AVG)).toBe('IN_TECH_INTERVIEW');
+    expect(stage2GateAllows(rounds, { position: 4 }, of(m), AVG)).toBe(true);
+  });
+
+  it('a low average rejects only after the last technical round ("Rejected: technical overall")', () => {
+    const m = { apt: pass(8, 10), gd: r('FAILED', 6, 30, 15), sql: r('FAILED', 8, 20, 12) };
+    // DSA not taken yet: still in the technical rounds, not rejected
+    expect(pipelineStatusOf(rounds, of(m), AVG)).toBe('IN_TECHNICAL_ROUNDS');
+    expect(stage2Verdict(rounds, of(m), AVG)).toMatchObject({ decided: false, passed: false });
+    const done = { ...m, dsa: r('PASSED', 18, 30, 15) }; // 20 %, 40 %, 60 % = 40 % < 53.33 %
+    expect(stage2Verdict(rounds, of(done), AVG)).toMatchObject({ decided: true, passed: false, averagePercent: 40 });
+    expect(pipelineStatusOf(rounds, of(done), AVG)).toBe('REJECTED_MODULE2_OVERALL');
+    expect(stage2GateAllows(rounds, { position: 4 }, of(done), AVG)).toBe(false);
+  });
+
+  it('2 rounds = average of 2 (a skipped round does not count); aptitude still rejects on its own', () => {
+    const two = rounds.map((x) => (x.id === 'gd' ? { ...x, skipped: true } : x));
+    const m = { apt: pass(8, 10), sql: r('FAILED', 10, 20, 12), dsa: r('PASSED', 21, 30, 15) }; // 50 %, 70 % = 60 % vs 55 %
+    expect(stage2Verdict(two, of(m), AVG)).toMatchObject({ decided: true, passed: true, averagePercent: 60, requiredPercent: 55 });
+    expect(pipelineStatusOf(two, of({ ...m, apt: fail(2, 10) }), AVG)).toBe('REJECTED_APTITUDE');
   });
 });

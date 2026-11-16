@@ -1,9 +1,10 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   FIXED_SCREENING_STEPS,
   ROUND_TYPES,
   TRUE_FALSE_OPTIONS,
   generateQuestionsRequestSchema,
+  onlineTestProblem,
   roundQuestionInputSchema,
   roundsCompletionProblems,
   saveRoundsRequestSchema,
@@ -19,6 +20,7 @@ import { uuidv7 } from '../../common/uuidv7';
 import { AuditService } from '../audit';
 import type { Actor } from '../tenants';
 import { QuestionGeneratorClient, QuestionGeneratorError, type QuestionJobFacts } from './question-generator.client';
+import { RoundModules } from './round-modules';
 import { RoundsConfigStore, RoundsLockedError, type StoredConfig, type StoredRound } from './rounds-config.store';
 
 /** "Table does not exist": the rounds migration is not applied to this database yet (Prisma P2021). */
@@ -52,7 +54,29 @@ export class RoundsConfigService {
     @Inject(RoundsConfigStore) private readonly store: RoundsConfigStore,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(QuestionGeneratorClient) private readonly generator: QuestionGeneratorClient,
+    /** Which round modules run on this server; absent (unit tests) = no online-test check at completion. */
+    @Optional() @Inject(RoundModules) private readonly modules?: RoundModules,
   ) {}
+
+  /**
+   * Completing the rounds: a SQL or Coding (DSA) round must run online by itself (its link emailed, graded by the system)
+   * unless a connected round module runs it - otherwise no link would ever go out and HR would have to run it by hand.
+   */
+  private assertRunsOnline(rounds: RoundConfig[]): void {
+    if (!this.modules) return;
+    const problems: string[] = [];
+    rounds.forEach((r, i) => {
+      const problem = onlineTestProblem(r);
+      if (!problem) return;
+      // a connected SQL module runs SQL rounds with its own questions (DSA problems are the round engine's own)
+      if (r.type === 'SQL' && this.modules!.isConnected('SQL')) return;
+      problems.push(`Round ${i + 1} (${r.name || 'no name'}): ${problem}`);
+    });
+    if (!problems.length) return;
+    const err = apiError(HttpStatus.BAD_REQUEST, 'ROUND_NOT_ONLINE', problems[0]!);
+    (err.getResponse() as Record<string, unknown>).issues = problems.map((message) => ({ path: 'rounds', message }));
+    throw err;
+  }
 
   async get(tenantId: string, jobId: string): Promise<JobRounds> {
     return this.guard(async () => {
@@ -70,6 +94,7 @@ export class RoundsConfigService {
       if (!job) throw jobNotFound();
       const current = await this.store.getConfig(tenantId, jobId);
       if (current?.lockedAt) throw roundsLocked();
+      if (req.complete) this.assertRunsOnline(req.rounds);
 
       const rounds = toStored(req.rounds, current);
       const status = req.complete ? 'COMPLETE' : 'DRAFT';

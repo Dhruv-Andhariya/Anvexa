@@ -30,8 +30,20 @@ export const isTechnicalRound = (type: RoundType) => PIPELINE_STAGE_OF[type] ===
 
 // ---------------------------------------------------------------- settings
 
-export const stage2RuleSchema = z.enum(['ALL_ROUNDS_PASSED', 'TOTAL_PERCENT', 'BOTH']);
+/**
+ * AVERAGE_OF_ROUNDS (default): the technical rounds (DSA / SQL / GD, whichever the job has) are judged together at the
+ * end - one failed round does not stop the student; they take every technical round, then the average of their
+ * percentages must reach the average of those rounds' own pass marks (as percentages). 3 rounds = average of 3,
+ * 2 rounds = average of 2, 1 round = that round's own rule.
+ */
+export const stage2RuleSchema = z.enum(['AVERAGE_OF_ROUNDS', 'ALL_ROUNDS_PASSED', 'TOTAL_PERCENT', 'BOTH']);
 export type Stage2Rule = z.infer<typeof stage2RuleSchema>;
+
+/** Rules that need HR's minimum total percentage. */
+export const stage2RuleUsesMinPercent = (rule: Stage2Rule) => rule === 'TOTAL_PERCENT' || rule === 'BOTH';
+
+/** Under this rule a failed technical round does not reject on its own: the student goes on to the next one. */
+export const averagesTechnicalRounds = (settings: Pick<PipelineSettings, 'stage2Rule'>) => settings.stage2Rule === 'AVERAGE_OF_ROUNDS';
 
 export const pipelineSettingsSchema = z
   .object({
@@ -43,14 +55,14 @@ export const pipelineSettingsSchema = z
   })
   .strict()
   .superRefine((s, ctx) => {
-    if (s.stage2Rule !== 'ALL_ROUNDS_PASSED' && s.stage2MinPercent === null) {
+    if (stage2RuleUsesMinPercent(s.stage2Rule) && s.stage2MinPercent === null) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['stage2MinPercent'], message: 'Enter the minimum total percentage.' });
     }
   });
 export type PipelineSettingsInput = z.input<typeof pipelineSettingsSchema>;
 export type PipelineSettings = z.output<typeof pipelineSettingsSchema>;
 
-export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = { stage2Rule: 'ALL_ROUNDS_PASSED', stage2MinPercent: null, rejectionEmails: true };
+export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = { stage2Rule: 'AVERAGE_OF_ROUNDS', stage2MinPercent: null, rejectionEmails: true };
 
 export interface PipelineSettingsView extends PipelineSettings {
   jobId: string;
@@ -178,6 +190,8 @@ export interface PipelineResult {
   outcome: RoundOutcome;
   score: number | null;
   maxScore: number | null;
+  /** The round's pass mark, in the same unit as score (AVERAGE_OF_ROUNDS needs it). */
+  passMark?: number | null;
 }
 
 export interface Stage2Verdict {
@@ -189,6 +203,28 @@ export interface Stage2Verdict {
   total: number;
   /** Rounded to 2 decimals; null when there is nothing scored yet. */
   percent: number | null;
+  /** AVERAGE_OF_ROUNDS: the average of the rounds' percentages so far (null = no result yet). */
+  averagePercent?: number | null;
+  /** AVERAGE_OF_ROUNDS: what the average must reach = the average of the rounds' own pass marks, as percentages. */
+  requiredPercent?: number | null;
+}
+
+/** A result as a percentage of its round's maximum (null = no usable result). */
+const percentOfResult = (r: PipelineResult | undefined): number | null =>
+  r && r.score !== null && r.maxScore !== null && r.maxScore > 0 ? Math.min(100, Math.max(0, (r.score / r.maxScore) * 100)) : null;
+const passPercentOfResult = (r: PipelineResult | undefined): number | null =>
+  r && r.passMark !== null && r.passMark !== undefined && r.maxScore !== null && r.maxScore > 0 ? Math.min(100, Math.max(0, (r.passMark / r.maxScore) * 100)) : null;
+const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+
+/** The AVERAGE_OF_ROUNDS numbers of a student (only rounds with a result count). */
+function averageOfRounds(results: (PipelineResult | undefined)[]) {
+  const scored = results.map(percentOfResult).filter((p): p is number => p !== null);
+  const required = results.map(passPercentOfResult).filter((p): p is number => p !== null);
+  return {
+    averagePercent: scored.length ? round2(mean(scored)) : null,
+    // a result without its pass mark (older data) does not move the bar
+    requiredPercent: required.length ? round2(mean(required)) : null,
+  };
 }
 
 const round2 = (n: number) => Math.floor(n * 100 + 1e-9) / 100;
@@ -208,6 +244,12 @@ export function stage2Verdict(rounds: PipelineRound[], resultOf: (roundId: strin
   const percent = total > 0 ? round2((scored / total) * 100) : null;
   const allRoundsPassed = outcomes.every((o) => o === 'PASSED');
   const decided = outcomes.every((o) => o !== 'NOT_ATTEMPTED');
+  if (averagesTechnicalRounds(settings)) {
+    const { averagePercent, requiredPercent } = averageOfRounds(results);
+    // no pass marks known (older results): every round passed decides, as before
+    const averageOk = averagePercent !== null && (requiredPercent === null ? allRoundsPassed : averagePercent >= requiredPercent);
+    return { decided, passed: decided && averageOk, allRoundsPassed, scored: round2(scored), total: round2(total), percent, averagePercent, requiredPercent };
+  }
   const percentOk = percent !== null && percent >= (settings.stage2MinPercent ?? 0);
   const passed =
     settings.stage2Rule === 'ALL_ROUNDS_PASSED' ? allRoundsPassed : settings.stage2Rule === 'TOTAL_PERCENT' ? percentOk : allRoundsPassed && percentOk;
@@ -245,9 +287,11 @@ export function pipelineStatusOf(
   const verdict = stage2Verdict(ordered, resultOf, settings);
   const lastTech = [...ordered].reverse().find((r) => isTechnicalRound(r.type));
   let any = false;
+  const averaged = averagesTechnicalRounds(settings);
   for (const r of ordered) {
     const outcome = resultOf(r.id)?.outcome ?? 'NOT_ATTEMPTED';
-    if (outcome === 'FAILED') return REJECTED_AT[PIPELINE_STAGE_OF[r.type]];
+    // AVERAGE_OF_ROUNDS: a failed technical round is judged with the others at the last one (below)
+    if (outcome === 'FAILED' && !(averaged && isTechnicalRound(r.type))) return REJECTED_AT[PIPELINE_STAGE_OF[r.type]];
     if (outcome === 'NOT_ATTEMPTED') {
       if (PIPELINE_STAGE_OF[r.type] === 'PERSONAL_INTERVIEW' && piCall) return piCall === 'SELECTED' ? 'SELECTED' : 'REJECTED_PERSONAL_INTERVIEW';
       return any ? IN_STAGE[PIPELINE_STAGE_OF[r.type]] : 'NOT_STARTED';

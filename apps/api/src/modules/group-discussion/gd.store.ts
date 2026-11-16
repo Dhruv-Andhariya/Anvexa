@@ -3,6 +3,7 @@ import type { GdAttendance, GdBatchStatus, GdEventStatus, GdSessionAudio, GdSett
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
+import { averagesTechnicalRoundsSql } from '../round-engine';
 
 /** A student who may enter a GD round's pool (found by poolCandidates()). */
 export interface PoolCandidate {
@@ -188,7 +189,8 @@ export class PrismaGdStore extends GdStore {
               SELECT 1 FROM screening_sessions s
                WHERE s.application_id = a.id AND s.tenant_id = a.tenant_id AND s.status = 'COMPLETED'))
            OR
-           -- later round: every earlier round that runs has a result that counts as passed (HR override first)
+           -- later round: every earlier round that runs has a result that counts as passed (HR override first);
+           -- an earlier technical round (DSA / SQL) of a job that averages them only needs a result (AVERAGE_OF_ROUNDS)
            (EXISTS (SELECT 1 FROM job_rounds e0 WHERE e0.job_id = r.job_id AND e0.tenant_id = r.tenant_id
                        AND e0.position < r.position AND e0.skipped_at IS NULL)
             AND NOT EXISTS (
@@ -197,7 +199,8 @@ export class PrismaGdStore extends GdStore {
                  AND NOT EXISTS (
                    SELECT 1 FROM round_results rr
                     WHERE rr.application_id = a.id AND rr.round_id = e.id
-                      AND COALESCE(rr.override_passed, rr.system_passed))))
+                      AND (COALESCE(rr.override_passed, rr.system_passed)
+                           OR (e.type IN ('CODING', 'SQL', 'GROUP_DISCUSSION') AND ${averagesTechnicalRoundsSql})))))
          )
        ORDER BY a.created_at
        LIMIT ${limit}`);

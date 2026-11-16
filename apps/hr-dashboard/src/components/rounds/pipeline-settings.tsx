@@ -1,6 +1,6 @@
 'use client';
 
-import { DEFAULT_PIPELINE_SETTINGS, isTechnicalRound, type PipelineSettings, type PipelineSettingsView, type RoundType, type Stage2Rule } from '@hireflow/contracts';
+import { DEFAULT_PIPELINE_SETTINGS, isTechnicalRound, stage2RuleUsesMinPercent, type PipelineSettings, type PipelineSettingsView, type RoundType, type Stage2Rule } from '@hireflow/contracts';
 import { useEffect, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { getPipelineSettings, savePipelineSettings } from '@/lib/pipeline-api';
@@ -34,7 +34,7 @@ export function PipelineSettingsPanel({ jobId, roundTypes, saved, readOnly }: { 
   if (!saved) return <p className="text-xs text-muted">Pipeline rules (Stage 2 overall criterion, rejection emails): save the rounds first to set them up.</p>;
 
   const locked = readOnly || !!view?.locked;
-  const usesPercent = draft.stage2Rule !== 'ALL_ROUNDS_PASSED';
+  const usesPercent = stage2RuleUsesMinPercent(draft.stage2Rule);
   const changed = !view || JSON.stringify(draft) !== JSON.stringify({ stage2Rule: view.stage2Rule, stage2MinPercent: view.stage2MinPercent, rejectionEmails: view.rejectionEmails });
   const set = (patch: Partial<PipelineSettings>) => {
     setDraft({ ...draft, ...patch });
@@ -57,14 +57,23 @@ export function PipelineSettingsPanel({ jobId, roundTypes, saved, readOnly }: { 
     <fieldset className="flex flex-col gap-3 rounded-md border border-border p-3" disabled={locked || busy}>
       <legend className="px-1 text-sm font-semibold">Pipeline rules</legend>
       <p className="text-xs text-muted">
-        Students move on only after passing each round, in the order above. After the last technical round (DSA, SQL, group discussion) this overall
-        criterion decides who goes on to the technical interview.
+        Rounds run in the order above: each student gets only the first round&apos;s link, and the next round&apos;s link once they finish it. After the
+        last technical round (DSA, SQL, group discussion) this overall criterion decides who gets the technical interview link.
+        {draft.stage2Rule === 'AVERAGE_OF_ROUNDS' && ' With the average rule a student takes every technical round, even after scoring low in one.'}
         {techCount === 0 && ' This job has no technical round yet, so the criterion does not apply.'}
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm font-medium">
           Stage 2 overall criterion
-          <select className={inputClass} value={draft.stage2Rule} onChange={(e) => set({ stage2Rule: e.target.value as Stage2Rule, stage2MinPercent: e.target.value === 'ALL_ROUNDS_PASSED' ? null : (draft.stage2MinPercent ?? 60) })}>
+          <select
+            className={inputClass}
+            value={draft.stage2Rule}
+            onChange={(e) => {
+              const rule = e.target.value as Stage2Rule;
+              set({ stage2Rule: rule, stage2MinPercent: stage2RuleUsesMinPercent(rule) ? (draft.stage2MinPercent ?? 60) : null });
+            }}
+          >
+            <option value="AVERAGE_OF_ROUNDS">Average of the technical rounds ≥ average of their pass marks (recommended)</option>
             <option value="ALL_ROUNDS_PASSED">Every technical round passed</option>
             <option value="TOTAL_PERCENT">Total score of the technical rounds at least…</option>
             <option value="BOTH">Every round passed AND total score at least…</option>

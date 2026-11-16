@@ -5,6 +5,7 @@ import {
   AI_INTERVIEW_PROTECTION_LIMITS,
   activeRounds,
   isRoundSkipped,
+  isTechnicalRound,
   skipRoundRequestSchema,
   type SkipRoundResult,
   assessmentIntegrityDecisionRequestSchema,
@@ -507,21 +508,22 @@ export class RoundEngineService {
    * Safe to call twice (invitations and outcome emails are queued once).
    */
   async continueAfterExternalRound(tenantId: string, applicationId: string, roundId: string, passed: boolean): Promise<NextStep | null> {
-    if (!passed) return null;
     const ctx = await this.store.context(tenantId, applicationId);
     const config = ctx ? await this.rounds.forRoundEngine(tenantId, ctx.jobId) : null;
     const round = config?.rounds.find((r) => r.id === roundId);
     if (!ctx || !config || !round) return null;
-    const step = await this.nextFor(tenantId, ctx.jobId, applicationId, config.rounds, round, true);
-    // the module already told the student they were selected: no second "cleared" email
-    const applied = step.kind === 'EMAIL' && step.email !== 'REJECTED' ? { emailSkipped: 'module' } : await this.applyStep(tenantId, applicationId, ctx.jobId, round.id, step);
+    // not selected: the module's own rejection, unless the job averages its technical rounds (then the student goes on)
+    if (!passed && !(await this.carriesOn(tenantId, ctx.jobId, round, passed))) return null;
+    const step = await this.nextFor(tenantId, ctx.jobId, applicationId, config.rounds, round, passed);
+    // a selected student was already told so by the module: no second "cleared" email
+    const applied = passed && step.kind === 'EMAIL' && step.email !== 'REJECTED' ? { emailSkipped: 'module' } : await this.applyStep(tenantId, applicationId, ctx.jobId, round.id, step);
     await this.audit.record({
       tenantId,
       actorUserId: null,
       action: 'assessment.progressed',
       subjectType: 'application',
       subjectId: applicationId,
-      metadata: { roundId: round.id, outcome: 'PASSED', next: describeStep(step), ...applied },
+      metadata: { roundId: round.id, outcome: passed ? 'PASSED' : 'FAILED', next: describeStep(step), ...applied },
     });
     return step;
   }
@@ -577,13 +579,43 @@ export class RoundEngineService {
       });
       movedOn++;
     }
+    // students told "HR will contact you for this round" (a round the engine cannot run, e.g. SQL with plain-text
+    // questions): skipping it sends them straight on - the next round's link by email, like everyone else
+    const previous = activeRounds(config.rounds.filter((r) => r.position < round.position)).at(-1);
+    const toldHr = previous ? await this.store.waitingForHrRound(tenantId, jobId, previous.id, round.id) : [];
+    for (const applicationId of toldHr) {
+      const step = await this.nextFor(tenantId, jobId, applicationId, config.rounds, round, true);
+      const applied = await this.applyStep(tenantId, applicationId, jobId, round.id, step);
+      await this.audit.record({
+        tenantId,
+        actorUserId: actor?.id ?? null,
+        action: 'assessment.progressed',
+        subjectType: 'application',
+        subjectId: applicationId,
+        metadata: { roundId: round.id, outcome: 'ROUND_SKIPPED', left: 'HR_ROUND', next: describeStep(step), ...applied },
+      });
+      movedOn++;
+    }
     return { movedOn, inProgress: waiting.inProgress };
   }
 
-  /** The next step, with the pipeline's Stage 2 overall criterion applied after the last technical round. */
+  /**
+   * A failed technical round (DSA / SQL / GD) under the job's AVERAGE_OF_ROUNDS rule (the default): the student is not
+   * rejected here but goes on to the next technical round; the average decides after the last one.
+   */
+  private async carriesOn(tenantId: string, jobId: string, round: SavedRound, passed: boolean): Promise<boolean> {
+    if (passed || !isTechnicalRound(round.type) || !this.pipeline) return false;
+    return this.pipeline.averagesTechnicalRounds(tenantId, jobId);
+  }
+
+  /**
+   * The next step, with the pipeline's Stage 2 overall criterion applied after the last technical round (under
+   * AVERAGE_OF_ROUNDS: the average of every technical round decides, a failed round included).
+   */
   private async nextFor(tenantId: string, jobId: string, applicationId: string, rounds: SavedRound[], round: SavedRound, passed: boolean): Promise<NextStep> {
-    const step = this.next(rounds, round, passed);
-    if (passed && this.pipeline && (await this.pipeline.failsStage2Overall(tenantId, jobId, applicationId, rounds, round))) {
+    const goesOn = passed || (await this.carriesOn(tenantId, jobId, round, passed));
+    const step = this.next(rounds, round, goesOn);
+    if (goesOn && this.pipeline && (await this.pipeline.failsStage2Overall(tenantId, jobId, applicationId, rounds, round))) {
       return { kind: 'EMAIL', email: 'REJECTED', nextRoundName: null, stage2Overall: true } as NextStep;
     }
     return step;
@@ -748,9 +780,9 @@ export class RoundEngineService {
       });
       return { status: 'NEXT_ROUND', token: t.token, roundName: next.name };
     }
-    if (next.type === 'GROUP_DISCUSSION' && attempt.systemPassed && config) {
-      // the step the engine took (incl. the pipeline's overall criterion), not just this round's score
-      const step = await this.nextFor(o.ctx.tenantId, o.ctx.jobId, o.ctx.applicationId, config.rounds, o.round, true);
+    if (next.type === 'GROUP_DISCUSSION' && config) {
+      // the step the engine took (incl. the pipeline's overall criterion, and a failed round the job averages), not just this round's score
+      const step = await this.nextFor(o.ctx.tenantId, o.ctx.jobId, o.ctx.applicationId, config.rounds, o.round, attempt.systemPassed === true);
       if (step.kind === 'GROUP_DISCUSSION') {
         return { status: 'GROUP_DISCUSSION', roundName: next.name, ref: { tenantId: o.ctx.tenantId, applicationId: o.ctx.applicationId, roundId: next.id } };
       }

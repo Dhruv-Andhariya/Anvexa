@@ -235,3 +235,65 @@ describe('candidates A-D through the whole pipeline', () => {
     expect((await pipeline.statuses(TENANT, JOB)).students.find((s) => s.applicationId === APP.C)!.status).toBe('IN_TECH_INTERVIEW');
   });
 });
+
+describe('AVERAGE_OF_ROUNDS: the technical rounds (GD, SQL, SQL 2) are judged together at the end', () => {
+  // pass marks: GD 15/30 = 50 %, SQL 10/25 = 40 %, SQL 2 10/20 = 50 % -> the average must reach 46.67 %
+  beforeEach(async () => {
+    await pipeline.saveSettings(TENANT, JOB, { stage2Rule: 'AVERAGE_OF_ROUNDS' }, ACTOR);
+  });
+
+  it('a failed round does not stop the student; the average after the last one decides', async () => {
+    await takeAptitude('A', true);
+    await takeAptitude('C', true);
+    await takeGd('A', 9); // 30 %: fails the GD on its own
+    await takeSql('A', 'SQL Round', [3, 4]); // 28 %: fails SQL on its own
+    await takeSql('A', 'SQL Round 2', [19]); // 95 % -> average 51 % >= 46.67 %
+    await takeGd('C', 6); // 20 %
+    await takeSql('C', 'SQL Round', [2, 3]); // 20 %
+    await takeSql('C', 'SQL Round 2', [8]); // 40 % -> average 26.67 % < 46.67 %
+
+    // nobody was rejected after the GD or the first SQL round: no email until the end
+    expect(emailsOf('A')).toEqual([]);
+    expect(emailsOf('C')).toEqual(['REJECTED@SQL Round 2']);
+    const statuses = await pipeline.statuses(TENANT, JOB);
+    const s = (w: Who) => statuses.students.find((x) => x.applicationId === APP[w])!;
+    expect(s('A').status).toBe('IN_TECH_INTERVIEW');
+    expect(s('A').stage2).toMatchObject({ decided: true, passed: true, allRoundsPassed: false, averagePercent: 51, requiredPercent: 46.66 });
+    expect(s('C').status).toBe('REJECTED_MODULE2_OVERALL');
+    // only A gets the technical interview link
+    store.waitingByType.set('AI_INTERVIEW', (['A', 'C'] as Who[]).map((w) => ({ tenantId: TENANT, applicationId: APP[w], jobId: JOB, roundId: round('Technical Interview').id })));
+    expect((await engine.waitingForModule('AI_INTERVIEW')).map((r) => r.applicationId)).toEqual([APP.A]);
+  });
+
+  it('the aptitude test still rejects on its own', async () => {
+    await takeAptitude('B', false);
+    expect(emailsOf('B')).toEqual(['REJECTED@Aptitude & English']);
+  });
+});
+
+describe('completing the rounds: SQL / Coding rounds must run online (their link emailed, graded by the system)', () => {
+  const plainSql: RoundInput = { type: 'SQL', name: 'SQL', passRule: { mode: 'MARKS', value: 5 }, questions: [{ kind: 'CODING', text: 'Write an SQL query to list the documents', marks: 10, language: 'SQL' }] };
+  const mcqSql: RoundInput = { type: 'SQL', name: 'SQL MCQ', passRule: { mode: 'MARKS', value: 1 }, questions: [{ kind: 'MCQ', text: 'Which clause filters groups?', options: ['WHERE', 'HAVING'], correct: [1] }] };
+  const plainCoding: RoundInput = { type: 'CODING', name: 'Coding', passRule: { mode: 'MARKS', value: 5 }, questions: [{ kind: 'CODING', text: 'Reverse a list', marks: 10, language: 'Python' }] };
+
+  const service = (connected: ('SQL' | 'DSA')[]) => {
+    const roundsStore = new MemoryRoundsConfigStore();
+    roundsStore.addJob(TENANT, JOB);
+    const m = new RoundModules();
+    connected.forEach((x) => m.connect(x));
+    return new RoundsConfigService(roundsStore, new MemoryAudit(), new FakeGenerator().asClient(), m);
+  };
+
+  it('refuses a SQL round with a question the system cannot run (no SQL bank question), and a plain-text coding round', async () => {
+    const err = await caught(service(['DSA']).save(TENANT, JOB, { rounds: [aptitude, plainSql], complete: true }, ACTOR));
+    expect(code(err)).toBe('ROUND_NOT_ONLINE');
+    expect(((err as HttpException).getResponse() as { message: string }).message).toMatch(/^Round 2 \(SQL\): every question must be a SQL question from your SQL question bank/);
+    expect(code(await caught(service(['DSA']).save(TENANT, JOB, { rounds: [plainCoding], complete: true }, ACTOR)))).toBe('ROUND_NOT_ONLINE');
+  });
+
+  it('a draft may hold them; a multiple-choice SQL round runs online; a connected SQL module runs its own questions', async () => {
+    expect((await service(['DSA']).save(TENANT, JOB, { rounds: [plainSql], complete: false }, ACTOR)).status).toBe('DRAFT');
+    expect((await service(['DSA']).save(TENANT, JOB, { rounds: [mcqSql], complete: true }, ACTOR)).status).toBe('COMPLETE');
+    expect((await service(['DSA', 'SQL']).save(TENANT, JOB, { rounds: [plainSql], complete: true }, ACTOR)).status).toBe('COMPLETE');
+  });
+});

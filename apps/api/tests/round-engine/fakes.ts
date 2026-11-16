@@ -279,6 +279,16 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
         this.gdPlaces.filter((p) => p.tenantId === tenantId && p.roundId === roundId && p.batchId).length,
     };
   }
+  async waitingForHrRound(tenantId: string, _jobId: string, previousRoundId: string, roundId: string) {
+    return [
+      ...new Set(
+        this.outcomeEmails
+          .filter((e) => e.tenantId === tenantId && e.roundId === previousRoundId && e.kind === 'CLEARED_NEXT_BY_HR')
+          .map((e) => e.applicationId)
+          .filter((a) => !this.invites.some((i) => i.applicationId === a && i.roundId !== previousRoundId && i.roundId !== roundId)),
+      ),
+    ];
+  }
   async leaveGdPool(tenantId: string, applicationId: string, roundId: string) {
     const n = this.gdPlaces.length;
     this.gdPlaces = this.gdPlaces.filter((p) => !(p.tenantId === tenantId && p.applicationId === applicationId && p.roundId === roundId && !p.batchId));
