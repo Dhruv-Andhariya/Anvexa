@@ -7,7 +7,7 @@ install, and the result decides who moves on and who gets a rejection email.
 Code: `apps/api/src/modules/dsa` (candidate page API, problem bank, scoring, proctoring), `apps/api/src/modules/round-engine`
 (invitation, clock, result, emails), `apps/careers-site` (the coding page, `/dsa/[token]`, on the same site and port 3300 as every
 other candidate round; until November 2026 it was a separate app, `apps/candidate-app` on port 3001). Code execution:
-[`dsa-piston-hosting.md`](dsa-piston-hosting.md). Proctoring details: [`dsa-proctoring-implementation.md`](dsa-proctoring-implementation.md).
+[`dsa-piston-hosting.md`](dsa-piston-hosting.md). Proctoring details: [`PROCTORING.md`](PROCTORING.md) (current reference) and [`dsa-proctoring-implementation.md`](dsa-proctoring-implementation.md) (original browser-proctoring change).
 Module notes (questions, harnesses, older Judge0 history): [`dsa-integration-notes.md`](dsa-integration-notes.md).
 
 ---
@@ -65,7 +65,19 @@ The first student who starts locks the questions and the pass rule for the whole
   C++, nothing to install, a working webcam that stays on (checked on the student's device, never recorded), no microphone or screen recording). It never contains marks or the pass mark.
 - **Page** (`/dsa/<token>`): start screen with the list of problems (titles, difficulty, marks, no statements); consent
   to the monitoring notice; full screen; then the problems, a code editor, Run (sample tests only, nothing scored) and
-  Submit (sample and hidden tests, scored; best score per problem counts). The countdown is the server's.
+  Submit (sample and hidden tests, scored; best score per problem counts). The countdown is the server's. During the
+  test the student's own camera preview floats and can be dragged to any of the four corners (or moved with its ⤢
+  button); moving it never touches the camera stream or the face check (`CameraTile`, `camera-monitor.tsx`).
+- **Submitting near the end**: a Submit is accepted atomically under the attempt's row lock, only while the attempt
+  runs and strictly before its deadline on the server clock, one at a time per attempt (a second one gets `429 BUSY`).
+  Once accepted, its result is recorded even if the time-out sweep, Finish or a termination closes the attempt
+  meanwhile, and grading and the next step wait for it. A code-runner failure releases it (`503`, nothing recorded).
+  An accepted submission whose result never arrives is abandoned after 15 minutes (`PENDING_SUBMISSION_MAX_MS`; the
+  attempt is graded without it, and a late result is refused with `409 SUBMISSION_NOT_RECORDED`). The student is shown
+  a score only after it is stored. After a page reload the state carries `judging: { questionId, acceptedAt }`: the
+  page shows "Judging your submission…", holds Submit, and then shows the saved result or an honest "please submit
+  again" message (`lib/dsa-judging.ts`). Kept in `round_attempts.coding_state` (`pending`), no schema change. Tests:
+  `apps/api/tests/round-engine/dsa-deadline-race.db.test.ts`, `apps/careers-site/tests/dsa-judging.test.ts`.
 - **Last page**: "submitted, the hiring team will contact you by email". **No score, no percentage, no pass or fail**
   (`DSA_SHOW_SCORE=on` shows the score if a company wants that).
 - Closing the tab does not stop the clock. Reopening the link continues the same attempt with the saved progress. After
@@ -81,8 +93,14 @@ The first student who starts locks the questions and the pass rule for the whole
   submissions"), so HR can read what the student wrote.
 - **Time ran out**: the attempt is scored with what had been submitted (the engine's worker does this even when nobody
   has the page open, within about 30 seconds of the deadline plus the poll interval).
-- **Ended by the warning limit** (default: the 3rd suspicious action; `DSA_PROCTOR_MAX_STRIKES`): the attempt ends, what was
-  submitted so far is scored like any other. It is not an automatic rejection by itself; HR sees the monitoring record.
+- **Ended by the warning limit** (code default: 2 warnings, the 3rd confirmed incident terminates; `DSA_PROCTOR_MAX_STRIKES`,
+  which a deployment's `.env` may set differently): the attempt becomes `TERMINATED` with integrity status
+  `INTEGRITY_VIOLATION_REVIEW`. What was submitted so far is graded (HR sees the score), but **no next step and no email**
+  follow until HR records an integrity decision (Advance / Reject, `POST /round-engine/applications/:id/rounds/:roundId/integrity-decision`).
+  The student's end screen shows the termination message and no score (`DSA_SHOW_SCORE` default off). Details: [`PROCTORING.md`](PROCTORING.md).
+- **Only the code runner's tests score.** Marks and pass / fail come only from the test results (`DsaService.scoreOf`
+  -> round engine `coding-round.ts` -> assessments grading). Gemini / AAIE is **not** part of official scoring: the API
+  never calls the AAIE worker (`workers/aaie-worker`, shadow / advisory only; integration postponed).
 - **Emails after the result** (sent in the background, retried, never twice): passed and another online round follows ->
   that round's invitation; passed and HR runs the next round -> "Congratulations, HR will contact you about <round>";
   passed the last round -> "cleared all rounds"; failed -> rejection. None contains a score.
@@ -117,7 +135,8 @@ The first student who starts locks the questions and the pass rule for the whole
 | `DSA_ROUNDS` | on | off = DSA rounds are run by HR (no invitation, no automatic result) |
 | `CAREERS_SITE_URL` / `DSA_ASSESSMENT_URL` | localhost / empty | where the coding page lives; the emailed link |
 | `PISTON_URL` | `http://127.0.0.1:2000` | the code runner (API only) |
-| `DSA_PROCTOR_MAX_STRIKES` | 2 | suspicious actions allowed before the next one ends the test |
+| `DSA_PROCTOR_MAX_STRIKES` | 2 | warnings allowed before the next confirmed incident ends the test (`.env` may override; the local `.env` currently sets 3) |
+| camera thresholds | 20 s / 120 s / 3 s / 3 s | face missing, looking away, more than one person, phone (`DSA_PROCTOR_*_SECONDS`, min confidence 0.5; see [`PROCTORING.md`](PROCTORING.md) §10: change the page's contracts default too, a server value above the page's turns that warning off) |
 | `DSA_SHOW_SCORE` | off | on = candidates see their score on the last page |
 | `DSA_ADMIN_API_KEY` | empty | reviewer routes `/dsa-admin/*` exist only with a key |
 | `DSA_DEMO_MODE` | off | on = demo tokens in memory, to try the page without an HR round |
@@ -180,8 +199,8 @@ Not verified: the HR dashboard pages in a browser (type-checked and unit-tested 
   time limit. `vitest run --no-file-parallelism` runs everything in sequence.
 - **C++ and Java are slow** (a compile per test case; about 9 to 12 s for a full C++ Submit) and 20 simultaneous C++
   submissions queue for up to about two minutes: stagger invitations for large batches. See the hosting guide.
-- **One API instance**: the "one run at a time per candidate" guard and the per-process runner queue live in memory. Several API
-  instances would need a shared lock and a shared queue.
+- **One API instance**: the "one Run at a time per candidate" guard and the per-process runner queue live in memory. Several API
+  instances would need a shared lock and a shared queue. (The one-Submit-at-a-time rule is already in the database: section 3.)
 - **Monitoring records are written read-modify-write**: two event batches of one candidate arriving at the very same moment could
   lose the smaller one. The browser sends batches one after another, so this has not been seen.
 - **The mock data repository's name remains** (`MockQuestionRepository` is the demo path; `BankQuestionRepository` serves HR rounds).

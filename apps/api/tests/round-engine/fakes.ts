@@ -1,7 +1,7 @@
 import type { RoundOutcomeEmailKind } from '@hireflow/contracts';
 import type { EmailMessage } from '../../src/modules/applications/email/confirmation-email';
 import type { Mailer } from '../../src/modules/applications';
-import type { CodingState } from '../../src/modules/round-engine/coding-round';
+import { mergeCodingState, type CodingState } from '../../src/modules/round-engine/coding-round';
 import type { StoredAnswers } from '../../src/modules/round-engine/online-test';
 import {
   RoundEngineStore,
@@ -85,6 +85,14 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
     a.codingState = structuredClone(state);
     return true;
   }
+  async updateCodingState(attemptId: string, change: (attempt: AttemptRow) => CodingState | null) {
+    const a = this.attempts.find((x) => x.id === attemptId);
+    if (!a) return false;
+    const next = change(structuredClone(a));
+    if (!next) return false;
+    a.codingState = structuredClone(next);
+    return true;
+  }
   async saveAnswers(attemptId: string, revision: number, answers: StoredAnswers) {
     const a = this.attempts.find((x) => x.id === attemptId);
     if (!a) return null;
@@ -109,7 +117,8 @@ export class MemoryRoundEngineStore extends RoundEngineStore {
       warningCount: t.warningCount,
       integrityStatus: 'INTEGRITY_VIOLATION_REVIEW',
       protection: structuredClone(t.protection),
-      codingState: structuredClone(t.state),
+      // like the Prisma store: the stored results win, a pending submission stays pending
+      codingState: mergeCodingState(a.codingState, structuredClone(t.state)),
     });
     return true;
   }

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { RoundEngineService, emptyCodingState, type CodingQuestionState, type CodingState } from '../../round-engine';
 import { LANGUAGES, type Language } from '../questions/question.types';
 import { assessmentIdFor, firstNameOf } from './round-invitation.resolver';
-import type { DsaSession, QuestionProgress, SessionStore } from './session.store';
+import type { DsaSession, QuestionProgress, SessionStore, SubmissionAcceptance } from './session.store';
 
 const asLanguage = (v: string | null): Language | null => ((LANGUAGES as readonly string[]).includes(v ?? '') ? (v as Language) : null);
 
@@ -17,19 +17,19 @@ const toProgress = (questionId: string, p: CodingQuestionState): QuestionProgres
   bestCode: p.bestCode,
 });
 
+const toQuestionState = (p: QuestionProgress): CodingQuestionState => ({
+  attempts: p.attempts,
+  bestScore: p.bestScore,
+  passed: p.passed,
+  total: p.total,
+  language: p.language,
+  lastVerdict: p.lastVerdict,
+  bestCode: p.bestCode ?? null,
+});
+
 function toState(session: DsaSession): CodingState {
   const state = emptyCodingState();
-  for (const [id, p] of Object.entries(session.progress)) {
-    state.progress[id] = {
-      attempts: p.attempts,
-      bestScore: p.bestScore,
-      passed: p.passed,
-      total: p.total,
-      language: p.language,
-      lastVerdict: p.lastVerdict,
-      bestCode: p.bestCode ?? null,
-    };
-  }
+  for (const [id, p] of Object.entries(session.progress)) state.progress[id] = toQuestionState(p);
   return state;
 }
 
@@ -59,6 +59,7 @@ export class EngineSessionStore implements SessionStore {
       finishedAt: a.submittedAt?.getTime() ?? null,
       finishReason: finished ? (state.finishReason ?? (a.status === 'TIMED_OUT' ? 'time_expired' : 'submitted')) : null,
       progress: Object.fromEntries(Object.entries(state.progress).map(([id, p]) => [id, toProgress(id, p)])),
+      pending: state.pending ? { questionId: state.pending.questionId, acceptedAt: Date.parse(state.pending.acceptedAt) } : null,
     };
   }
 
@@ -72,5 +73,18 @@ export class EngineSessionStore implements SessionStore {
       return;
     }
     await this.engine.finishCodingAttempt(session.token, session.finishReason ?? 'submitted', toState(session), session.termination);
+  }
+
+  acceptSubmission(token: string, questionId: string): Promise<SubmissionAcceptance> {
+    return this.engine.acceptCodingSubmission(token, questionId);
+  }
+
+  async completeSubmission(token: string, submissionId: string, questionId: string, build: (previous: QuestionProgress | undefined) => QuestionProgress): Promise<QuestionProgress | null> {
+    const stored = await this.engine.completeCodingSubmission(token, submissionId, questionId, (prev) => toQuestionState(build(prev ? toProgress(questionId, prev) : undefined)));
+    return stored ? toProgress(questionId, stored) : null;
+  }
+
+  releaseSubmission(token: string, submissionId: string): Promise<void> {
+    return this.engine.releaseCodingSubmission(token, submissionId);
   }
 }

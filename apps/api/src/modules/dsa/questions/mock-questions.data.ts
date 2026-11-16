@@ -24,9 +24,9 @@ const tc = (id: string, display: string, stdin: string, expectedOutput: string, 
 const twoSumCase = (id: string, nums: number[], target: number, answer: [number, number], hidden: boolean) =>
   tc(id, `nums = [${nums.join(', ')}], target = ${target}`, `${arrLine(nums)}\n${target}`, `[${answer[0]},${answer[1]}]`, hidden);
 
-// 10007 is prime and coprime with 7919, so this is a permutation of 1..N.
-// Only N-1 and N sum to 2N-1, so the answer is unique.
-const BIG_N = 10007;
+// Exactly the stated maximum (2 <= nums.length <= 10^4). 7919 is prime and does not divide 10000 (gcd = 1), so
+// ((i * 7919) mod N) + 1 is a permutation of 1..N. Only N-1 and N sum to 2N-1, so the answer is unique.
+const BIG_N = 10000;
 const bigNums = Array.from({ length: BIG_N }, (_, i) => ((i * 7919) % BIG_N) + 1);
 const bigAnswer = [bigNums.indexOf(BIG_N - 1), bigNums.indexOf(BIG_N)].sort((a, b) => a - b) as [number, number];
 

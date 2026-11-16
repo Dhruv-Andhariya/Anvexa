@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ASSESSMENT_CONSENT_VERSION,
@@ -39,8 +40,11 @@ import {
   codingMinutes,
   codingResultInput,
   emptyCodingState,
+  mergeCodingState,
+  pendingActive,
   type CameraMode,
   type CodingFinishReason,
+  type CodingQuestionState,
   type CodingState,
 } from './coding-round';
 import {
@@ -394,6 +398,9 @@ export class RoundEngineService {
   async progress(attemptId: string): Promise<void> {
     const attempt = await this.store.getAttempt(attemptId);
     if (!attempt || attempt.status === 'IN_PROGRESS' || attempt.progressedAt) return;
+    // a submission accepted before the attempt ended is still being judged: grade once its result is in (recording it
+    // calls progress() again; the worker's recovery pass retries as well)
+    if (pendingActive(attempt.codingState, this.now())) return;
     try {
       const config = await this.rounds.forRoundEngine(attempt.tenantId, attempt.jobId);
       const round = config?.rounds.find((r) => r.id === attempt.roundId);
@@ -702,7 +709,72 @@ export class RoundEngineService {
   async saveCodingProgress(token: string | undefined, state: CodingState): Promise<boolean> {
     const o = await this.open(token, { kind: 'CODING', allowFinished: true });
     if (!o.attempt || o.attempt.status !== 'IN_PROGRESS') return false;
-    return this.store.saveCodingState(o.attempt.id, state);
+    // a submission being judged stays pending (it is not part of the page's copy of the state)
+    return this.store.updateCodingState(o.attempt.id, (a) => (a.status === 'IN_PROGRESS' ? { ...state, pending: a.codingState?.pending ?? null } : null));
+  }
+
+  /**
+   * Accepts a coding submission, atomically under the attempt's row lock: only while the attempt runs, before its
+   * deadline on the server clock, and only one at a time. The acceptance is stored on the attempt, so its result is
+   * recorded even if the attempt closes (time-out sweep, Finish) while its tests run.
+   */
+  async acceptCodingSubmission(token: string | undefined, questionId: string): Promise<{ accepted: true; id: string } | { accepted: false; reason: 'NOT_STARTED' | 'ENDED' | 'TIME_EXPIRED' | 'BUSY' }> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    if (!o.attempt) return { accepted: false, reason: 'NOT_STARTED' };
+    const id = randomUUID();
+    const now = this.now();
+    let reason: 'ENDED' | 'TIME_EXPIRED' | 'BUSY' = 'ENDED';
+    const accepted = await this.store.updateCodingState(o.attempt.id, (a) => {
+      const state = a.codingState ?? emptyCodingState();
+      if (a.status !== 'IN_PROGRESS') reason = 'ENDED';
+      else if (a.deadlineAt && now.getTime() >= a.deadlineAt.getTime()) reason = 'TIME_EXPIRED';
+      else if (pendingActive(state, now)) reason = 'BUSY';
+      else return { ...state, pending: { id, questionId, acceptedAt: now.toISOString() } };
+      return null;
+    });
+    return accepted ? { accepted: true, id } : { accepted: false, reason };
+  }
+
+  /**
+   * Records the result of an accepted submission (once: only while it is still the pending one, and never into an
+   * attempt already graded without it). Works whatever the attempt's status now is; it never reopens the attempt.
+   * `build` turns the stored previous result of that question into the new one (the best-submission rule).
+   * Returns what was stored, or null when nothing was (the candidate must not be shown a score).
+   */
+  async completeCodingSubmission(
+    token: string | undefined,
+    submissionId: string,
+    questionId: string,
+    build: (previous: CodingQuestionState | undefined) => CodingQuestionState,
+  ): Promise<CodingQuestionState | null> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    if (!o.attempt) return null;
+    let stored: CodingQuestionState | null = null;
+    let closed = false;
+    const ok = await this.store.updateCodingState(o.attempt.id, (a) => {
+      const state = a.codingState;
+      if (!state || state.pending?.id !== submissionId || state.pending.questionId !== questionId || a.progressedAt) return null;
+      stored = build(state.progress[questionId]);
+      closed = a.status !== 'IN_PROGRESS';
+      return { ...state, progress: { ...state.progress, [questionId]: stored }, pending: null };
+    });
+    if (!ok) return null;
+    // the attempt ended while this submission was judged: grade it now, with this result in
+    if (closed) await this.progress(o.attempt.id);
+    return stored;
+  }
+
+  /** An accepted submission that could not be judged (code runner failure): nothing recorded, it no longer holds the attempt. */
+  async releaseCodingSubmission(token: string | undefined, submissionId: string): Promise<void> {
+    const o = await this.open(token, { kind: 'CODING', allowFinished: true });
+    if (!o.attempt) return;
+    let closed = false;
+    const ok = await this.store.updateCodingState(o.attempt.id, (a) => {
+      if (a.codingState?.pending?.id !== submissionId) return null;
+      closed = a.status !== 'IN_PROGRESS';
+      return { ...a.codingState, pending: null };
+    });
+    if (ok && closed) await this.progress(o.attempt.id);
   }
 
   /**
@@ -719,7 +791,8 @@ export class RoundEngineService {
       return;
     }
     if (attempt.status === 'IN_PROGRESS') {
-      await this.store.saveCodingState(attempt.id, { ...state, finishReason: reason });
+      // the stored results win over the page's older copy, and a submission being judged stays pending
+      await this.store.updateCodingState(attempt.id, (a) => (a.status === 'IN_PROGRESS' ? mergeCodingState(a.codingState, { ...state, finishReason: reason }) : null));
       await this.finish(attempt, reason === 'time_expired' ? 'TIMED_OUT' : 'SUBMITTED');
     } else if (!attempt.progressedAt) {
       await this.progress(attempt.id); // finished earlier but the next step did not run yet

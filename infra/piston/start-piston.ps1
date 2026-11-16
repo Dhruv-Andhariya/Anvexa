@@ -91,13 +91,15 @@ foreach ($p in $Packages) {
 
 # 6. A real program in each language, inside the sandbox
 if (-not $SkipSmokeTest) {
+  # the exact versions installed above (the API asks for the same ones: PISTON_RUNTIMES in piston.runner.ts)
+  $version = @{}; foreach ($p in $Packages) { $version[$p[0]] = $p[1] }
   $tests = @(
-    @{ lang = 'python'; file = 'main.py';   code = 'print(sum(map(int, input().split())))' },
-    @{ lang = 'java';   file = 'Main.java'; code = 'public class Main { public static void main(String[] a) { java.util.Scanner s = new java.util.Scanner(System.in); System.out.println(s.nextInt() + s.nextInt()); } }' },
-    @{ lang = 'c++';    file = 'main.cpp';  code = "#include <iostream>`nint main(){ int a,b; std::cin>>a>>b; std::cout<<a+b<<std::endl; }" }
+    @{ lang = 'python'; ver = $version['python']; file = 'main.py';   code = 'print(sum(map(int, input().split())))' },
+    @{ lang = 'java';   ver = $version['java'];   file = 'Main.java'; code = 'public class Main { public static void main(String[] a) { java.util.Scanner s = new java.util.Scanner(System.in); System.out.println(s.nextInt() + s.nextInt()); } }' },
+    @{ lang = 'c++';    ver = $version['gcc'];    file = 'main.cpp';  code = "#include <iostream>`nint main(){ int a,b; std::cin>>a>>b; std::cout<<a+b<<std::endl; }" }
   )
   foreach ($t in $tests) {
-    $body = @{ language = $t.lang; version = '*'; files = @(@{ name = $t.file; content = $t.code }); stdin = "2 3`n" } | ConvertTo-Json -Depth 5
+    $body = @{ language = $t.lang; version = $t.ver; files = @(@{ name = $t.file; content = $t.code }); stdin = "2 3`n" } | ConvertTo-Json -Depth 5
     $r = Invoke-RestMethod -Uri "$Url/api/v2/execute" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 120
     if (($r.run.stdout + '').Trim() -ne '5') { Fail "smoke test failed for $($t.lang): $($r | ConvertTo-Json -Depth 4 -Compress)" }
     Say "smoke test passed: $($t.lang) -> 5"

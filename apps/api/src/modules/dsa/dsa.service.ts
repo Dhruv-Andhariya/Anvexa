@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PROCTOR_TERMINATION_MESSAGE } from '@hireflow/contracts';
+import { PENDING_SUBMISSION_MAX_MS } from '../round-engine';
 import { SQL_SANDBOX, SqlSandbox } from '../sql/engine/sql-sandbox';
 import { dsaError, parseCodeRequest, type CodeRequestDto } from './dsa.dto';
 import { Evaluator, type CaseResult, type Evaluation, type Verdict } from './evaluation/evaluator';
@@ -78,6 +79,11 @@ export interface AssessmentState {
   proctoring: ClientProctoringConfig & { started: boolean } & CandidateProctorState;
   /** False for HR rounds: the final page shows no score (the outcome comes by email) and `result` carries none. */
   showScore: boolean;
+  /**
+   * A submission the server accepted is still being judged (e.g. the page was reloaded meanwhile): which question, and
+   * since when. The page shows "Judging…", holds Submit, and reloads until it is gone. Null otherwise.
+   */
+  judging: { questionId: string; acceptedAt: string } | null;
 }
 
 export interface RunResponse {
@@ -219,31 +225,82 @@ export class DsaService {
     const dto = parseCodeRequest(body);
     const { session, questions } = await this.load(token);
     const question = this.activeQuestion(session, questions, dto);
-    // Samples and hidden cases both count towards the score; hidden ones are only judged here.
-    const evaluation = await this.execute(session, question, dto, question.testCases);
+    // A persisted round accepts the submission FIRST (atomically: attempt running, before its deadline on the server
+    // clock, one at a time). It is then judged by that acceptance: its result is recorded even if the attempt closes
+    // (time-out sweep, Finish) while its tests run, and never after the deadline otherwise.
+    const accepted = await this.accept(token, session, question.id);
+    let evaluation: Evaluation;
+    try {
+      // Samples and hidden cases both count towards the score; hidden ones are only judged here.
+      evaluation = await this.execute(session, question, dto, question.testCases);
+    } catch (err) {
+      if (accepted) await this.sessions.releaseSubmission!(token, accepted);
+      throw err;
+    }
+
+    // A test the code runner failed to execute (internal_error: sandbox failure, compile step timed out on the runner)
+    // is not evidence about the candidate's code. Such a submission is incomplete: it never replaces the best result,
+    // never creates one, and is not counted as an attempt. The candidate gets the usual runner-failure answer (503,
+    // retry), exactly like a runner outage.
+    if (evaluation.verdict === 'internal_error' || evaluation.cases.some((c) => c.status === 'internal_error')) {
+      const failed = evaluation.cases.filter((c) => c.status === 'internal_error').length;
+      this.logger.warn(`Submission not recorded: the code runner failed on ${failed} of ${evaluation.total} test(s) (question ${question.id})`);
+      if (accepted) await this.sessions.releaseSubmission!(token, accepted);
+      throw dsaError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'CODE_RUNNER_UNAVAILABLE',
+        'The code runner failed to run some of the tests. This is not caused by your code and nothing was recorded. Please submit again.',
+      );
+    }
 
     const score = this.scoreOf(question, evaluation);
-    const previous = session.progress[question.id] ?? this.emptyProgress(question.id);
-    const best = score >= previous.bestScore && evaluation.verdict !== 'internal_error';
-    const progress: QuestionProgress = {
-      questionId: question.id,
-      attempts: previous.attempts + 1,
-      bestScore: best ? score : previous.bestScore,
-      passed: best ? evaluation.passed : previous.passed,
-      total: evaluation.total,
-      language: best ? dto.language : previous.language,
-      lastVerdict: evaluation.verdict,
-      // the best submission's source is kept for HR's review (assessments answer limit: 50,000 characters)
-      bestCode: best ? dto.code.slice(0, 50_000) : (previous.bestCode ?? null),
+    // the best-submission rule, applied to the previous result of this question (a runner failure never gets here)
+    const next = (previous: QuestionProgress = this.emptyProgress(question.id)): QuestionProgress => {
+      const best = score >= previous.bestScore;
+      return {
+        questionId: question.id,
+        attempts: previous.attempts + 1,
+        bestScore: best ? score : previous.bestScore,
+        passed: best ? evaluation.passed : previous.passed,
+        total: evaluation.total,
+        language: best ? dto.language : previous.language,
+        lastVerdict: evaluation.verdict,
+        // the best submission's source is kept for HR's review (assessments answer limit: 50,000 characters)
+        bestCode: best ? dto.code.slice(0, 50_000) : (previous.bestCode ?? null),
+      };
     };
-    // Re-read: a finish may have raced with this evaluation; never resurrect a manually finished session.
-    const fresh = (await this.sessions.get(token)) ?? session;
-    if (fresh.finishReason !== 'submitted' && fresh.finishReason !== 'disqualified') {
-      fresh.progress[question.id] = progress;
-      await this.sessions.save(fresh);
+
+    let progress: QuestionProgress;
+    if (accepted) {
+      // recorded against the STORED previous result; the candidate sees a score only once it is stored
+      const stored = await this.sessions.completeSubmission!(token, accepted, question.id, next);
+      if (!stored) {
+        this.logger.warn(`Submission result not recorded: no longer the accepted submission of its attempt (question ${question.id})`);
+        throw dsaError(HttpStatus.CONFLICT, 'SUBMISSION_NOT_RECORDED', 'This submission could not be recorded because the assessment had already been completed. Your earlier results are kept.');
+      }
+      progress = stored;
+    } else {
+      // stores without durable submissions (demo, in memory): re-read, and never resurrect a manually finished session
+      progress = next(session.progress[question.id]);
+      const fresh = (await this.sessions.get(token)) ?? session;
+      if (fresh.finishReason !== 'submitted' && fresh.finishReason !== 'disqualified') {
+        fresh.progress[question.id] = progress;
+        await this.sessions.save(fresh);
+      }
     }
     const response = this.toResponse(session, question, dto, evaluation);
     return { ...response, score, maxScore: question.marks, progress: toPublicProgress(progress) };
+  }
+
+  /** Durable stores: accepts the submission or explains why not. Null = the store has no durable submissions. */
+  private async accept(token: string, session: DsaSession, questionId: string): Promise<string | null> {
+    if (!this.sessions.acceptSubmission) return null;
+    const a = await this.sessions.acceptSubmission(token, questionId);
+    if (a.accepted) return a.id;
+    if (a.reason === 'BUSY') throw dsaError(HttpStatus.TOO_MANY_REQUESTS, 'BUSY', 'Your previous run is still in progress. Please wait for it to finish.');
+    if (a.reason === 'TIME_EXPIRED') throw dsaError(HttpStatus.FORBIDDEN, 'TIME_EXPIRED', 'Time is up. The assessment has ended.');
+    if (a.reason === 'NOT_STARTED') throw dsaError(HttpStatus.CONFLICT, 'NOT_STARTED', 'Start the assessment before running code.');
+    throw this.finishedError((await this.sessions.get(token)) ?? session);
   }
 
   async finish(token: string): Promise<AssessmentState> {
@@ -430,8 +487,14 @@ export class DsaService {
         ...(await this.proctoring.candidateStateFor(ref)),
       },
       showScore: true,
+      judging: null,
     };
     if (session.status === 'in_progress') state.questions = questions.map(toPublicQuestion);
+    // the same limit as grading: an accepted submission older than it is abandoned (its result never came)
+    const p = session.pending;
+    if (session.status === 'in_progress' && p && this.now() - p.acceptedAt < PENDING_SUBMISSION_MAX_MS) {
+      state.judging = { questionId: p.questionId, acceptedAt: new Date(p.acceptedAt).toISOString() };
+    }
     const showScore = invitation.showResult !== false;
     state.showScore = showScore;
     if (session.status === 'finished') {

@@ -278,7 +278,12 @@ API, set in `.env`:
 
 The page-side rules are `CAMERA_RULES_DEFAULTS` in contracts. Their incident thresholds come from
 `CAMERA_CONFIRM_DEFAULTS`, so the page and the server agree. **If you change a server threshold, change
-`CAMERA_CONFIRM_DEFAULTS` too.** Otherwise the page may send alerts the server will not confirm, or no alerts at all.
+`CAMERA_CONFIRM_DEFAULTS` too.** The page always uses its built-in thresholds and sends each alert with its own
+duration: raising a server value above the page's value turns that warning off (every alert is then "shorter than"
+the server's minimum and kept as an observation only), and lowering it does not make the page alert sooner.
+
+`DSA_PROCTOR_MAX_STRIKES` above is the code default; a deployment's `.env` may set another value (the local `.env`
+currently sets 3).
 
 **Why these numbers:**
 

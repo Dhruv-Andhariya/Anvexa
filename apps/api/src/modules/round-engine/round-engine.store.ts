@@ -15,7 +15,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { uuidv7 } from '../../common/uuidv7';
-import { parseCodingState, type CodingState } from './coding-round';
+import { mergeCodingState, parseCodingState, type CodingState } from './coding-round';
 import { parseStoredAnswers, type StoredAnswers } from './online-test';
 
 export interface InviteRow {
@@ -156,6 +156,11 @@ export abstract class RoundEngineStore {
   ): Promise<AttemptRow>;
   /** DSA rounds: stores the candidate's progress while the attempt is in progress (false = it is not, nothing stored). */
   abstract saveCodingState(attemptId: string, state: CodingState): Promise<boolean>;
+  /**
+   * DSA rounds: read-decide-write of the coding state under the attempt's row lock, whatever the attempt's status.
+   * `change` sees the locked attempt and returns the new state, or null to store nothing. true = a state was stored.
+   */
+  abstract updateCodingState(attemptId: string, change: (attempt: AttemptRow) => CodingState | null): Promise<boolean>;
   /** Stores the answers if the attempt is in progress and `revision` is newer. Returns the revision now stored. */
   abstract saveAnswers(attemptId: string, revision: number, answers: StoredAnswers): Promise<number | null>;
   /** IN_PROGRESS -> SUBMITTED / TIMED_OUT, once. Optional final answers (applied only when newer). true = this call finished it. */
@@ -348,6 +353,19 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
     return r.count > 0;
   }
 
+  async updateCodingState(attemptId: string, change: (attempt: AttemptRow) => CodingState | null) {
+    return this.db.$transaction(async (tx) => {
+      // the row lock: accepting, recording and closing a coding submission are decided one after the other
+      await tx.$queryRaw`SELECT 1 AS locked FROM round_attempts WHERE id = ${attemptId}::uuid FOR UPDATE`;
+      const row = await tx.roundAttempt.findUnique({ where: { id: attemptId } });
+      if (!row) return false;
+      const next = change(toAttempt(row));
+      if (!next) return false;
+      await tx.roundAttempt.update({ where: { id: attemptId }, data: { codingState: next as unknown as Prisma.InputJsonObject } });
+      return true;
+    });
+  }
+
   async saveAnswers(attemptId: string, revision: number, answers: StoredAnswers) {
     await this.db.roundAttempt.updateMany({
       where: { id: attemptId, status: 'IN_PROGRESS', revision: { lt: revision } },
@@ -374,20 +392,26 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
     attemptId: string,
     t: { at: Date; reason: string; warningCount: number; protection: AssessmentProtectionSettings; state: CodingState },
   ) {
-    const r = await this.db.roundAttempt.updateMany({
-      where: { id: attemptId, status: 'IN_PROGRESS' },
-      data: {
-        status: 'TERMINATED',
-        submittedAt: t.at,
-        terminatedAt: t.at,
-        terminationReason: t.reason.slice(0, 300),
-        warningCount: t.warningCount,
-        integrityStatus: 'INTEGRITY_VIOLATION_REVIEW',
-        protection: t.protection as unknown as Prisma.InputJsonObject,
-        codingState: t.state as unknown as Prisma.InputJsonObject,
-      },
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM round_attempts WHERE id = ${attemptId}::uuid FOR UPDATE`;
+      const row = await tx.roundAttempt.findUnique({ where: { id: attemptId } });
+      // the stored results win (a submission recorded meanwhile is kept), and an accepted pending one stays pending
+      const state = mergeCodingState(row ? toAttempt(row).codingState : null, t.state);
+      const r = await tx.roundAttempt.updateMany({
+        where: { id: attemptId, status: 'IN_PROGRESS' },
+        data: {
+          status: 'TERMINATED',
+          submittedAt: t.at,
+          terminatedAt: t.at,
+          terminationReason: t.reason.slice(0, 300),
+          warningCount: t.warningCount,
+          integrityStatus: 'INTEGRITY_VIOLATION_REVIEW',
+          protection: t.protection as unknown as Prisma.InputJsonObject,
+          codingState: state as unknown as Prisma.InputJsonObject,
+        },
+      });
+      return r.count > 0;
     });
-    return r.count > 0;
   }
 
   async setSystemPassed(attemptId: string, passed: boolean) {

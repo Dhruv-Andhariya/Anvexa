@@ -169,8 +169,85 @@ const HARNESSES: Record<CodeLanguage, Record<WrappedKind, string>> = { python: P
 
 const countLines = (s: string) => (s === '' ? 0 : s.split('\n').length - (s.endsWith('\n') ? 1 : 0));
 
-/** `import java.util.*;`, `import static java.lang.Math.*;` ... must precede every class in the file. */
-const JAVA_IMPORT = /^\s*import\s+(static\s+)?[\w.]+(\.\*)?\s*;\s*$/;
+// ----------------------------- Java header lines (package / import) -----------------------------
+// A `package` declaration and the imports must precede every class in the file, but the harness `Main` has to be the
+// FIRST class. So the candidate's header lines move above the harness: package first, then the imports, in their order.
+const JAVA_IDENT = String.raw`[A-Za-z_$][\w$]*`;
+const JAVA_PACKAGE = String.raw`package\s+${JAVA_IDENT}(?:\s*\.\s*${JAVA_IDENT})*\s*;`;
+const JAVA_IMPORT = String.raw`import\s+(?:static\s+)?${JAVA_IDENT}(?:\s*\.\s*(?:${JAVA_IDENT}|\*))*\s*;`;
+/** A line made only of package / import declarations (one or several), once comments and literals are blanked out. */
+const JAVA_HEADER_LINE = new RegExp(String.raw`^\s*(?:(?:${JAVA_PACKAGE}|${JAVA_IMPORT})\s*)+$`);
+
+interface JavaLine {
+  /** The line with comments, string / char literals and text blocks replaced by spaces. */
+  code: string;
+  /** Brace depth before the line (0 = top level, outside every class). */
+  depth: number;
+  /** The line starts inside a block comment or a text block. */
+  startsInside: boolean;
+  /** A block comment or a text block is still open at the end of the line. */
+  endsInside: boolean;
+}
+
+/** A small lexer, just enough to tell real declarations from text inside comments, strings and text blocks. */
+function scanJava(lines: string[]): JavaLine[] {
+  let inBlock = false;
+  let inText = false;
+  let depth = 0;
+  return lines.map((line) => {
+    const startsInside = inBlock || inText;
+    const startDepth = depth;
+    let code = '';
+    let i = 0;
+    while (i < line.length) {
+      const c = line[i];
+      if (inBlock) {
+        if (line.startsWith('*/', i)) {
+          inBlock = false;
+          i += 2;
+        } else i++;
+        code += ' ';
+        continue;
+      }
+      if (inText) {
+        if (line.startsWith('"""', i)) {
+          inText = false;
+          i += 3;
+        } else i += c === '\\' ? 2 : 1;
+        code += ' ';
+        continue;
+      }
+      if (line.startsWith('//', i)) break; // the rest of the line is a comment
+      if (line.startsWith('/*', i)) {
+        inBlock = true;
+        i += 2;
+        code += ' ';
+        continue;
+      }
+      if (line.startsWith('"""', i)) {
+        inText = true;
+        i += 3;
+        code += ' ';
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
+        i = j + 1;
+        code += ' ';
+        continue;
+      }
+      if (c === '{') depth++;
+      else if (c === '}') depth = Math.max(0, depth - 1);
+      code += c;
+      i++;
+    }
+    return { code, depth: startDepth, startsInside, endsInside: inBlock || inText };
+  });
+}
+
+/** Moves only whole lines that are nothing but declarations at the top level (a trailing comment may follow). */
+const isJavaHeaderLine = (l: JavaLine) => !l.startsInside && !l.endsInside && l.depth === 0 && JAVA_HEADER_LINE.test(l.code);
 
 export function buildProgram(language: CodeLanguage, kind: HarnessKind, candidateCode: string): BuiltProgram {
   const body = candidateCode.endsWith('\n') ? candidateCode : `${candidateCode}\n`;
@@ -181,21 +258,31 @@ export function buildProgram(language: CodeLanguage, kind: HarnessKind, candidat
 
   if (language === 'java') {
     // Java runs in single-file source mode, which launches the FIRST class in the file. So the harness `Main` goes
-    // first, the candidate's imports move above it, and the candidate's own classes follow.
+    // first; the candidate's package line and imports move above it (package first, then the imports in their order,
+    // whole lines, trailing comments kept, never copied); the candidate's own classes follow. With a package, the
+    // harness `Main` is in the same package as the candidate's `Solution`.
     const lines = body.split('\n');
     if (lines[lines.length - 1] === '') lines.pop();
+    const scanned = scanJava(lines);
+    const packages: { text: string; orig: number }[] = [];
     const imports: { text: string; orig: number }[] = [];
     const rest: { text: string; orig: number }[] = [];
-    lines.forEach((text, i) => (JAVA_IMPORT.test(text) ? imports : rest).push({ text, orig: i + 1 }));
+    lines.forEach((text, i) => {
+      const line = { text, orig: i + 1 };
+      if (!isJavaHeaderLine(scanned[i])) rest.push(line);
+      else if (/^\s*package\b/.test(scanned[i].code)) packages.push(line);
+      else imports.push(line);
+    });
+    const header = [...packages, ...imports];
     const harness = HARNESSES.java[kind]; // starts with a newline, ends with a newline
     const harnessLines = countLines(harness);
-    const head = imports.map((l) => l.text).join('\n');
-    const source = `${head}${imports.length ? '\n' : ''}${harness}${rest.map((l) => l.text).join('\n')}\n`;
-    const importCount = imports.length;
+    const head = header.map((l) => l.text).join('\n');
+    const source = `${head}${header.length ? '\n' : ''}${harness}${rest.map((l) => l.text).join('\n')}\n`;
+    const importCount = header.length;
     return {
       source,
       mapLine: (n) => {
-        if (n >= 1 && n <= importCount) return imports[n - 1].orig;
+        if (n >= 1 && n <= importCount) return header[n - 1].orig;
         const afterHarness = n - importCount - harnessLines;
         return afterHarness >= 1 && afterHarness <= rest.length ? rest[afterHarness - 1].orig : null;
       },
