@@ -2,7 +2,9 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   DEFAULT_PIPELINE_SETTINGS,
   PIPELINE_STAGE_OF,
+  averagesTechnicalRounds,
   isTechnicalRound,
+  stage2RuleUsesMinPercent,
   piCallUpdateRequestSchema,
   pipelineSettingsSchema,
   pipelineStatusOf,
@@ -41,6 +43,7 @@ const toResult = (r: ResultRows[number]): PipelineResult => ({
   outcome: (r.override?.passed ?? r.systemPassed) ? 'PASSED' : 'FAILED',
   score: r.score,
   maxScore: r.maxScore,
+  passMark: r.passMark,
 });
 const percentOf = (rows: (ResultRows[number] | undefined)[]) => {
   const got = rows.filter((r): r is ResultRows[number] => !!r);
@@ -90,7 +93,7 @@ export class PipelineService {
     const config = await this.rounds.forRoundEngine(tenantId, jobId);
     if (!config) throw apiError(HttpStatus.NOT_FOUND, 'ROUNDS_NOT_FOUND', 'Save the job’s rounds first.');
     if (config.locked) throw locked();
-    const settings: PipelineSettings = { ...s, stage2MinPercent: s.stage2Rule === 'ALL_ROUNDS_PASSED' ? null : s.stage2MinPercent };
+    const settings: PipelineSettings = { ...s, stage2MinPercent: stage2RuleUsesMinPercent(s.stage2Rule) ? s.stage2MinPercent : null };
     await this.store.saveSettings(tenantId, jobId, settings, actor?.id ?? null);
     await this.audit.record({ tenantId, actorUserId: actor?.id ?? null, action: 'pipeline.settings_saved', subjectType: 'job', subjectId: jobId, metadata: { ...settings } });
     return { jobId, ...settings, locked: false };
@@ -175,6 +178,14 @@ export class PipelineService {
     return stage2GateAllows(config.rounds, target, (id) => byRound.get(id), settings);
   }
 
+  /**
+   * AVERAGE_OF_ROUNDS (the default): a failed technical round (DSA / SQL / GD) does not stop the student - they go on to
+   * the next technical round, and the average decides after the last one (failsStage2Overall).
+   */
+  async averagesTechnicalRounds(tenantId: string, jobId: string): Promise<boolean> {
+    return averagesTechnicalRounds(await this.settings(tenantId, jobId));
+  }
+
   /** Whether a rejection email may be sent for this job. */
   async rejectionEmailsOn(tenantId: string, jobId: string): Promise<boolean> {
     return (await this.settings(tenantId, jobId)).rejectionEmails;
@@ -219,7 +230,8 @@ export class PipelineService {
             return { roundId: r.id, name: r.name, type: r.type, score: row?.score ?? null, maxScore: row?.maxScore ?? null, outcome: row ? toResult(row).outcome : 'NOT_ATTEMPTED' };
           }),
           aptitudePercent: percentOf(ordered.filter((r) => PIPELINE_STAGE_OF[r.type] === 'APTITUDE').map((r) => res(r.id))),
-          stage2Percent: ctx.stage2Of(s.applicationId)?.percent ?? null,
+          // under AVERAGE_OF_ROUNDS the average of the rounds' percentages is what decided
+          stage2Percent: ((v) => v?.averagePercent ?? v?.percent ?? null)(ctx.stage2Of(s.applicationId)),
           techInterview: techRow ? { score: techRow.score, maxScore: techRow.maxScore, remarks: techRow.override?.reason ?? techRow.notes ?? null } : null,
           overallPercent: percentOf(ordered.map((r) => res(r.id))),
           call: { status: call?.status ?? 'NOT_CALLED', notes: call?.notes ?? '', updatedByName: call?.updatedByName ?? null, updatedAt: call?.updatedAt.toISOString() ?? null },

@@ -235,6 +235,11 @@ export abstract class RoundEngineStore {
     tenantId: string,
     roundId: string,
   ): Promise<{ waiting: { applicationId: string; via: 'INVITE' | 'GD_POOL' }[]; inProgress: number }>;
+  /**
+   * Students told "the next round is run by HR" after `previousRoundId` (a CLEARED_NEXT_BY_HR email) who have no result
+   * in `roundId` and did not move past it (no result, invitation or GD place in a later round of the job).
+   */
+  abstract waitingForHrRound(tenantId: string, jobId: string, previousRoundId: string, roundId: string): Promise<string[]>;
   /** Takes the student out of the round's GD pool (only while not in a group). True when they were in it. */
   abstract leaveGdPool(tenantId: string, applicationId: string, roundId: string): Promise<boolean>;
   /** A FAILED invitation goes back to the queue (a new link is made when it is sent). */
@@ -259,6 +264,13 @@ export const skipAware = Prisma.sql`
 export const earlierRunning = Prisma.sql`
               SELECT 1 FROM job_rounds e0
                WHERE e0.job_id = r.job_id AND e0.tenant_id = r.tenant_id AND e0.position < r.position AND e0.skipped_at IS NULL`;
+
+/**
+ * The job of round `r` judges its technical rounds by their average (pipeline rule AVERAGE_OF_ROUNDS, also when the
+ * job has no saved pipeline settings: it is the default - DEFAULT_PIPELINE_SETTINGS in contracts).
+ */
+export const averagesTechnicalRoundsSql = Prisma.sql`COALESCE((SELECT ps.stage2_rule::text FROM job_pipeline_settings ps
+                                 WHERE ps.job_id = r.job_id AND ps.tenant_id = r.tenant_id), 'AVERAGE_OF_ROUNDS') = 'AVERAGE_OF_ROUNDS'`;
 
 type InviteDb = Prisma.RoundInviteGetPayload<object>;
 type AttemptDb = Prisma.RoundAttemptGetPayload<object>;
@@ -512,14 +524,17 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
               SELECT 1 FROM screening_sessions s
                WHERE s.application_id = a.id AND s.tenant_id = a.tenant_id AND s.status = 'COMPLETED'))
            OR
-           -- later round: every earlier round that runs has a result that counts as passed (HR override first)
+           -- later round: every earlier round that runs has a result that counts as passed (HR override first);
+           -- a technical round (DSA / SQL / GD) of a job that averages them only needs a result (pipeline AVERAGE_OF_ROUNDS),
+           -- and the rounds after the technical ones are gated by the average (PipelineService.gateAllows)
            (EXISTS (${earlierRunning}) AND NOT EXISTS (
               SELECT 1 FROM job_rounds e
                WHERE e.job_id = r.job_id AND e.tenant_id = r.tenant_id AND e.position < r.position AND e.skipped_at IS NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM round_results rr
                     WHERE rr.application_id = a.id AND rr.round_id = e.id
-                      AND COALESCE(rr.override_passed, rr.system_passed))))
+                      AND (COALESCE(rr.override_passed, rr.system_passed)
+                           OR (e.type IN ('CODING', 'SQL', 'GROUP_DISCUSSION') AND ${averagesTechnicalRoundsSql})))))
          )
        ORDER BY a.created_at
        LIMIT ${limit}`);
@@ -690,6 +705,23 @@ export class PrismaRoundEngineStore extends RoundEngineStore {
       ],
       inProgress: running + grouped,
     };
+  }
+
+  async waitingForHrRound(tenantId: string, jobId: string, previousRoundId: string, roundId: string) {
+    const rows = await this.db.$queryRaw<{ applicationId: string }[]>(Prisma.sql`
+      SELECT DISTINCT e.application_id::text AS "applicationId"
+        FROM round_outcome_emails e
+        JOIN job_rounds r ON r.id = ${roundId}::uuid AND r.tenant_id = e.tenant_id
+       WHERE e.tenant_id = ${tenantId}::uuid AND e.round_id = ${previousRoundId}::uuid AND e.kind = 'CLEARED_NEXT_BY_HR'
+         AND r.job_id = ${jobId}::uuid
+         AND NOT EXISTS (SELECT 1 FROM round_results rr WHERE rr.application_id = e.application_id AND rr.round_id = r.id)
+         AND NOT EXISTS (SELECT 1 FROM round_results lr JOIN job_rounds l ON l.id = lr.round_id
+                          WHERE lr.application_id = e.application_id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM round_invites li JOIN job_rounds l ON l.id = li.round_id
+                          WHERE li.application_id = e.application_id AND l.job_id = r.job_id AND l.position > r.position)
+         AND NOT EXISTS (SELECT 1 FROM gd_participants lp JOIN job_rounds l ON l.id = lp.round_id
+                          WHERE lp.application_id = e.application_id AND l.job_id = r.job_id AND l.position > r.position)`);
+    return rows.map((r) => r.applicationId);
   }
 
   async leaveGdPool(tenantId: string, applicationId: string, roundId: string) {

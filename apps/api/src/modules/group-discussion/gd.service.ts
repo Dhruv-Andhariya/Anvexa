@@ -92,7 +92,9 @@ export class GdService {
    */
   async scheduleAutomatically(tenantId: string, roundId: string, opts: { minGroupSize: number; leadMinutes: number }): Promise<string> {
     const { suggestedSettings } = await this.overview(tenantId, roundId);
-    const settings = { ...suggestedSettings, minGroupSize: Math.min(suggestedSettings.minGroupSize, opts.minGroupSize) };
+    // fewer waiting students than the smallest allowed group (AUTO_GD_MIN_STUDENTS below 3, e.g. 1 for a test): the group
+    // is scheduled anyway and marked undersized
+    const settings = { ...suggestedSettings, minGroupSize: Math.max(GD_LIMITS.groupSizeMin, Math.min(suggestedSettings.minGroupSize, opts.minGroupSize)) };
     const startsAt = new Date(this.now().getTime() + Math.max(opts.leadMinutes, GD_LIMITS.minLeadMinutes + 1) * 60_000);
     const when = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(startsAt);
     await this.createEvent(tenantId, roundId, { name: `Group discussion ${when} (automatic)`.slice(0, GD_LIMITS.nameMax), startsAt: startsAt.toISOString(), settings }, null);

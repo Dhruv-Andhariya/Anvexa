@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dsaBankEntry, dsaBankIdOf, dsaProblemSpecSchema, dsaSpecProblems, type DsaProblemSpec } from './dsa-bank';
+import { dsaBankEntry, dsaBankIdOf, dsaProblemSpecSchema, dsaSpecProblems, isDsaRound, type DsaProblemSpec } from './dsa-bank';
 import { SELECTION_PROCESS_LIMITS } from './publisher';
 import { sqlProblemSpecSchema, sqlSpecProblems } from './sql-bank';
 
@@ -275,6 +275,26 @@ export function roundsCompletionProblems(rounds: Pick<RoundConfig, 'name' | 'pas
     for (const p of passRuleProblems(r)) problems.push(`${label}: ${p}`);
   });
   return problems;
+}
+
+/**
+ * DSA (Coding) and SQL rounds run online by themselves: the student gets the test link by email and the system grades
+ * it. The round engine can only do that when every question is a problem it can run - a DSA problem (bank or HR's own
+ * with test cases) or a SQL question from the company's SQL question bank - or a plain multiple-choice test, with a
+ * score-based pass rule. A question the AI wrote as plain text cannot be run or graded, so no link would go out and
+ * HR would have to run the round by hand. The API refuses to complete such rounds (RoundsConfigService.save) unless a
+ * connected round module runs them. null = fine.
+ */
+export function onlineTestProblem(r: Pick<RoundConfig, 'passRule' | 'questions'> & { type?: RoundType }): string | null {
+  if ((r.type !== 'SQL' && r.type !== 'CODING') || !r.passRule || !r.questions.length) return null;
+  if (r.passRule.mode === 'INTERVIEWER_SCORE') {
+    return `a ${r.type === 'SQL' ? 'SQL' : 'coding'} round is graded online, so choose a score-based passing criterion (marks or percentage), not an interviewer's score.`;
+  }
+  // runs online: every question a runnable problem (DSA / SQL bank), or a plain multiple-choice test (isOnlineRound)
+  if (isDsaRound(r) || r.questions.every((q) => q.kind === 'MCQ' || q.kind === 'TRUE_FALSE')) return null;
+  return r.type === 'SQL'
+    ? 'every question must be a SQL question from your SQL question bank (use "Pick from SQL question bank…" in this round; add questions on the SQL Questions page first if the list is empty). A question written by the AI as plain text cannot be run or graded, so the SQL test link could not be emailed.'
+    : 'every question must be a DSA problem (from the problem bank, or your own with test cases). A question written as plain text cannot be run or graded, so the coding test link could not be emailed.';
 }
 
 /** Interview length of an AI technical interview round (minutes): HR's time limit, or the default. */

@@ -16,3 +16,5 @@ export {
   type CodingState,
 } from './coding-round';
 export { hashAssessmentToken } from './link';
+/** SQL condition (round alias `r`): the job averages its technical rounds (pipeline AVERAGE_OF_ROUNDS). Used by the GD pool. */
+export { averagesTechnicalRoundsSql } from './round-engine.store';

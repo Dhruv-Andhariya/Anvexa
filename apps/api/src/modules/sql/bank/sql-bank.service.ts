@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   sqlQuestionInputSchema,
   type SqlBankListItem,
@@ -48,14 +48,30 @@ export function toBankQuestion(q: StoredSqlQuestion): SqlBankQuestion {
  */
 @Injectable()
 export class SqlBankService {
+  private readonly logger = new Logger(SqlBankService.name);
+
   constructor(
     @Inject(SqlBankStore) private readonly store: SqlBankStore,
     @Inject(SQL_SANDBOX) private readonly sandbox: SqlSandbox,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
+  /**
+   * The company's questions. An empty bank is filled with the starter questions first: a SQL round can only be emailed
+   * and graded online with questions from this bank, so HR always has graded questions to pick from.
+   */
   async list(tenantId: string): Promise<SqlBankListItem[]> {
-    return (await this.store.list(tenantId)).map((q) => ({
+    let rows = await this.store.list(tenantId);
+    if (!rows.length) {
+      try {
+        if ((await this.importStarter(tenantId, null)).added) rows = await this.store.list(tenantId);
+      } catch (err) {
+        // e.g. two tabs at once (unique seed key) - the other request filled it; HR can also press "Add starter questions"
+        this.logger.warn(`starter SQL questions not added tenant=${tenantId} (${err instanceof Error ? err.message : 'unknown'})`);
+        rows = await this.store.list(tenantId);
+      }
+    }
+    return rows.map((q) => ({
       id: q.id,
       title: q.title,
       difficulty: q.difficulty,

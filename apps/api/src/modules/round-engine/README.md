@@ -128,3 +128,13 @@ One warning counter per attempt, the same rules as the AI technical interview (`
   proctoring (dsa module).
 - Audit: `assessment.protection_warning`, `assessment.terminated`, `assessment.integrity_decided`.
 - Migration `20261104140000_assessment_protection` (additive). Tests: `tests/round-engine/assessment-protection.test.ts`.
+
+## SQL / Coding rounds always run online
+
+- Completing the rounds (`RoundsConfigService.save`, `onlineTestProblem` in contracts) refuses a SQL or Coding round
+  whose questions the engine cannot run: every question must be a SQL-bank question or a DSA problem (or the round a
+  plain MCQ test), with a score-based pass rule - unless a connected round module runs it. Without this, an AI-written
+  plain-text SQL question made the engine email "HR will contact you" instead of the SQL link.
+- An empty SQL question bank is filled with the starter questions the first time HR opens it (`SqlBankService.list`).
+- Skipping a round HR would have run by hand moves the students who were told "HR will contact you" for it straight on
+  (`waitingForHrRound`): they get the next round's link.

@@ -4,6 +4,9 @@
 
 /// Stage 2 overall criterion, checked once the student finished the last technical round (DSA / SQL / GD).
 enum PipelineStage2Rule {
+  /// The default: a failed technical round does not stop the student; after the last one, the average of their
+  /// percentages must reach the average of the rounds' own pass marks (as percentages).
+  AVERAGE_OF_ROUNDS
   /// Every technical round passed (each round's own pass rule). The behaviour before this setting existed.
   ALL_ROUNDS_PASSED
   /// Marks scored across the technical rounds >= stage2_min_percent of their total marks.
@@ -14,13 +17,13 @@ enum PipelineStage2Rule {
   @@map("pipeline_stage2_rule")
 }
 
-/// Per-job pipeline settings. No row = the defaults (ALL_ROUNDS_PASSED, rejection emails on).
+/// Per-job pipeline settings. No row = the defaults (AVERAGE_OF_ROUNDS, rejection emails on).
 /// Frozen together with the rounds (job_round_configs.locked_at). No foreign key on purpose: settings hold no
 /// personal data, and the rounds editor re-creates job_rounds on every save.
 model JobPipelineSettings {
   jobId            String             @id @map("job_id") @db.Uuid
   tenantId         String             @map("tenant_id") @db.Uuid
-  stage2Rule       PipelineStage2Rule @default(ALL_ROUNDS_PASSED) @map("stage2_rule")
+  stage2Rule       PipelineStage2Rule @default(AVERAGE_OF_ROUNDS) @map("stage2_rule")
   /// TOTAL_PERCENT / BOTH: 1-100.
   stage2MinPercent Int?               @map("stage2_min_percent")
   /// false = no rejection email after a failed round (the student's status still shows the rejection to HR).

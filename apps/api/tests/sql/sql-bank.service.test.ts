@@ -85,17 +85,28 @@ describe('HR manages SQL questions (stored in the database, no code change)', ()
     expect(status(await caught(bank.update(T2, q.id, question(), HR)))).toBe(404);
     expect(status(await caught(bank.setActive(T2, q.id, false, HR)))).toBe(404);
     expect(status(await caught(bank.remove(T2, q.id, HR)))).toBe(404);
-    expect(await bank.list(T2)).toEqual([]);
+    // T2's bank was empty, so it got its own starter questions - never T1's question
+    const t2 = await bank.list(T2);
+    expect(t2).toHaveLength(15);
+    expect(t2.map((x) => x.id)).not.toContain(q.id);
     await bank.remove(T1, q.id, HR);
-    expect(await bank.list(T1)).toEqual([]);
+    expect((await bank.get(T1, q.id).catch((e: unknown) => e)) instanceof Error).toBe(true);
     expect(audit.entries.map((e) => e.action)).toEqual([
       'sql.question_created',
       'sql.question_updated',
       'sql.question_deactivated',
       'sql.question_activated',
+      'sql.starter_questions_added',
       'sql.question_deleted',
     ]);
-  }, 30_000);
+  }, 60_000);
+
+  it('an empty bank is filled with the starter questions when HR opens it (a SQL round needs bank questions to be emailed and graded)', async () => {
+    const list = await bank.list(T1);
+    expect(list).toHaveLength(15);
+    expect(list.every((x) => x.active && x.tests.sample > 0)).toBe(true);
+    expect(await bank.list(T1)).toHaveLength(15); // once: a second visit adds nothing
+  }, 60_000);
 
   it('adds the 15 starter questions once per company (a second time adds nothing)', async () => {
     expect(await bank.importStarter(T1, HR)).toEqual({ added: 15, skipped: 0 });

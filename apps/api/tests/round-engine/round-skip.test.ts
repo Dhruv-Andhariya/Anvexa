@@ -254,3 +254,34 @@ describe('rules that read the round list ignore skipped rounds', () => {
     expect(pipelineStatusOf(saved, resultOf, settings)).toBe('IN_PERSONAL_INTERVIEW');
   });
 });
+
+describe('HR order decides which link goes first (SQL before DSA works like DSA before SQL)', () => {
+  it('Aptitude -> SQL link -> DSA link: each link only once the round before is finished', async () => {
+    await rounds.save(TENANT, JOB, { rounds: [aptitude, sql, dsa, interview], complete: true }, ACTOR).then((v) => (saved = v.rounds));
+    await passAptitude();
+    expect(invitedTo()).toEqual(['Aptitude', 'SQL Round']);
+    await passCoding('SQL Round');
+    expect(invitedTo()).toEqual(['Aptitude', 'SQL Round', 'DSA Coding Round']);
+    await passCoding('DSA Coding Round');
+    expect(store.outcomeEmails.map((e) => [e.kind, e.nextRoundName])).toEqual([['CLEARED_NEXT_BY_HR', 'Personal Interview']]);
+  });
+});
+
+describe('skipping a round HR would have run by hand', () => {
+  // an older job: its SQL round has a plain-text question (no SQL bank problem), so the engine cannot run it
+  const plainSql: RoundInput = { type: 'SQL', name: 'SQL Round', passRule: { mode: 'MARKS', value: 5 }, questions: [{ kind: 'CODING', text: 'Write an SQL query', marks: 10, language: 'SQL' }] };
+
+  it('students told "HR will contact you" for it move straight on: the next round\'s link is emailed', async () => {
+    await setup([aptitude, plainSql, dsa, interview]);
+    await passAptitude();
+    expect(store.outcomeEmails.map((e) => [e.kind, e.nextRoundName])).toEqual([['CLEARED_NEXT_BY_HR', 'SQL Round']]);
+    expect(invitedTo()).toEqual(['Aptitude']);
+    const res = await skip('SQL Round', 'SQL questions were not from the bank');
+    expect(res.movedOn).toBe(1);
+    expect(invitedTo()).toEqual(['Aptitude', 'DSA Coding Round']);
+    // a second skip / undo + skip moves nobody twice
+    await engine.unskipRound(TENANT, JOB, round('SQL Round').id, ACTOR);
+    await skip('SQL Round', 'SQL questions were not from the bank');
+    expect(store.invites.filter((i) => i.roundId === round('DSA Coding Round').id)).toHaveLength(1);
+  });
+});

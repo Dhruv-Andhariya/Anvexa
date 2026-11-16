@@ -41,7 +41,8 @@ export const gdWorkerConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): GdW
   pollMs: int(env.GD_POLL_MS, 10_000, 1000, 600_000),
   livePollMs: int(env.GD_LIVE_POLL_MS, 1000, 250, 10_000),
   autoSchedule: on(env.AUTO_GD_SCHEDULE, true),
-  autoScheduleMin: int(env.AUTO_GD_MIN_STUDENTS, 6, GD_LIMITS.groupSizeMin, GD_LIMITS.groupSizeMax),
+  // 1-2 only for testing (a group of 1 is scheduled as undersized); normally 3 or more
+  autoScheduleMin: int(env.AUTO_GD_MIN_STUDENTS, 6, 1, GD_LIMITS.groupSizeMax),
   autoLeadMinutes: int(env.AUTO_GD_LEAD_MINUTES, 30, GD_LIMITS.minLeadMinutes + 5, 7 * 24 * 60),
 });
 
