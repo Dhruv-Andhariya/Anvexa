@@ -32,6 +32,17 @@ export function cameraProblemOf(err: unknown): CameraProblem {
   return 'unknown';
 }
 
+/**
+ * Should the page turn the camera on by itself (no click)? Only once per time the browser grants the camera: when the
+ * browser says "granted" but the operating system still blocks the camera (Windows camera access off), every start
+ * fails as "denied" - starting again by itself would loop without end (the camera flickering on the page). After that
+ * one try the candidate sees the help text and presses "Try again"; a new grant from the browser allows one more try.
+ */
+export function shouldAutoStart(s: { enabled: boolean; permission: CameraPermission; status: 'off' | 'starting' | 'on' | 'error'; problem: CameraProblem | null; triedSinceGrant: boolean }): boolean {
+  if (!s.enabled || s.permission !== 'granted' || s.triedSinceGrant) return false;
+  return s.status === 'off' || (s.status === 'error' && s.problem === 'denied');
+}
+
 /** Video only, small: enough for the face model, nothing more. */
 export async function startCamera(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });

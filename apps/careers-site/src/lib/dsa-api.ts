@@ -176,6 +176,8 @@ export interface AssessmentState {
   proctoring: ProctoringState;
   /** False for an HR round: the last page shows no score (the outcome comes by email). */
   showScore: boolean;
+  /** A submission the server accepted is still being judged (e.g. after a reload). Missing from older API versions. */
+  judging?: { questionId: string; acceptedAt: string } | null;
 }
 
 /** Hidden test cases arrive with only a label, status and timing: no input, expected value or output. */

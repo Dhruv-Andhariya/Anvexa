@@ -149,7 +149,8 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
     const { token, mail } = await invited(s.email);
 
     // 1. the email: the DSA link, the DSA wording
-    expect(mail.message.subject).toBe("Congratulations! You've Been Shortlisted for Backend Developer – Next Step: DSA Coding Round");
+    // the first round after screening, no aptitude round before it: the plain "Next Step" wording (round-engine.worker)
+    expect(mail.message.subject).toBe('Next Step: DSA Coding Round for Backend Developer at Acme');
     expect(mail.message.text).toContain('3 coding problems · 60 minutes');
     expect(await db.roundInvite.count({ where: { applicationId: s.applicationId, emailStatus: 'SENT' } })).toBe(1);
 
@@ -295,7 +296,13 @@ describe.skipIf(!DB)('DSA round (real database)', () => {
         }),
       ),
     );
-    expect(results.every((r) => r.status === 'fulfilled' || /ATTEMPT_ENDED|ended/i.test(String((r as PromiseRejectedResult).reason?.message)))).toBe(true);
+    // a report that lands after the termination is committed is refused with the structured code ATTEMPT_ENDED (HTTP 403)
+    const endedRejection = (r: PromiseSettledResult<unknown>) => {
+      const reason = (r as PromiseRejectedResult).reason as { getStatus?: () => number; getResponse?: () => unknown } | undefined;
+      const response = reason?.getResponse?.() as { code?: string } | undefined;
+      return reason?.getStatus?.() === 403 && response?.code === 'ATTEMPT_ENDED';
+    };
+    expect(results.every((r) => r.status === 'fulfilled' || endedRejection(r))).toBe(true);
     const row = await db.dsaProctorSession.findUniqueOrThrow({ where: { inviteRef: inviteRefFor(token) } });
     const session = row.session as { warningCount: number; terminatedAt: number | null; events: { outcome?: string; warningNumber?: number | null }[] };
     expect(session.events.filter((e) => e.outcome === 'WARNING' || e.outcome === 'TERMINATED').map((e) => [e.outcome, e.warningNumber])).toEqual([

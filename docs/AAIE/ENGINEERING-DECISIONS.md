@@ -4,8 +4,8 @@
 |---|---|
 | **Purpose** | Decision sheet for the three blockers that gate **Phase 1** (Evidence Bundle + HR Evidence view). |
 | **Source of truth** | [`README.md`](README.md) (architecture document). This sheet details B1–B3 only; if they disagree, the README wins and this sheet must be corrected. |
-| **Status of all three** | **OPEN** — no owner agreement has been recorded. |
-| **Last updated** | 2026-11-11 (with README version 0.2.1) |
+| **Status** | B1 **OPEN**, B2 **OPEN**, B3 **APPROVED** (2026-11-12). |
+| **Last updated** | 2026-11-12 (with README version 0.7.0) |
 
 Owners below are given by **module and role**, as listed in each module's README and in `.github/CODEOWNERS`. No
 individual has agreed to anything yet. Where a module has no owner entry, that is stated.
@@ -161,9 +161,71 @@ behaviour from the owners of `ats`, `screening`, `assessments`, `ai-interview`, 
    purged, application erased.
 4. The bundle `inputHash` includes every `sourceVersion`.
 
-**Decision status:** **OPEN.**
+**Decision status:** **APPROVED** by the product owner on 2026-11-12: immutable, linked evidence versioning (as in
+`DSA-SQL/README.md` §10.3). Every submission and execution result stays traceable to its original assessment result
+and later AAIE evaluations; re-evaluations create new versions; existing records are never overwritten. (Source owners'
+confirmation of `updatedAt` behaviour is still collected during implementation; where it cannot be confirmed, a
+content hash is used.)
 
 ---
+
+## DSA + SQL scope notes (from the Phase 0 audit, 2026-11-12)
+
+For the DSA + SQL pipeline (`DSA-SQL/README.md`), B1–B3 apply with these concrete interfaces. **All still OPEN.**
+
+- **B1 (reads and hooks) — owners:** `round-engine` (Intern 3 (Candidate & Comms)), `dsa` (DSA assessment developer),
+  `sql`, `assessments` (owner to be confirmed), `rounds-config` (exported service exists).
+  - Read: finished coding attempts with `codingState` (today only `RoundEngineService.forApplication` exists).
+  - Read: questions with HR's marks and tests (`RoundsConfigService` exists; test categories need D25 storage).
+  - Hook: append-only submission capture in `DsaService.submit()` (and `run()` if Runs count) — must never block or
+    fail the candidate.
+  - Hook: progression hold before `claimProgress()` and one method that applies AAIE's outcome (DSA-SQL §10.0).
+- **B3 (versioning):** `round_results.updatedAt` exists (`@updatedAt`); `codingState` entries need a content hash;
+  stored submissions (D24) are immutable, so their id is their version.
+- New blockers B8–B10 are tracked in the README §13 (B8 decided by D31).
+- **Full detail for DSA + SQL:** owners and interfaces H1–H6, R1–R4, A1, U1 in `DSA-SQL/README.md` §10.2; the
+  versioning chain (question → submission → execution result → original result → AAIE evaluation → AAIE outcome →
+  effective outcome) in §10.3. B1 remains **OPEN** until the owners agree; B3 **APPROVED** 2026-11-12.
+
+## B1 agreement record — DSA + SQL Phase 1 interfaces (2026-11-12)
+
+The product owner reported on 2026-11-12 that the developers agreed to the B1 Phase 1 integration requirements below.
+No developer names, agreement dates or written evidence were provided, so each row is recorded as **verbally
+confirmed** with the formal evidence pending. Nothing here is invented: "not named" / "not stated" / "pending" mean the
+information has not been supplied yet.
+
+| Module | Interface | Requirement | Owner of record (repository) | Agreeing developer | Agreement date | Status | Evidence link |
+|---|---|---|---|---|---|---|---|
+| `dsa` | **H1** | Capture every Run and Submit (non-blocking, idempotent: D35–D37) | "DSA assessment developer" (module README); no CODEOWNERS entry | not named | not stated | **Verbally confirmed** — reported by the product owner on 2026-11-12 | pending |
+| `dsa` | **R1** | Provide test cases with categories (D25) | "DSA assessment developer"; no CODEOWNERS entry | not named | not stated | **Verbally confirmed** — reported 2026-11-12; *category storage still undecided (readiness row 6)* | pending |
+| `sql` | **R1** | Provide SQL datasets with categories (D25) | "SQL rounds" (module README); no CODEOWNERS entry | not named | not stated | **Verbally confirmed** — reported 2026-11-12; *category storage still undecided (row 6)* | pending |
+| `round-engine` | **R2** | Read access to finished coding attempts | Intern 3 (Candidate & Comms) (README); CODEOWNERS `GrisaPujara` | not named | not stated | **Verbally confirmed** — reported 2026-11-12 | pending |
+| `rounds-config` | **R3** | Existing HR weights, pass rules and round order (`RoundsConfigService`, already exported) | Intern 1 (Core & HR) (README); CODEOWNERS `naina-chauhan` | not named | not stated | **Verbally confirmed** — reported 2026-11-12 | pending |
+| `assessments` | **R4** | Access to original assessment results (`AssessmentsService.resultsFor`, already exported) | **not listed** in README or CODEOWNERS | not named | not stated | **Verbally confirmed** — reported 2026-11-12; *module owner still unidentified* | pending |
+
+**What this agreement does not cover**
+
+- It does **not** authorise implementation (an explicit go-ahead is still required).
+- Phase 6 interfaces **H2–H6** and **U1** (progression hold, outcome application, recovery exclusion, board / review
+  list, Stage 2 / PI reads, candidate messages) remain **future integration requirements**, not Phase 1 tasks.
+- The per-click idempotency key on the candidate page (D35, readiness row 10) needs the candidate-app owner's
+  agreement, which is not part of this record.
+- The general (non-DSA/SQL) AAIE read interfaces (ats, screening, ai-interview, group-discussion) remain **OPEN**.
+
+**To complete the record:** for each row add the agreeing developer's name or role, the date of agreement and a link
+(PR review, issue or written note). For `dsa`, `sql` and `assessments`, also confirm who owns the module.
+
+**B1 status:** DSA + SQL Phase 1 subset **verbally confirmed — formal evidence pending**; overall B1 **OPEN**.
+
+## D38 impact on B1 (2026-11-12)
+
+D38 (APPROVED) adds a Python + FastAPI AAIE service for DSA + SQL. This affects B1:
+
+- The **evidence data path is undecided (T2)**: NestJS sends the evidence to the Python service through its owner-
+  approved reads (Option A of B1 preserved), or the Python service reads Postgres directly (comparable to Option B, but
+  outside Prisma). The choice must respect module ownership and tenant isolation and be recorded here.
+- The **writer of AAIE records is undecided (T3)** and depends on the schema review.
+- B1 stays **OPEN**.
 
 ## Recording a decision
 

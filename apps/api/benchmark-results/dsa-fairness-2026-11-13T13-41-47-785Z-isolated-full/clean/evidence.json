@@ -1,0 +1,140 @@
+{
+ "windows": {
+  "cpu_overlap": {
+   "from": "2026-11-13T13:55:00.000Z",
+   "to": "2026-11-13T13:56:30.000Z"
+  },
+  "sleep": [
+   {
+    "from": "2026-11-13T14:33:44.048Z",
+    "to": "2026-11-13T15:02:58.557Z"
+   },
+   {
+    "from": "2026-11-13T14:57:58.451Z",
+    "to": "2026-11-13T22:28:39.933Z"
+   },
+   {
+    "from": "2026-11-13T22:23:38.933Z",
+    "to": "2026-11-15T19:18:48.153Z"
+   }
+  ],
+  "post_resume": {
+   "from": "2026-11-15T19:13:48.153Z",
+   "to": "2026-11-15T19:28:50.986Z"
+  }
+ },
+ "evidence": {
+  "pauses": [
+   {
+    "lastStartBefore": "2026-11-13T14:33:45.048Z",
+    "firstStartAfter": "2026-11-13T14:57:58.557Z",
+    "minutes": 24.2
+   },
+   {
+    "lastStartBefore": "2026-11-13T14:57:59.451Z",
+    "firstStartAfter": "2026-11-13T22:23:39.933Z",
+    "minutes": 445.7
+   },
+   {
+    "lastStartBefore": "2026-11-13T22:23:39.933Z",
+    "firstStartAfter": "2026-11-15T19:13:48.153Z",
+    "minutes": 2690.1
+   }
+  ],
+  "wallVsBaseline": {
+   "outside_all_windows": {
+    "samples": 2405,
+    "medianRatio": 1,
+    "over1_5x": 164,
+    "over3x": 9
+   },
+   "cpu_overlap": {
+    "samples": 48,
+    "medianRatio": 1.43,
+    "over1_5x": 22,
+    "over3x": 6
+   },
+   "sleep_windows": {
+    "samples": 45,
+    "medianRatio": 4.17,
+    "over1_5x": 42,
+    "over3x": 30
+   },
+   "post_resume_segment": {
+    "samples": 169,
+    "medianRatio": 1.93,
+    "over1_5x": 132,
+    "over3x": 49
+   },
+   "post_resume_after_first_5_min": {
+    "samples": 169,
+    "medianRatio": 1.93,
+    "over1_5x": 132,
+    "over3x": 49
+   }
+  }
+ },
+ "counts": {
+  "warmup:correct": 243,
+  "warmup:infra_http400": 90,
+  "warmup:genuine_timeout": 27,
+  "measure:correct": 2162,
+  "measure:infra_http400": 900,
+  "measure:genuine_timeout": 3,
+  "measure:excluded_cpu_overlap": 48,
+  "measure:excluded_sleep": 45,
+  "measure:infra_client_timeout": 3,
+  "measure:excluded_degraded": 169
+ },
+ "timeouts": [
+  "2026-11-13T13:41:56.082Z warmup cpp|ls-quadratic|ls-alpha26-n100000 cpu=8081 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8081 ms >= 90% of the limit)",
+  "2026-11-13T13:42:09.613Z warmup python|ls-quadratic|ls-alpha26-n50000 cpu=8083 wall=8096 -> genuine_timeout (censored point, outside every suspect window, CPU 8083 ms >= 90% of the limit)",
+  "2026-11-13T13:42:26.801Z warmup java|ls-quadratic|ls-alpha26-n50000 cpu=8059 wall=7006 -> genuine_timeout (censored point, outside every suspect window, CPU 8059 ms >= 90% of the limit)",
+  "2026-11-13T13:42:34.759Z warmup java|ls-quadratic|ls-distinct94-n50000 cpu=8101 wall=6924 -> genuine_timeout (censored point, outside every suspect window, CPU 8101 ms >= 90% of the limit)",
+  "2026-11-13T13:43:06.065Z warmup java|ls-quadratic|ls-alpha26-n50000 cpu=8106 wall=6602 -> genuine_timeout (censored point, outside every suspect window, CPU 8106 ms >= 90% of the limit)",
+  "2026-11-13T13:43:22.463Z warmup cpp|ls-quadratic|ls-alpha26-n50000 cpu=8079 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8079 ms >= 90% of the limit)",
+  "2026-11-13T13:43:41.880Z warmup cpp|ls-quadratic|ls-distinct94-n50000 cpu=8068 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8068 ms >= 90% of the limit)",
+  "2026-11-13T13:43:53.083Z warmup java|ls-quadratic|ls-distinct94-n50000 cpu=8011 wall=7207 -> genuine_timeout (censored point, outside every suspect window, CPU 8011 ms >= 90% of the limit)",
+  "2026-11-13T13:44:00.316Z warmup python|ls-quadratic|ls-alpha26-n100000 cpu=8088 wall=8102 -> genuine_timeout (censored point, outside every suspect window, CPU 8088 ms >= 90% of the limit)",
+  "2026-11-13T13:44:08.458Z warmup java|ls-quadratic|ls-alpha26-n100000 cpu=8041 wall=7102 -> genuine_timeout (censored point, outside every suspect window, CPU 8041 ms >= 90% of the limit)",
+  "2026-11-13T13:44:50.357Z warmup java|ls-quadratic|ls-distinct94-n50000 cpu=8094 wall=7011 -> genuine_timeout (censored point, outside every suspect window, CPU 8094 ms >= 90% of the limit)",
+  "2026-11-13T13:45:05.942Z warmup python|ls-quadratic|ls-distinct94-n50000 cpu=8065 wall=8099 -> genuine_timeout (censored point, outside every suspect window, CPU 8065 ms >= 90% of the limit)",
+  "2026-11-13T13:45:21.946Z warmup cpp|ls-quadratic|ls-distinct94-n50000 cpu=8077 wall=8102 -> genuine_timeout (censored point, outside every suspect window, CPU 8077 ms >= 90% of the limit)",
+  "2026-11-13T13:46:07.641Z warmup java|ls-quadratic|ls-alpha26-n50000 cpu=8018 wall=6105 -> genuine_timeout (censored point, outside every suspect window, CPU 8018 ms >= 90% of the limit)",
+  "2026-11-13T13:46:14.882Z warmup python|ls-quadratic|ls-alpha26-n100000 cpu=8086 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8086 ms >= 90% of the limit)",
+  "2026-11-13T13:46:24.029Z warmup python|ls-quadratic|ls-distinct94-n50000 cpu=8083 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8083 ms >= 90% of the limit)",
+  "2026-11-13T13:46:32.174Z warmup cpp|ls-quadratic|ls-alpha26-n50000 cpu=8085 wall=8098 -> genuine_timeout (censored point, outside every suspect window, CPU 8085 ms >= 90% of the limit)",
+  "2026-11-13T13:47:03.785Z warmup python|ls-quadratic|ls-alpha26-n100000 cpu=8084 wall=8099 -> genuine_timeout (censored point, outside every suspect window, CPU 8084 ms >= 90% of the limit)",
+  "2026-11-13T13:47:49.409Z warmup cpp|ls-quadratic|ls-alpha26-n100000 cpu=8075 wall=8100 -> genuine_timeout (censored point, outside every suspect window, CPU 8075 ms >= 90% of the limit)",
+  "2026-11-13T13:48:06.180Z warmup java|ls-quadratic|ls-alpha26-n100000 cpu=8110 wall=6904 -> genuine_timeout (censored point, outside every suspect window, CPU 8110 ms >= 90% of the limit)",
+  "2026-11-13T13:48:20.111Z warmup cpp|ls-quadratic|ls-alpha26-n50000 cpu=8093 wall=8107 -> genuine_timeout (censored point, outside every suspect window, CPU 8093 ms >= 90% of the limit)",
+  "2026-11-13T13:48:42.804Z warmup python|ls-quadratic|ls-alpha26-n50000 cpu=8082 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8082 ms >= 90% of the limit)",
+  "2026-11-13T13:49:03.576Z warmup cpp|ls-quadratic|ls-distinct94-n50000 cpu=8070 wall=8099 -> genuine_timeout (censored point, outside every suspect window, CPU 8070 ms >= 90% of the limit)",
+  "2026-11-13T13:49:16.472Z warmup java|ls-quadratic|ls-alpha26-n100000 cpu=8097 wall=7205 -> genuine_timeout (censored point, outside every suspect window, CPU 8097 ms >= 90% of the limit)",
+  "2026-11-13T13:49:23.701Z warmup cpp|ls-quadratic|ls-alpha26-n100000 cpu=8078 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8078 ms >= 90% of the limit)",
+  "2026-11-13T13:49:35.437Z warmup python|ls-quadratic|ls-distinct94-n50000 cpu=8089 wall=8098 -> genuine_timeout (censored point, outside every suspect window, CPU 8089 ms >= 90% of the limit)",
+  "2026-11-13T13:49:48.527Z warmup python|ls-quadratic|ls-alpha26-n50000 cpu=8080 wall=8101 -> genuine_timeout (censored point, outside every suspect window, CPU 8080 ms >= 90% of the limit)",
+  "2026-11-13T13:53:53.700Z measure cpp|ls-quadratic|ls-distinct94-n10000 cpu=8101 wall=8158 -> genuine_timeout (point's normal CPU median 5108 ms is near the 8000 ms limit)",
+  "2026-11-13T13:54:55.714Z measure cpp|ls-quadratic|ls-distinct94-n10000 cpu=8025 wall=8052 -> genuine_timeout (point's normal CPU median 5108 ms is near the 8000 ms limit)",
+  "2026-11-13T14:33:33.581Z measure cpp|ls-quadratic|ls-alpha26-n10000 cpu=7770 wall=8085 -> genuine_timeout (point's normal CPU median 5039 ms is near the 8000 ms limit)",
+  "2026-11-15T19:13:48.153Z measure java|two-sum-nested|ts-n10 cpu=8109 wall=8101 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:14:08.286Z measure java|two-sum-nested|ts-n2 cpu=8136 wall=6759 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:14:15.856Z measure java|ls-window|ls-alpha26-n50000 cpu=8182 wall=6795 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:14:22.830Z measure cpp|ls-window|ls-distinct94-n10 cpu=15034 wall=15030 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:14:45.590Z measure cpp|ls-window|ls-distinct94-n1000 cpu=14939 wall=15184 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:15:12.932Z measure python|ls-quadratic|ls-distinct94-n10000 cpu=8058 wall=8103 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:15:21.236Z measure cpp|ls-window|ls-distinct94-n50000 cpu=15327 wall=15329 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:16:38.348Z measure cpp|ls-window|ls-alpha26-n50000 cpu=14984 wall=15159 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:17:38.672Z measure python|ls-quadratic|ls-distinct94-n10000 cpu=8077 wall=8101 -> excluded_sleep (in flight across a sleep, or within 5 min after waking)",
+  "2026-11-15T19:19:17.215Z measure cpp|ls-quadratic|ls-alpha26-n10000 cpu=8065 wall=8061 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:22:41.775Z measure cpp|two-sum-nested|ts-n10000 cpu=15053 wall=15342 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:22:58.832Z measure cpp|ls-quadratic|ls-distinct94-n10 cpu=15183 wall=14940 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:23:14.971Z measure cpp|ls-quadratic|ls-alpha26-n10 cpu=14990 wall=15148 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:23:40.019Z measure java|ls-quadratic|ls-alpha26-n10000 cpu=8320 wall=5949 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:23:56.978Z measure cpp|ls-quadratic|ls-alpha26-n10000 cpu=8034 wall=8001 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:24:35.037Z measure cpp|ls-quadratic|ls-alpha26-n10000 cpu=8028 wall=8223 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:25:05.033Z measure cpp|two-sum-hash|ts-n1000 cpu=8830 wall=17538 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:25:53.168Z measure java|two-sum-nested|ts-n5000 cpu=4381 wall=8391 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))",
+  "2026-11-15T19:27:12.460Z measure cpp|ls-quadratic|ls-alpha26-n10000 cpu=8078 wall=8100 -> excluded_degraded (after the final wake-up, host degraded until the end (see evidence))"
+ ]
+}

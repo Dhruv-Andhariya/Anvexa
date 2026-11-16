@@ -11,6 +11,7 @@ export {
   type CodingKind,
   emptyCodingState,
   parseCodingState,
+  PENDING_SUBMISSION_MAX_MS,
   type CodingFinishReason,
   type CodingQuestionState,
   type CodingState,

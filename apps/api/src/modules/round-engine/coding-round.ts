@@ -29,12 +29,55 @@ export interface CodingQuestionState {
   bestCode: string | null;
 }
 
+/**
+ * A submission the server ACCEPTED (while the attempt ran, before its deadline) whose tests are still being run. It is
+ * judged by when it was accepted, not by when its tests finish: the result is recorded even if the attempt closed
+ * meanwhile, and the attempt is not graded until it is in (or until it is clearly abandoned, PENDING_SUBMISSION_MAX_MS).
+ */
+export interface PendingSubmission {
+  id: string;
+  questionId: string;
+  /** Server time of acceptance (ISO). */
+  acceptedAt: string;
+}
+
 export interface CodingState {
   progress: Record<string, CodingQuestionState>;
   finishReason: CodingFinishReason | null;
+  /** At most one accepted submission being judged (one at a time per attempt). */
+  pending?: PendingSubmission | null;
 }
 
+/** No `pending` key: it is only present while an accepted submission is being judged (null once its result is in). */
 export const emptyCodingState = (): CodingState => ({ progress: {}, finishReason: null });
+
+/**
+ * After this long an accepted submission whose result never arrived (the API stopped while judging it) no longer holds
+ * the attempt: it is graded without it. Longer than any judging can take: each code-runner request waits at most 60 s
+ * in the queue and runs at most 60 s, a submission has at most 10 of them, 2 at a time (5 x 120 s = 10 minutes).
+ */
+export const PENDING_SUBMISSION_MAX_MS = 15 * 60_000;
+
+/**
+ * What to store when a coding attempt ends with the state the page last had: the STORED results win per question (a
+ * submission recorded meanwhile is never overwritten by an older copy), questions only the page knows are kept, and the
+ * stored pending submission stays pending (its result is recorded when its tests finish).
+ */
+export function mergeCodingState(stored: CodingState | null, given: CodingState): CodingState {
+  return {
+    progress: { ...given.progress, ...(stored?.progress ?? {}) },
+    finishReason: given.finishReason ?? stored?.finishReason ?? null,
+    pending: stored?.pending ?? null,
+  };
+}
+
+/** An accepted submission is still being judged (and not abandoned). */
+export const pendingActive = (state: CodingState | null | undefined, now: Date): boolean => {
+  const p = state?.pending;
+  if (!p) return false;
+  const at = Date.parse(p.acceptedAt);
+  return Number.isFinite(at) && now.getTime() - at < PENDING_SUBMISSION_MAX_MS;
+};
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
@@ -44,8 +87,15 @@ const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, ma
 export function parseCodingState(value: unknown): CodingState {
   const out = emptyCodingState();
   if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
-  const v = value as { progress?: unknown; finishReason?: unknown };
+  const v = value as { progress?: unknown; finishReason?: unknown; pending?: unknown };
   if (v.finishReason === 'submitted' || v.finishReason === 'time_expired' || v.finishReason === 'disqualified') out.finishReason = v.finishReason;
+  if (v.pending && typeof v.pending === 'object' && !Array.isArray(v.pending)) {
+    const p = v.pending as Record<string, unknown>;
+    const pid = text(p.id, 64);
+    const qid = text(p.questionId, 64);
+    const at = text(p.acceptedAt, 40);
+    if (pid && qid && at && Number.isFinite(Date.parse(at))) out.pending = { id: pid, questionId: qid, acceptedAt: at };
+  }
   if (v.progress && typeof v.progress === 'object' && !Array.isArray(v.progress)) {
     for (const [id, raw] of Object.entries(v.progress as Record<string, unknown>)) {
       if (!raw || typeof raw !== 'object') continue;

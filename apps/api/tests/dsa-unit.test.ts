@@ -278,6 +278,107 @@ describe('DsaService', () => {
     await expect(service.run(TOKEN, body())).rejects.toMatchObject({ response: { code: 'CODE_RUNNER_BUSY' } });
   });
 
+  // ---- C2: a runner failure on some tests never lowers, replaces or creates the candidate's result
+  const internal = (): RunnerResult => ({ ...ok(''), verdict: 'internal_error', statusText: 'sandbox failed', stderr: 'isolate: box setup failed' });
+  const LAST_TWO_SUM = MOCK_QUESTIONS[0].testCases.at(-1)!.stdin;
+  /** Correct output on every test except the last one, where the runner itself fails. */
+  const mixedRunner = (failStdin = LAST_TWO_SUM): CodeRunner => ({
+    async runBatch(jobs) {
+      return jobs.map((j) => (j.stdin === failStdin ? internal() : ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`)));
+    },
+  });
+  function serviceWithStore(runner: CodeRunner) {
+    const store = new InMemorySessionStore();
+    const service = new DsaService(new DemoInvitationResolver(), new MockQuestionRepository(), store, runner, () => 1_700_000_000_000);
+    return { service, store };
+  }
+
+  it('C2: passed tests plus one runner failure is not recorded and returns the runner-failure (retry) answer', async () => {
+    const { service, store } = serviceWithStore(mixedRunner());
+    await service.start(TOKEN);
+    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503, response: { code: 'CODE_RUNNER_UNAVAILABLE' } });
+    const p = (await service.getState(TOKEN)).progress.find((x) => x.questionId === 'dsa-001')!;
+    expect(p).toMatchObject({ attempts: 0, bestScore: 0, passed: 0, total: 0, language: null, lastVerdict: null }); // no result created
+    expect((await store.get(TOKEN))!.progress['dsa-001']).toBeUndefined();
+  });
+
+  it('C2: a runner failure never replaces a previously saved best score or code', async () => {
+    let failing = false;
+    const runner: CodeRunner = {
+      async runBatch(jobs) {
+        return jobs.map((j) => (failing && j.stdin === LAST_TWO_SUM ? internal() : ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`)));
+      },
+    };
+    const { service, store } = serviceWithStore(runner);
+    await service.start(TOKEN);
+    const first = await service.submit(TOKEN, body('dsa-001', 'python', 'best_code = 1'));
+    expect(first.score).toBe(10);
+    const saved = structuredClone((await store.get(TOKEN))!.progress['dsa-001']);
+
+    failing = true; // the same (or any other) code, but the runner fails on one hidden test
+    await expect(service.submit(TOKEN, body('dsa-001', 'java', 'class Solution {}'))).rejects.toMatchObject({ status: 503 });
+    expect((await store.get(TOKEN))!.progress['dsa-001']).toEqual(saved); // best score, passed, language, code, attempts: unchanged
+    expect(saved).toMatchObject({ bestScore: 10, attempts: 1, language: 'python', bestCode: 'best_code = 1' });
+  });
+
+  it('C2: a lower partial best is not replaced either, even when the failed run passed more tests', async () => {
+    let mode: 'half' | 'mixed' = 'half';
+    let seq = 0;
+    const runner: CodeRunner = {
+      async runBatch(jobs) {
+        return jobs.map((j) => {
+          if (mode === 'mixed') return j.stdin === LAST_TWO_SUM ? internal() : ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`);
+          return ok(`\n${RESULT_MARKER}${seq++ % 2 === 0 ? expectedByStdin.get(j.stdin) : 'wrong'}\n`);
+        });
+      },
+    };
+    const { service, store } = serviceWithStore(runner);
+    await service.start(TOKEN);
+    const partial = await service.submit(TOKEN, body());
+    expect(partial.score).toBeGreaterThan(0);
+    expect(partial.score).toBeLessThan(10);
+    const saved = structuredClone((await store.get(TOKEN))!.progress['dsa-001']);
+    mode = 'mixed'; // 7 of 8 tests pass, 1 runner failure: still not evidence about the candidate
+    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503 });
+    expect((await store.get(TOKEN))!.progress['dsa-001']).toEqual(saved);
+  });
+
+  it('C2: every test failing in the runner is not recorded either', async () => {
+    const { service } = serviceWithStore({ runBatch: async (jobs) => jobs.map(() => internal()) });
+    await service.start(TOKEN);
+    await expect(service.submit(TOKEN, body())).rejects.toMatchObject({ status: 503, response: { code: 'CODE_RUNNER_UNAVAILABLE' } });
+    expect((await service.getState(TOKEN)).progress.every((p) => p.attempts === 0)).toBe(true);
+  });
+
+  it('C2: candidate failures keep their scoring (runtime error and wrong answer are recorded)', async () => {
+    const runner: CodeRunner = {
+      async runBatch(jobs) {
+        return jobs.map((j) =>
+          j.stdin === LAST_TWO_SUM
+            ? { ...ok(''), verdict: 'runtime_error' as const, statusText: 'Runtime error', stderr: 'ZeroDivisionError' }
+            : ok(`\n${RESULT_MARKER}${expectedByStdin.get(j.stdin)}\n`),
+        );
+      },
+    };
+    const { service } = serviceWithStore(runner);
+    await service.start(TOKEN);
+    const res = await service.submit(TOKEN, body());
+    expect(res.verdict).toBe('failed');
+    expect(res.passed).toBe(res.total - 1);
+    expect(res.score).toBe(Math.round((10 * (res.total - 1) * 100) / res.total) / 100);
+    expect(res.progress).toMatchObject({ attempts: 1, bestScore: res.score });
+  });
+
+  it('C3 end to end: a C++ compile timeout on the runner is not a compile error and is not recorded', async () => {
+    // what mapPistonResponse now returns for a compile-stage TO
+    const { service } = serviceWithStore({
+      runBatch: async (jobs) => jobs.map(() => ({ ...ok(''), verdict: 'internal_error' as const, statusText: 'Compilation timed out on the code runner' })),
+    });
+    await service.start(TOKEN);
+    await expect(service.submit(TOKEN, body('dsa-001', 'cpp'))).rejects.toMatchObject({ status: 503, response: { code: 'CODE_RUNNER_UNAVAILABLE' } });
+    expect((await service.getState(TOKEN)).progress.every((p) => p.attempts === 0 && p.bestScore === 0)).toBe(true);
+  });
+
   it('runs the first test case alone, so code that does not compile costs one run, not one per test', async () => {
     const batches: number[] = [];
     const broken: CodeRunner = {

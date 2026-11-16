@@ -14,7 +14,7 @@ editor and run by the round engine: invitation email, result, outcome email. Gui
 |---|---|---|
 | Invitation / link token | `RoundInvitationResolver` -> `RoundEngineService.openCodingRound` | `DemoInvitationResolver` (`DSA_DEMO_TOKENS`) |
 | Questions | `BankQuestionRepository`: the round's bank problems under HR's question ids and marks | the whole bank |
-| Session (attempt, progress, result) | `EngineSessionStore` -> the engine's `round_attempts` row | in memory |
+| Session (attempt, progress, result) | `EngineSessionStore` -> the engine's `round_attempts` row (`coding_state`, incl. the accepted `pending` submission) | in memory |
 | Proctoring record | `PrismaProctorStore` -> `dsa_proctor_sessions` | in memory |
 | Code runner | `PistonRunner` (`CODE_RUNNER`) | same |
 
@@ -22,10 +22,23 @@ Routes: `/api/v1/dsa/:token/*` (candidate, public, token = credential), `/api/v1
 (HR session, `jobs.read`, own company only), `/api/v1/dsa-admin/proctoring/*` (service key, closed unless
 `DSA_ADMIN_API_KEY` is set). Off with `FEATURE_DSA=off`.
 
+## Behaviour worth knowing
+- **Scoring** comes only from the code runner's test results (`DsaService.scoreOf` -> round engine `coding-round.ts`
+  -> assessments grading). Gemini / AAIE is not part of it: nothing in `apps/api` calls the AAIE worker
+  (`workers/aaie-worker`, shadow / advisory only, integration postponed).
+- **Submit** is accepted by `RoundEngineService.acceptCodingSubmission` under the attempt row lock, only while the
+  attempt runs and before its deadline, one at a time (`429 BUSY`). Its result is recorded by
+  `completeCodingSubmission` even if the attempt closed meanwhile (grading and the next step wait for it); a runner
+  failure calls `releaseCodingSubmission` (`503`, nothing recorded); after `PENDING_SUBMISSION_MAX_MS` (15 min) it is
+  abandoned and a late result gets `409 SUBMISSION_NOT_RECORDED`. The state exposes it as `judging`.
+- **Warning limit**: `DSA_PROCTOR_MAX_STRIKES`, code default 2 (`.env` may override). The next confirmed incident
+  terminates: `TERMINATED` + `INTEGRITY_VIOLATION_REVIEW`, graded, next step held for HR's integrity decision. Camera
+  thresholds and caveats: `docs/PROCTORING.md`.
+
 ## Rules for this folder
 - Talks to the round engine ONLY through `round-engine/index.ts` (`RoundEngineService`), never its store or tables.
 - Hidden test cases live only in `questions/` and are never serialised to a client (`toPublicProgress` and
   `toPublicQuestion` are whitelists; the stored best source code never leaves the server).
 - The bank list HR sees is `DSA_BANK` in `packages/contracts`; `tests/dsa-bank-sync.test.ts` keeps it in step with
   `questions/mock-questions.data.ts`. Add a problem in both, plus a harness if it has a new function shape.
-- Full notes: `docs/dsa-integration-notes.md`, `docs/dsa-proctoring-implementation.md`.
+- Full notes: `docs/dsa-integration-notes.md`, `docs/PROCTORING.md`, `docs/dsa-proctoring-implementation.md` (history).

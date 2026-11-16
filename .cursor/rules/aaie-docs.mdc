@@ -40,6 +40,28 @@ alwaysApply: false
 - No new agents, microservices, queues, schedulers or infrastructure for AAIE without explicit approval recorded in
   the decision register.
 
+## HR vs AAIE boundary (D28)
+- HR = assessment design and standards: questions, marks / weights, round maximum marks, pass marks and criteria,
+  round order and required rounds. AAIE must never modify any of these.
+- AAIE = intelligent evaluation and adaptive progression within HR's configuration. AAIE marks never exceed a
+  question's configured marks; HR's pass criteria stay authoritative; HR's override always wins.
+- DSA / SQL decisions live in `docs/AAIE/DSA-SQL/README.md`; where they supersede D1–D14 for DSA / SQL, that is
+  recorded in `docs/AAIE/README.md` §12.1. Proposed decisions are not in force until approved.
+- The original `round_results` is never modified; AAIE writes a separate, versioned outcome record (D31). Do not
+  reinterpret `CORRECT_COUNT` pass rules (B9 open).
+- Never replace or rewrite Piston, the SQL execution engine, test execution or database isolation as part of AAIE
+  work; AAIE consumes their outputs.
+
+## Technology (D38)
+- DSA + SQL AAIE: one Python + FastAPI service (proposed `workers/aaie-worker/`) with the Gemini API; Pydantic +
+  deterministic validation of every AI response; Python computes marks from the D29 band. Gemini never decides
+  final marks or progression, never writes replacement code / SQL, never executes candidate code.
+- Keep NestJS, PostgreSQL / Neon, Prisma, Piston, the SQLite sandbox and Next.js. Do not add LangGraph, multi-agent
+  orchestration, queues or other services.
+- Do not invent a Gemini model version, retry configuration, orchestration framework or database schema: these are
+  open items (T1–T11 in `docs/AAIE/DSA-SQL/README.md` §12a) until approved.
+- The proposed service structure is a proposal: do not create it without an explicit implementation go-ahead.
+
 ## Preserve existing behaviour (always)
 - Do not change existing assessment workflows, candidate answer recording, speech-to-text, transcripts, stored
   answers, evaluators, proctoring, or HR evidence panels and their access as part of AAIE work.

@@ -1,14 +1,21 @@
 # DSA assessment: browser proctoring
 
+> **Current behaviour (2026-11-16). Where this document disagrees, this block and [PROCTORING.md](PROCTORING.md) win; the rest is the record of the original browser-proctoring change.**
+> - **Camera:** the AI camera rules in `packages/contracts/src/schemas/camera-proctoring.ts` (`CAMERA_CONFIRM_DEFAULTS`, `CAMERA_RULES_DEFAULTS`) replaced the BlazeFace `NO_FACE` / `MULTIPLE_FACES` / `CAMERA_OFF` check described below. A confirmed incident is: face not visible for 20 s (`DSA_PROCTOR_FACE_MISSING_SECONDS`, default 20), looking away continuously for 120 s (`DSA_PROCTOR_LOOK_AWAY_SECONDS`, default 120), more than one person for about 3 s, a phone for about 3 s, each with confidence at least 0.5. Camera alerts count as warnings unless `DSA_PROCTOR_CAMERA_STRIKES=off`. The page always uses its built-in thresholds and sends each alert with its own duration; raising a server value above the page's value turns that warning off, so change both together (the contracts default and the env value).
+> - **Warning limit:** the code default is `DSA_PROCTOR_MAX_STRIKES = 2` (two warnings allowed, the 3rd confirmed incident terminates; `0` = no limit). It is set per deployment in `.env`, which may use another value (the local `.env` currently sets 3).
+> - **Termination:** the attempt becomes `TERMINATED` with integrity status `INTEGRITY_VIOLATION_REVIEW`. It is graded (HR sees the score), but no next step and no email follow until HR records an integrity decision. The candidate's end screen of an HR round shows no score (`DSA_SHOW_SCORE`, default off).
+> - **Storage:** progress lives in the database (`round_attempts.coding_state` through `EngineSessionStore`) and the proctoring record in `dsa_proctor_sessions` (`PrismaProctorStore`); both are in memory only in demo mode (`DSA_DEMO_MODE=on`). The "in memory" and "Database changes: none applied" statements below are historical.
+> - **Camera preview:** during the test the candidate's camera tile floats and can be dragged to any of the four corners (or moved with its ⤢ button); moving it never touches the stream or the face check (`CameraTile` in `camera-monitor.tsx`).
+
 > **Update (2026-11-02): code execution now runs on Piston, not Judge0.** The test sections below are a record of the proctoring change as it was verified at the time, when Judge0 was the runner; "real Judge0" and `dsa-judge0.integration.test.ts` there refer to that earlier setup, and that test file no longer exists. After the switch the proctoring browser suite was re-run against Piston: **56 / 56 checks passed**, including Run and Submit under proctoring. Current test counts and hosting: [dsa-integration-notes.md](dsa-integration-notes.md) §7 and [dsa-piston-hosting.md](dsa-piston-hosting.md).
 
 Browser-based integrity monitoring for the DSA coding assessment: full-screen mode, tab and window focus, clipboard and restricted shortcuts, with server-side violation records, a review policy and an HR reporting contract.
 
 > **What this is, and is not.** It is *browser-level detection and deterrence*. A normal web page cannot lock down a computer. It cannot see other applications, block operating-system shortcuts (Alt+Tab, the Windows key, Ctrl+T/W), stop a second device, or know why the browser reported an event. Every record is an **observation for a human reviewer, never proof of cheating**, and nothing here changes a candidate's score. See [Security limitations](#7-security-limitations).
 >
-> **Webcam (2026-11-04, `DSA_PROCTOR_CAMERA`, default on).** The webcam must be on to start and for the whole attempt. A face detector (MediaPipe BlazeFace, running in the candidate's browser, one frame a second) reports `NO_FACE` (no face for 8 s), `MULTIPLE_FACES` (more than one face for 3 s, high severity) and `CAMERA_OFF` (the camera stopped or its permission was withdrawn; the page is blocked until it is back on). Each is one warning, at most once per episode. The video never leaves the device; only these events reach the server. Code: `apps/careers-site/src/app/dsa/[token]/webcam.tsx`. The detector is served by the careers site itself (runtime copied to `public/mediapipe/wasm` before dev / build by `scripts/copy-face-detector.mjs`, model committed in `public/models`), overridable with `NEXT_PUBLIC_FACE_WASM_URL` / `NEXT_PUBLIC_FACE_MODEL_URL`; if it cannot load, only the camera-on check runs. Consent version `dsa-proctoring-v2`.
+> **Webcam (2026-11-04, `DSA_PROCTOR_CAMERA`, default on; superseded by the AI camera rules, see the block above).** The webcam must be on to start and for the whole attempt. A face detector (MediaPipe BlazeFace, running in the candidate's browser, one frame a second) reports `NO_FACE` (no face for 8 s), `MULTIPLE_FACES` (more than one face for 3 s, high severity) and `CAMERA_OFF` (the camera stopped or its permission was withdrawn; the page is blocked until it is back on). Each is one warning, at most once per episode. The video never leaves the device; only these events reach the server. Code: `apps/careers-site/src/app/dsa/[token]/webcam.tsx`. The detector is served by the careers site itself (runtime copied to `public/mediapipe/wasm` before dev / build by `scripts/copy-face-detector.mjs`, model committed in `public/models`), overridable with `NEXT_PUBLIC_FACE_WASM_URL` / `NEXT_PUBLIC_FACE_MODEL_URL`; if it cannot load, only the camera-on check runs. Consent version `dsa-proctoring-v2`.
 >
-> **Allowed warnings (default 3).** The first 3 suspicious events (any violation below: a screenshot key, a tab switch, leaving full screen, a copy attempt, the webcam turning off, no face or a second face in view, and so on, one per real action) are tolerated and shown to the candidate as warnings. **The next one ends the assessment immediately**, including leaving full screen, and the work submitted so far is kept. See [Allowed warnings](#allowed-warnings-the-two-strike-rule). Set `DSA_PROCTOR_MAX_STRIKES=0` for no limit.
+> **Allowed warnings (code default 2).** The first 2 suspicious events (any violation below: a screenshot key, a tab switch, leaving full screen, a copy attempt, a confirmed camera incident, and so on, one per real action) are tolerated and shown to the candidate as warnings. **The next one ends the assessment immediately**, including leaving full screen; the work submitted so far is graded and held for HR's integrity decision. See [Allowed warnings](#allowed-warnings-the-two-strike-rule). Set `DSA_PROCTOR_MAX_STRIKES=0` for no limit.
 
 Related: [dsa-integration-notes.md](dsa-integration-notes.md) (the assessment module this extends).
 
@@ -35,7 +42,7 @@ Design decisions:
 - **Isolated.** All code is in `modules/dsa/proctoring/` plus small hooks in `DsaService`. The existing `modules/proctoring` (owned by another developer) is only a README stub in this snapshot, so there was nothing to reuse and nothing was changed. Event names that already exist in the round-engine's online-test proctoring (`TAB_SWITCH`, `FULLSCREEN_EXIT`) are kept identical so the two logs can later be merged on one timeline.
 - **The server is the source of truth.** The browser reports raw signals. The server assigns severity, computes durations, counts, the score and the status. The candidate's page never sends or receives a final count it must be trusted for.
 - **Identity comes only from the invitation token in the URL.** Bodies that name a candidate, assessment or invitation are refused (`400 UNEXPECTED_FIELD`). There is no field through which another candidate's record could be addressed.
-- **Swappable parts** (same pattern as the rest of the module): `ProctorStore` (`DSA_PROCTOR_STORE`), policy (`DSA_PROCTOR_POLICY`), invitation resolver. Storage is in memory for now.
+- **Swappable parts** (same pattern as the rest of the module): `ProctorStore` (`DSA_PROCTOR_STORE`), policy (`DSA_PROCTOR_POLICY`), invitation resolver. Storage is `PrismaProctorStore` (`dsa_proctor_sessions`); in memory only in demo mode.
 
 ### Files
 
@@ -55,7 +62,7 @@ Tests, `apps/api/tests/`: `dsa-proctoring.test.ts`, `dsa-proctoring.e2e.test.ts`
 4. **Leaving full screen.** With policy `block` (default) a modal covers the page, and the page behind it is `inert` (not usable), until the candidate returns to full screen. The timer keeps running and the code is kept. With policy `warn` only a banner is shown.
 5. **Reload mid-attempt.** The attempt continues (server timer). The gate asks for full screen again. A `SESSION_RESUMED` info event is stored (not counted as a violation).
    Each suspicious event shows a warning such as "Warning 1 of 2". The *Monitored* badge shows "warnings 1/2". After the last allowed warning the notice says the next suspicious activity, including leaving full screen, ends the assessment.
-6. **Strike-out.** The next suspicious event after the allowed warnings ends the assessment on the server at once. The candidate lands on the result screen ("ended automatically because the allowed number of warnings was used up"), with the score earned so far, and cannot return (further runs, submissions and events are refused with 403).
+6. **Strike-out.** The next suspicious event after the allowed warnings ends the assessment on the server at once. The candidate lands on the end screen with the termination message (no score in an HR round; the attempt is graded for HR and held for HR's integrity decision), and cannot return (further runs, submissions and events are refused with 403).
 7. **End.** On finish, time-out or policy end, monitoring stops, full screen is released, and the result screen shows nothing about integrity. Remaining events are flushed first.
 
 ---
@@ -123,13 +130,13 @@ The server never trusts the page's clock. A client timestamp is accepted only in
 
 ### Allowed warnings (the two-strike rule)
 
-`DSA_PROCTOR_MAX_STRIKES` (default **3**, `0` = no limit; the table below shows the rule with 2). A *strike* is one stored violation record, so one real action counts once (a tab switch with Chrome's own full-screen exit and window blur is a single strike; a key press plus its clipboard event is a single strike; `SESSION_RESUMED` is not a strike).
+`DSA_PROCTOR_MAX_STRIKES` (code default **2**, `0` = no limit; a deployment's `.env` may set another value; the table below shows the rule with 2). A *strike* is one stored violation record, so one real action counts once (a tab switch with Chrome's own full-screen exit and window blur is a single strike; a key press plus its clipboard event is a single strike; `SESSION_RESUMED` is not a strike).
 
 | Strikes used | What the candidate sees | What happens |
 |---|---|---|
 | 1 | "Warning 1 of 2" | continues |
 | 2 | "Warning 2 of 2. That was your last allowed warning. The next suspicious activity, including leaving full screen, ends your assessment immediately." | continues |
-| 3 (the next one) | result screen: "ended automatically because the allowed number of warnings was used up" | **the server ends the attempt at once**: status `finished`, `finishReason: disqualified`, the best submitted score per question is kept, further runs, submissions and events get `403 ATTEMPT_ENDED`, the proctoring record is sealed |
+| 3 (the next one) | result screen: "ended automatically because the allowed number of warnings was used up" | **the server ends the attempt at once**: status `finished`, `finishReason: disqualified` (round engine: `TERMINATED`, `INTEGRITY_VIOLATION_REVIEW`; graded, next step held for HR's integrity decision), the best submitted score per question is kept, further runs, submissions and events get `403 ATTEMPT_ENDED`, the proctoring record is sealed |
 
 HR sees status `disqualified`, `flagged: true`, `strikesUsed: 3 / strikesAllowed: 2` and the reason "Used all 2 allowed warnings; suspicious event number 3 ended the assessment." Ending is decided on the server when the event arrives, not by the page. The intro screen tells the candidate about this rule before they consent. Because any violation counts, **accidental events cost a warning too** (right-click, a copy shortcut out of habit, a pop-up that takes focus for more than a second). Raise `DSA_PROCTOR_MAX_STRIKES` if that is too strict for your candidates, and review ended attempts before acting on them: the rule is automatic, the hiring decision should not be.
 
@@ -154,8 +161,8 @@ Score = low×1 + medium×3 + high×5. The score-based statuses below are in addi
 | `DSA_PROCTOR_DISQUALIFY_SCORE` | `0` | Disqualification threshold (0 = off) |
 | `DSA_PROCTOR_REVIEW_FULLSCREEN_EXITS` | `3` | Exits that flag for review (0 = off) |
 | `DSA_PROCTOR_REVIEW_OUTSIDE_SECONDS` | `60` | Merged seconds away that flag for review (0 = off) |
-| `DSA_PROCTOR_MAX_STRIKES` | `3` | Allowed warnings; the next suspicious event ends the assessment (0 = no limit) |
-| `DSA_PROCTOR_CAMERA` | `on` | Webcam required: `CAMERA_OFF`, `NO_FACE`, `MULTIPLE_FACES` are reported (`off` = no camera) |
+| `DSA_PROCTOR_MAX_STRIKES` | `2` | Allowed warnings; the next suspicious event ends the assessment (0 = no limit) |
+| `DSA_PROCTOR_CAMERA` | `all` | AI camera on SQL and DSA rounds (`sql` = SQL only, `off` = no camera); thresholds and `DSA_PROCTOR_CAMERA_STRIKES`: [PROCTORING.md](PROCTORING.md) §10 |
 | `DSA_PROCTOR_AUTO_END` | `off` | End the attempt when the *score* reaches the disqualification threshold |
 | `DSA_PROCTOR_FULLSCREEN_HIGH_AFTER` | `3` | From this exit on, each exit is *high* |
 | `DSA_PROCTOR_MAX_EVENTS` | `500` | Cap per attempt |
@@ -212,6 +219,8 @@ Header `x-dsa-admin-key: <DSA_ADMIN_API_KEY>`. Records are addressed by `inviteR
 
 ## 6. Database changes
 
+> **Superseded.** The record is now stored in the database: table `dsa_proctor_sessions` (migration `20261102120000_dsa_round`, `PrismaProctorStore`), and progress in `round_attempts.coding_state`; `InMemoryProctorStore` is used only in demo mode. See [PROCTORING.md](PROCTORING.md) §7. The original text follows.
+
 **None applied.** This snapshot has no connection to the shared database, and a migration on it needs the schema owner's review. Storage today is `InMemoryProctorStore` (lost on API restart), behind the `ProctorStore` interface. The proposed additive migration, to be reviewed and applied by whoever owns the Prisma schema:
 
 ```prisma
@@ -266,13 +275,13 @@ Stated plainly, because a proctoring page is easy to over-sell:
 - **Full-screen state at consent is a claim from the page.** The server records it but cannot verify it.
 - **iOS Safari has no Fullscreen API for pages**, so the assessment cannot start there while full screen is required. Real Firefox, Edge and Safari behaviour and macOS shortcuts were not tested (see §9).
 - **Admin routes use a temporary shared key** (§5). Treat the key as a secret and replace the guard before real use.
-- **Storage is in memory** until the migration in §6 is applied.
+- **Storage** is the database (`dsa_proctor_sessions`, `round_attempts.coding_state`); in memory only with `DSA_DEMO_MODE=on`.
 
 ## 8. Privacy and transparency
 
 - The candidate is told **before** monitoring begins, on the start screen, which events are monitored, what is *not* collected, why, and who sees it. Consent is explicit (checkbox) and stored with a version and time. Starting is impossible without it.
-- **Collected:** event type, time, duration, and a short shortcut label (e.g. `Ctrl+Shift+I`). **Not collected:** camera, microphone, screen, other tabs or applications, passwords, clipboard contents, typed text, IP address or device fingerprints. No video or image is captured or stored.
-- Events are kept with the assessment record and shown to the hiring team as *observations*. The result screen never shows integrity information. By default the first two suspicious events are warnings and the third ends the assessment automatically (the candidate is told this before consenting, and the work submitted so far is kept). Score-based disqualification is off by default, and the hiring team still decides what an ended attempt means.
+- **Collected:** event type, time, duration, and a short shortcut label (e.g. `Ctrl+Shift+I`); camera alerts add a confidence (the camera is analysed on the device, see [PROCTORING.md](PROCTORING.md)). **Not collected:** camera video or images, microphone, screen, other tabs or applications, passwords, clipboard contents, typed text, IP address or device fingerprints. No video or image is captured or stored.
+- Events are kept with the assessment record and shown to the hiring team as *observations*. The result screen never shows integrity information. By default the first two suspicious events are warnings and the third ends the assessment automatically (the candidate is told this before consenting; the work submitted so far is graded and held for HR's integrity decision). Score-based disqualification is off by default, and the hiring team still decides what an ended attempt means.
 - **Pseudonymous reference:** proctoring data is keyed by a hash of the invitation token, not by name or email.
 - **Retention:** not defined by this module. Decide a retention period before real use, and delete with the application record (§6). This document is not a statement of legal compliance (GDPR, DPDP or other); get that reviewed for your jurisdiction.
 

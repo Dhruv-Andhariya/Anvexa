@@ -39,11 +39,20 @@ describe('mapPistonResponse (Piston answers, copied from a real Piston 3 instanc
     expect(r).toMatchObject({ verdict: 'time_limit', timeMs: 2079 });
   });
 
-  it('a compile that times out is a compile error with a clear message', () => {
-    expect(mapPistonResponse('cpp', { compile: stage({ code: null, status: 'TO' }), run: stage() }, limits.cpp)).toMatchObject({
-      verdict: 'compile_error',
-      compileOutput: 'Compilation time limit exceeded.',
-    });
+  it('a compile that times out on the runner is a runner failure (internal_error), never the candidate\'s compile error', () => {
+    for (const compile of [stage({ code: null, status: 'TO' }), stage({ code: null, signal: 'SIGKILL', status: 'TO' }), stage({ code: 137, status: 'TO' })]) {
+      const r = mapPistonResponse('cpp', { compile, run: stage() }, limits.cpp);
+      expect(r.verdict).toBe('internal_error');
+      expect(r.verdict).not.toBe('compile_error');
+      expect(r.compileOutput).toBe('');
+    }
+  });
+
+  it('a genuine C++ compile error (non-zero exit, not a timeout) is still the candidate\'s compile error', () => {
+    const err = "main.cpp.cpp:3:5: error: 'x' was not declared in this scope\n";
+    const r = mapPistonResponse('cpp', { compile: stage({ code: 1, output: err, stderr: err, status: 'RE' }) }, limits.cpp);
+    expect(r).toMatchObject({ verdict: 'compile_error', statusText: 'Compilation failed' });
+    expect(r.compileOutput).toContain('was not declared');
   });
 
   it('exit 137 with memory at the cap is a memory-limit runtime error with a readable message', () => {
@@ -140,7 +149,10 @@ describe('PistonRunner', () => {
     const bodies = calls.map((c) => JSON.parse(c.init.body as string));
     expect(calls.every((c) => c.url === 'http://piston.internal:2000/api/v2/execute')).toBe(true);
     expect(bodies.map((b) => [b.language, b.files[0].name])).toEqual([['python', 'main.py'], ['java', 'Main.java'], ['c++', 'main.cpp']]);
-    expect(bodies[0]).toMatchObject({ version: '*', stdin: '2 3\n', run_memory_limit: 256 * MB, compile_memory_limit: 512 * MB });
+    expect(bodies[0]).toMatchObject({ stdin: '2 3\n', run_memory_limit: 256 * MB, compile_memory_limit: 512 * MB });
+    // exact pinned runtimes, never the '*' wildcard
+    expect(bodies.map((b) => [b.language, b.version])).toEqual([['python', '3.12.0'], ['java', '15.0.2'], ['c++', '10.2.0']]);
+    expect(bodies.every((b) => b.version !== '*')).toBe(true);
     expect(bodies[1].run_memory_limit).toBe(512 * MB); // Java gets more: the JVM and javac share one run
     expect(bodies[1].run_timeout).toBeGreaterThan(bodies[0].run_timeout);
     for (const c of calls) expect(JSON.stringify(c.init.headers)).not.toMatch(/auth|token|key/i);

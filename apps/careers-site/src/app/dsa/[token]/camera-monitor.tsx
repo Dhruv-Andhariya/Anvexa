@@ -9,6 +9,7 @@ import {
   cameraProblemOf,
   cameraSupport,
   followCameraPermission,
+  shouldAutoStart,
   startCamera,
   watchCameraPermission,
   type CameraPermission,
@@ -201,10 +202,16 @@ export function useCameraMonitor({ enabled, active, serverNow, onAlert }: Option
     };
   }, [enabled, loadModel, loadDetector]);
 
-  // allowed already (or just allowed after being blocked): no need to ask, the camera turns on by itself
+  // allowed already (or just allowed after being blocked): no need to ask, the camera turns on by itself - ONCE per
+  // grant (shouldAutoStart): if the operating system still blocks it, the candidate gets the help text and Try again
+  const triedSinceGrant = useRef(false);
   useEffect(() => {
-    if (!enabled || permission !== 'granted') return;
-    if (status === 'off' || (status === 'error' && problem === 'denied')) void start();
+    if (permission !== 'granted') triedSinceGrant.current = false;
+  }, [permission]);
+  useEffect(() => {
+    if (!shouldAutoStart({ enabled, permission, status, problem, triedSinceGrant: triedSinceGrant.current })) return;
+    triedSinceGrant.current = true;
+    void start();
   }, [enabled, permission, status, problem, start]);
 
   // the analysis loop: a few frames per second while the camera runs; frames count only during the attempt
@@ -441,14 +448,123 @@ export function CameraCheck({ cam }: { cam: CameraMonitor }) {
   );
 }
 
-/** During the attempt: the candidate's own small picture, so they can see they are in view. */
+/**
+ * Where the floating camera tile sits: one of the four screen corners (CSS-anchored, so it stays on screen on resize).
+ * The top corners sit below the site's sticky header (layout.tsx, z-40), which would otherwise cover the tile, and below
+ * the assessment's own bar (Finish, timer, question tabs; marked `data-camera-tile-avoid`) while that bar is on screen.
+ */
+const TILE_CORNERS = { bl: 'bottom-4 left-4', br: 'bottom-4 right-4', tr: 'right-4', tl: 'left-4' } as const;
+const isTop = (c: TileCorner) => c === 'tr' || c === 'tl';
+type TileCorner = keyof typeof TILE_CORNERS;
+const NEXT_CORNER: Record<TileCorner, TileCorner> = { bl: 'br', br: 'tr', tr: 'tl', tl: 'bl' };
+const CORNER_NAME: Record<TileCorner, string> = { bl: 'bottom left', br: 'bottom right', tr: 'top right', tl: 'top left' };
+/** Gap kept between the tile and the window edge while it is dragged (px; matches the corner offset). */
+const TILE_EDGE = 16;
+/** Highest point of the tile (px): below the sticky header (4.5rem). */
+const TILE_TOP = 72;
+
+/**
+ * Top of the tile in a top corner: below the header, and below the assessment bar while that bar is visible (it scrolls
+ * away; then the tile goes back up). Never so low that the tile would leave the window.
+ */
+function useTopCornerOffset(tile: React.RefObject<HTMLDivElement | null>): number {
+  const [top, setTop] = useState(TILE_TOP);
+  useEffect(() => {
+    const bar = document.querySelector('[data-camera-tile-avoid]');
+    const update = () => {
+      const below = bar ? bar.getBoundingClientRect().bottom + 8 : 0;
+      const room = document.documentElement.clientHeight - TILE_EDGE - (tile.current?.offsetHeight ?? 0);
+      setTop(Math.round(Math.max(TILE_TOP, Math.min(below, room))));
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const resized = typeof ResizeObserver === 'undefined' || !bar ? null : new ResizeObserver(update);
+    if (bar) resized?.observe(bar);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      resized?.disconnect();
+    };
+  }, [tile]);
+  return top;
+}
+
+/**
+ * During the attempt: the candidate's own small picture, so they can see they are in view. The candidate can drag it
+ * (mouse, touch or pen) and it settles in the nearest corner, or move it corner to corner with its button. Only the
+ * tile moves: the same <video> element stays mounted, so the stream and the face check are never touched.
+ */
 export function CameraTile({ cam }: { cam: CameraMonitor }) {
+  const [corner, setCorner] = useState<TileCorner>('bl');
+  const [offset, setOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const drag = useRef<{ id: number; x: number; y: number; rect: DOMRect; moved: boolean } | null>(null);
+  const tile = useRef<HTMLDivElement>(null);
+  const topOffset = useTopCornerOffset(tile);
+
   if (cam.status !== 'on') return null;
   const ok = cam.face === 'ok' || cam.face === null;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, rect: e.currentTarget.getBoundingClientRect(), moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const w = document.documentElement.clientWidth;
+    const h = document.documentElement.clientHeight;
+    // never outside the visible window
+    const dx = Math.min(Math.max(e.clientX - d.x, TILE_EDGE - d.rect.left), w - TILE_EDGE - d.rect.right);
+    const dy = Math.min(Math.max(e.clientY - d.y, TILE_TOP - d.rect.top), h - TILE_EDGE - d.rect.bottom);
+    if (!d.moved && Math.abs(dx) + Math.abs(dy) < 4) return; // a tap is not a drag
+    d.moved = true;
+    setOffset({ dx, dy });
+  };
+  const onPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (d.moved && offset) {
+      // settle in the corner nearest to where it was dropped
+      const cx = d.rect.left + d.rect.width / 2 + offset.dx;
+      const cy = d.rect.top + d.rect.height / 2 + offset.dy;
+      const top = cy < document.documentElement.clientHeight / 2;
+      const left = cx < document.documentElement.clientWidth / 2;
+      setCorner(top ? (left ? 'tl' : 'tr') : left ? 'bl' : 'br');
+    }
+    setOffset(null);
+  };
+
   return (
-    <div className="fixed bottom-4 left-4 z-20 flex flex-col gap-1 rounded-md border border-border bg-surface p-1.5 shadow-md">
-      <video ref={cam.preview} autoPlay muted playsInline aria-label="Your camera" className="h-24 w-32 rounded bg-black object-cover [transform:scaleX(-1)]" />
-      <p className={`px-0.5 text-[11px] ${ok ? 'text-muted' : 'font-medium text-danger'}`}>{cam.face && cam.face !== 'ok' ? FACE_TEXT[cam.face] : 'Camera on'}</p>
+    <div
+      role="group"
+      aria-label={`Your camera preview, ${CORNER_NAME[corner]} corner. Drag it, or use its move button, to place it in another corner.`}
+      title="Drag to move"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      ref={tile}
+      style={{ ...(isTop(corner) ? { top: topOffset } : {}), ...(offset ? { transform: `translate(${offset.dx}px, ${offset.dy}px)` } : {}) }}
+      className={`fixed ${TILE_CORNERS[corner]} z-20 flex touch-none select-none flex-col gap-1 rounded-md border border-border bg-surface p-1.5 shadow-md ${offset ? 'cursor-grabbing shadow-lg' : 'cursor-grab'}`}
+    >
+      <video ref={cam.preview} autoPlay muted playsInline aria-label="Your camera" className="pointer-events-none h-24 w-32 rounded bg-black object-cover [transform:scaleX(-1)]" />
+      <div className="flex w-32 items-start gap-1">
+        <p className={`min-w-0 flex-1 px-0.5 text-[11px] leading-tight ${ok ? 'text-muted' : 'font-medium text-danger'}`}>{cam.face && cam.face !== 'ok' ? FACE_TEXT[cam.face] : 'Camera on'}</p>
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setCorner((c) => NEXT_CORNER[c])}
+          aria-label={`Move the camera preview to the ${CORNER_NAME[NEXT_CORNER[corner]]} corner`}
+          title="Move to the next corner"
+          className="rounded px-1 text-[11px] leading-4 text-muted hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        >
+          ⤢
+        </button>
+      </div>
     </div>
   );
 }

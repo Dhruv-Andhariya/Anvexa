@@ -79,11 +79,19 @@ export const pistonOptionsFromEnv = (env: NodeJS.ProcessEnv = process.env): Pist
   };
 };
 
-const SPEC: Record<CodeLanguage, { language: string; file: string }> = {
-  python: { language: 'python', file: 'main.py' },
-  java: { language: 'java', file: 'Main.java' },
-  cpp: { language: 'c++', file: 'main.cpp' },
+/**
+ * The exact runtime every run asks Piston for: the single source of truth for runtime versions in the API. They are
+ * the packages infra/piston/start-piston.ps1 installs ($Packages; the `gcc` package provides the `c++` runtime) - a
+ * unit test keeps the two in step. Asking for an exact version (never '*') means a second installed version can never
+ * silently change what candidates run on; a version that is not installed is refused by Piston (HTTP 400), which the
+ * runner reports as a runner failure (503, nothing recorded), never as the candidate's error.
+ */
+export const PISTON_RUNTIMES: Readonly<Record<CodeLanguage, { language: string; version: string; file: string }>> = {
+  python: { language: 'python', version: '3.12.0', file: 'main.py' },
+  java: { language: 'java', version: '15.0.2', file: 'Main.java' },
+  cpp: { language: 'c++', version: '10.2.0', file: 'main.cpp' },
 };
+const SPEC = PISTON_RUNTIMES;
 
 interface PistonStage {
   stdout?: string;
@@ -130,7 +138,9 @@ export function mapPistonResponse(language: CodeLanguage, r: PistonResponse, lim
       timeMs: compile.cpu_time ?? null,
     });
   }
-  if (compile?.status === 'TO') return failure('compile_error', 'Compilation time limit exceeded', { compileOutput: 'Compilation time limit exceeded.' });
+  // The compile step ran out of time on the runner (a slow or busy machine, not something the candidate's code proves):
+  // a runner failure, never the candidate's compile error. A real compile error is a non-zero exit, handled above.
+  if (compile?.status === 'TO') return failure('internal_error', 'Compilation timed out on the code runner');
   if (!run) return failure('internal_error', 'No run stage in the runner response');
 
   const stats = {
@@ -211,7 +221,7 @@ export class PistonRunner implements CodeRunner {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           language: spec.language,
-          version: '*',
+          version: spec.version,
           files: [{ name: spec.file, content: job.source }],
           stdin: job.stdin,
           run_timeout: lim.runTimeoutMs,

@@ -30,6 +30,8 @@ export interface DsaSession {
   progress: Record<string, QuestionProgress>;
   /** Set when the proctoring warning limit terminated the attempt (finishReason 'disqualified'). */
   termination?: { reason: string; warnings: number } | null;
+  /** Durable stores: an accepted submission whose tests are still running (epoch ms of its acceptance). */
+  pending?: { questionId: string; acceptedAt: number } | null;
 }
 
 /**
@@ -39,7 +41,19 @@ export interface DsaSession {
 export interface SessionStore {
   get(token: string): Promise<DsaSession | undefined>;
   save(session: DsaSession): Promise<void>;
+  /**
+   * Durable submissions (stores that persist, i.e. HR rounds): a Submit is ACCEPTED first - atomically, only while the
+   * attempt runs and before its deadline, one at a time - and its result is recorded by that acceptance, even if the
+   * attempt closes while its tests run. Stores without these (demo, in memory) keep the plain save.
+   */
+  acceptSubmission?(token: string, questionId: string): Promise<SubmissionAcceptance>;
+  /** Records the accepted submission's result once; `build` applies the best-submission rule to the STORED previous result. Null = not recorded. */
+  completeSubmission?(token: string, submissionId: string, questionId: string, build: (previous: QuestionProgress | undefined) => QuestionProgress): Promise<QuestionProgress | null>;
+  /** The accepted submission could not be judged (code runner failure): nothing recorded. */
+  releaseSubmission?(token: string, submissionId: string): Promise<void>;
 }
+
+export type SubmissionAcceptance = { accepted: true; id: string } | { accepted: false; reason: 'NOT_STARTED' | 'ENDED' | 'TIME_EXPIRED' | 'BUSY' };
 
 @Injectable()
 export class InMemorySessionStore implements SessionStore {

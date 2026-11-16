@@ -3,7 +3,8 @@
 | | |
 |---|---|
 | **Status** | **Architecture proposal — NOT implemented.** No AAIE code, table, endpoint, prompt or UI exists. |
-| **Document version** | 0.2.1 (Phase 0 architecture baseline + governance) |
+| **Status note (2026-11-16)** | For DSA / SQL a shadow `workers/aaie-worker` (Python + FastAPI, Gemini) exists on `develop`, **advisory only**: it is not part of official candidate scoring. Marks and pass / fail still come only from the code runner's test results; `apps/api` never calls the worker. Integration is postponed. Details: [`DSA-SQL/README.md`](DSA-SQL/README.md). |
+| **Document version** | 0.7.1 (DSA + SQL amendments recorded) |
 | **Governance** | This README is the single source of truth for AAIE. Rules: [`.cursor/rules/aaie-docs.mdc`](../../.cursor/rules/aaie-docs.mdc). Detail of blockers B1–B3: [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md). |
 | **Owner** | Shared (docs folder); AAIE module owner to be assigned when Phase 1 is approved |
 | **Applies to** | `apps/api` (proposed `aaie` module), `workers/ai-worker` (proposed endpoint, Phase 2), `apps/hr-dashboard` (proposed views), `packages/contracts` (proposed schemas) |
@@ -488,6 +489,30 @@ Multiple rows per application are allowed (history); expiry and deletion apply t
 | D13 | Privacy and consent verified before AI summarisation | Approved as a gate; verification **pending** (B5) |
 | D14 | On-demand generation with input-hash reuse | Approved |
 
+### 12.1 DSA + SQL amendments (scope-limited supersession)
+
+For **DSA and SQL rounds only**, the product owner approved a different role for AAIE on 2026-11-12. These decisions
+are recorded in full in [`DSA-SQL/README.md`](DSA-SQL/README.md) (its §2) and **supersede the listed decisions within
+that scope only**. Outside DSA / SQL, D1–D14 are unchanged.
+
+| DSA + SQL decision | Supersedes (DSA / SQL only) | Summary |
+|---|---|---|
+| D15 | — | First scope: DSA + SQL |
+| D16, D22, D29 (D23 superseded by D29) | **D2** | AAIE calculates its own marks (fixed five-band logic rubric) and PASS / RE-EVALUATE / FAIL (shadow first); original records untouched |
+| D17 | **D2, D5** | After shadow validation, AAIE's outcome drives progression on pilot jobs (per-job flag, HR override kept) |
+| D18, D21 | **D9** | AI analyses code / queries as submitted (no fixes) |
+| D19 | **D13** (gate kept) | Code may be sent to the AI worker; privacy wording check still pending |
+| D20 | — | Separate AAIE module, product owner owns it |
+| D24–D27 | — | Every submission stored; test categories; switch-on gates; technical-retry message |
+| **D28** | — | **HR = assessment design and standards; AAIE = intelligent evaluation and adaptive progression** (approved 2026-11-12) |
+| D29 | D23 | **Approved** 2026-11-12: fixed, versioned logic rubric (100 / 75 / 50 / 25 / 0 %) with DSA and SQL criteria |
+| D30 | §9.2 / D16, D22 | **Approved with clarification** 2026-11-12: uncertain AI evidence → RE-EVALUATE → `HR_REVIEW_REQUIRED` after retries; HR resolves via existing override |
+| D29 clarification, D32 | — | **Approved** 2026-11-12: 100 % only for defect-free code; defect counting; pilot excludes `CORRECT_COUNT` rounds (B9 stays open) |
+| D33, D34, D35 | — | **Approved** 2026-11-12: `FEATURE_AAIE_CODING` (default off, per pilot job, audited); five-category test fixtures; per-click idempotency key with attempt-scoped uniqueness |
+| D36, D37 | — | **Approved** 2026-11-12: one "counted submission" definition for reconciliation; idempotent reconciliation |
+| **D38** | placement in §1 ("existing AI worker") **for DSA / SQL only** | **APPROVED** 2026-11-12: Python + FastAPI AAIE service, Gemini API (structured JSON), Pydantic + deterministic validation, Python-computed marks; existing NestJS, Postgres / Neon, Prisma, Piston, SQLite sandbox, Next.js kept; no LangGraph / multi-agent / queues / further services. Open technology items T1–T11 in `DSA-SQL/README.md` §12a |
+| D31 | — (resolves B8) | **Approved** 2026-11-12: separate versioned AAIE outcome record; `round_results` never modified; effective outcome = HR override → AAIE (pilot jobs) → original |
+
 Other open decisions: **U4** aggregates visible to Company Admins only or also HR Members · **U5** competency taxonomy
 (no weights either way) · **U6** daily generation cap and k-anonymity threshold (proposed 5) · **U8** Evidence view
 placement.
@@ -498,13 +523,16 @@ placement.
 
 | # | Blocker | Blocks | Status |
 |---|---|---|---|
-| B1 | Cross-module read approach + agreement from five owners | **Phase 1** | OPEN — detail in [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md) |
+| B1 | Cross-module read approach + agreement from five owners | **Phase 1** | OPEN — DSA + SQL Phase 1 interfaces **verbally confirmed** 2026-11-12, formal evidence pending; general AAIE interfaces open. Detail in [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md) |
 | B2 | GD expiry / purge status interface | **Phase 1** (GD section of the bundle) | OPEN — detail in [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md) |
-| B3 | Source reference versioning scheme | **Phase 1** | OPEN — detail in [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md) |
+| B3 | Source reference versioning scheme | **Phase 1** | **APPROVED** 2026-11-12 — immutable, linked versioning; detail in [`ENGINEERING-DECISIONS.md`](ENGINEERING-DECISIONS.md) |
 | B4 | Policy for GD-derived text surviving retention | Phase 2 | Open (conservative default in §5.3) |
 | B5 | Privacy and consent verification incl. Gemini processing | Phase 2 | Open |
 | B6 | `aaie_summaries` schema review | Phase 2 | Open |
 | B7 | M27 integration design | Phase 3 integration only | Deferred until M27 exists |
+| B8 | DSA / SQL: how AAIE's outcome reaches progression, Stage 2 rules, the Assessments board and PI percentages | DSA-SQL Phase 6 | **DECIDED (D31)** — owner agreement for the readers remains under B1 |
+| B9 | DSA / SQL: `CORRECT_COUNT` pass rules vs AAIE partial marks — not reinterpreted until decided | after the pilot | OPEN (unresolved); `CORRECT_COUNT` rounds excluded from the pilot (D32) |
+| B10 | DSA / SQL: partial runner faults lower the original marks today | Owner decision (`dsa`) | OPEN |
 
 ### B1 — Cross-module read approach
 
@@ -624,4 +652,10 @@ Phase 1 (to be confirmed at approval):
 |---|---|---|
 | 0.1.0 | 2026-11-11 | Stage 1 architecture proposal and revision (in review conversation; not committed as a file) |
 | 0.2.0 | 2026-11-11 | Phase 0 baseline: first version of this document. Applied the nine verification corrections (versioned refs; `round:` canonical; GD live expiry, all versions, audited delete-on-read; GD-derived text recorded as B4; override frequency removed, M27 deferred; two cross-module read options, A recommended; inline Evidence view; per-module recording / STT / retention; Gemini processing in privacy review). Decision register D1–D14 and blocker register B1–B7. |
+| 0.7.1 | 2026-11-12 | B1 row: DSA + SQL Phase 1 interfaces verbally confirmed, evidence pending. |
+| 0.7.0 | 2026-11-12 | §12.1: D36, D37 listed; **D38** technology decision recorded (DSA + SQL scope). |
+| 0.6.0 | 2026-11-12 | B3 approved; D33–D35 recorded in §12.1. |
+| 0.5.0 | 2026-11-12 | §12.1: D29 clarification and D32 recorded; B9 row updated. DSA-SQL README 0.9.0 adds B1 interfaces, B3 versioning, D30 gap, phase gates. |
+| 0.4.0 | 2026-11-12 | §12.1: D29, D30, D31 approved (D23's score superseded by D29); B8 decided by D31; B9 kept OPEN. |
+| 0.3.0 | 2026-11-12 | Added §12.1: DSA + SQL amendments D15–D28 recorded as scope-limited supersessions of D2, D5, D9, D13 (decided in `DSA-SQL/README.md`); D29, D30 listed as proposed. Added blockers B8–B10 from the DSA + SQL Phase 0 audit. D1–D14 text unchanged. |
 | 0.2.1 | 2026-11-11 | Phase 0 governance: added `.cursor/rules/aaie-docs.mdc` (this README is the single source of truth) and `ENGINEERING-DECISIONS.md` (B1–B3 detail, all OPEN). Recorded `.github/CODEOWNERS` coverage gaps (§2.2). No decision status changed; D1–D14 unchanged. |

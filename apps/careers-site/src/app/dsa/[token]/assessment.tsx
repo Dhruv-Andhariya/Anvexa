@@ -18,6 +18,7 @@ import {
   type PublicQuestion,
   type QuestionProgress,
 } from '@/lib/dsa-api';
+import { JUDGING_POLL_MS, NOT_RECORDED_MESSAGE, judgingOutcome, recordedMessage, watchFor, type JudgingWatch } from '@/lib/dsa-judging';
 import { CodeEditor } from './code-editor';
 import { ProblemPanel, difficultyTone } from './problem-panel';
 import { ResultsPanel, type PanelResult } from './results-panel';
@@ -67,6 +68,9 @@ export function Assessment({ token }: { token: string }) {
   const [actionError, setActionError] = useState('');
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  // a submission the server accepted is being judged while this page is not waiting for it (reload, another tab)
+  const [watch, setWatch] = useState<JudgingWatch | null>(null);
+  const [notices, setNotices] = useState<Record<string, string>>({});
 
   // Countdown. The server's clock is the source of truth; we only display the difference.
   const [now, setNow] = useState(() => Date.now());
@@ -95,6 +99,41 @@ export function Assessment({ token }: { token: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** A background refresh: a passing network problem must not replace the page with an error screen. */
+  const refresh = useCallback(async () => {
+    try {
+      applyState(await getAssessment(token));
+    } catch {
+      // the next refresh tries again
+    }
+  }, [token, applyState]);
+
+  // Judging seen in the server's state: watch it until its result is saved (or it is known not to be), then say which.
+  // This tab's own Submit gets its own answer (busy), so it is not watched here.
+  useEffect(() => {
+    if (!state || busy === 'submit') return;
+    if (!watch) {
+      const w = watchFor(state);
+      if (w) setWatch(w);
+      return;
+    }
+    const outcome = judgingOutcome(watch, state);
+    if (outcome.kind === 'judging') return;
+    setWatch(null);
+    if (outcome.kind === 'recorded') {
+      const marks = state.questions?.find((q) => q.id === watch.questionId)?.marks ?? 0;
+      setNotices((n) => ({ ...n, [watch.questionId]: recordedMessage(outcome.progress, marks) }));
+    } else if (outcome.kind === 'not_recorded') {
+      setActionError(NOT_RECORDED_MESSAGE);
+    }
+  }, [state, watch, busy]);
+
+  useEffect(() => {
+    if (!watch) return;
+    const id = window.setInterval(() => void refresh(), JUDGING_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [watch, refresh]);
 
   // Restore drafts once, after the first state arrives.
   useEffect(() => {
@@ -278,13 +317,22 @@ export function Assessment({ token }: { token: string }) {
         const data = await runCode(token, payload);
         setResults((r) => ({ ...r, [question.id]: { kind, data } }));
       } else {
+        setNotices((n) => {
+          const rest = { ...n };
+          delete rest[question.id];
+          return rest;
+        });
         const data = await submitCode(token, payload);
         setResults((r) => ({ ...r, [question.id]: { kind, data } }));
-        setState((s) => (s ? { ...s, progress: s.progress.map((p) => (p.questionId === data.progress.questionId ? data.progress : p)) } : s));
+        // this answer is the saved result: any "judging" this page saw meanwhile was this submission
+        setState((s) => (s ? { ...s, judging: null, progress: s.progress.map((p) => (p.questionId === data.progress.questionId ? data.progress : p)) } : s));
       }
     } catch (err) {
       setActionError(errorMessage(err));
+      if (kind === 'submit') setState((s) => (s ? { ...s, judging: null } : s));
       if (err instanceof ApiError && (err.code === 'TIME_EXPIRED' || err.code === 'ALREADY_FINISHED')) void load();
+      // another submission (another tab, or one sent before a reload) is being judged: follow it
+      if (err instanceof ApiError && err.code === 'BUSY') void refresh();
     } finally {
       setBusy(null);
     }
@@ -306,10 +354,13 @@ export function Assessment({ token }: { token: string }) {
 
   return (
     <>
-    <main className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6" inert={blocked}>
+    {/* with the floating camera tile, room at the bottom so the results can be scrolled clear of a bottom-corner tile */}
+    <main className={`mx-auto flex max-w-[1600px] flex-col gap-4 px-4 pt-4 sm:px-6 ${cameraWatched ? 'pb-48' : 'pb-4'}`} inert={blocked}>
       {needFullscreen && state.proctoring.fullscreenReentry === 'warn' && (
         <FullscreenGate mode="warn" onReenter={() => void reenter()} strikesUsed={strikesUsed} strikesAllowed={strikesAllowed} />
       )}
+      {/* the floating camera tile keeps its top corners below this bar (Finish, timer, question tabs) while it is on screen */}
+      <div data-camera-tile-avoid="">
       <Card className="flex flex-wrap items-center gap-3 px-3 py-2 sm:px-4">
         <nav aria-label="Questions" className="flex min-w-0 basis-full gap-2 overflow-x-auto sm:flex-1 sm:basis-0">
           {state.questions?.map((q, i) => {
@@ -366,6 +417,7 @@ export function Assessment({ token }: { token: string }) {
           </Button>
         </div>
       </Card>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className={`min-w-0 lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto ${proctor.enabled ? 'select-none' : ''}`}>
@@ -414,15 +466,21 @@ export function Assessment({ token }: { token: string }) {
               <Button onClick={() => void execute('run')} disabled={busy !== null}>
                 {busy === 'run' && <Spinner />} {sql ? 'Run query' : 'Run code'}
               </Button>
-              <Button variant="primary" onClick={() => void execute('submit')} disabled={busy !== null}>
-                {busy === 'submit' && <Spinner />} {sql ? 'Submit answer' : 'Submit'}
+              <Button variant="primary" onClick={() => void execute('submit')} disabled={busy !== null || watch !== null}>
+                {(busy === 'submit' || watch !== null) && <Spinner />} {sql ? 'Submit answer' : 'Submit'}
               </Button>
-              <span className="text-xs text-muted">Submit scores this question. You can submit again.</span>
+              <span className="text-xs text-muted">
+                {!watch
+                  ? 'Submit scores this question. You can submit again.'
+                  : watch.questionId === question.id
+                    ? 'Your submission is being judged. You can submit again when it is done.'
+                    : `A submission for question ${(state.questions?.findIndex((q) => q.id === watch.questionId) ?? -1) + 1} is being judged. You can submit again when it is done.`}
+              </span>
             </div>
           </Card>
 
           <Card>
-            <ResultsPanel result={results[question.id]} busy={busy} error={actionError} sql={sql} />
+            <ResultsPanel result={results[question.id]} busy={busy} error={actionError} sql={sql} judging={watch?.questionId === question.id} notice={notices[question.id]} />
           </Card>
         </div>
       </div>

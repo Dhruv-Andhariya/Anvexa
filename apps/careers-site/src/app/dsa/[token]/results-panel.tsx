@@ -86,12 +86,18 @@ export function ResultsPanel({
   busy,
   error,
   sql = false,
+  judging = false,
+  notice,
 }: {
   result: PanelResult | undefined;
   busy: 'run' | 'submit' | null;
   error: string;
   /** A SQL problem: "query" and "datasets" instead of "code" and "tests". */
   sql?: boolean;
+  /** A submission of this question accepted earlier (before a reload) is still being judged. */
+  judging?: boolean;
+  /** What happened to such a submission once it was judged (its saved result in words). */
+  notice?: string;
 }) {
   const what = sql ? 'query' : 'code';
   const tests = sql ? 'datasets' : 'tests';
@@ -105,13 +111,21 @@ export function ResultsPanel({
         </p>
       )}
 
+      {!busy && judging && (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Spinner /> Judging your submission… This page updates by itself when it is done.
+        </p>
+      )}
+
       {error && (
         <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
           {error}
         </p>
       )}
 
-      {!busy && !error && !result && (
+      {!busy && !judging && notice && <p className="rounded-md border border-border bg-surface px-3 py-2 text-sm">{notice}</p>}
+
+      {!busy && !judging && !notice && !error && !result && (
         <p className="text-sm text-muted">Run your {what} to see results here. Nothing is saved until you submit.</p>
       )}
 
